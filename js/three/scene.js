@@ -23,6 +23,7 @@ class SceneManager {
         this.renderer = null;
         this.controls = null;
         this.itemsGroup = null;
+        this.furnaceGroups = [];
         this.animationId = null;
     }
 
@@ -148,6 +149,46 @@ class SceneManager {
         while (this.itemsGroup.children.length > 0) {
             this.itemsGroup.remove(this.itemsGroup.children[0]);
         }
+        this.furnaceGroups = [];
+    }
+
+    /**
+     * 获取炉膛数量
+     */
+    getFurnaceCount() {
+        return this.furnaceGroups.length;
+    }
+
+    /**
+     * 设置指定炉膛的可见性
+     * @param {number} index - 炉膛索引
+     * @param {boolean} visible - 是否可见
+     */
+    setFurnaceVisible(index, visible) {
+        if (index >= 0 && index < this.furnaceGroups.length) {
+            this.furnaceGroups[index].visible = visible;
+        }
+    }
+
+    /**
+     * 切换指定炉膛的可见性
+     * @param {number} index - 炉膛索引
+     * @returns {boolean} 切换后的可见状态
+     */
+    toggleFurnaceVisible(index) {
+        if (index >= 0 && index < this.furnaceGroups.length) {
+            const group = this.furnaceGroups[index];
+            group.visible = !group.visible;
+            return group.visible;
+        }
+        return true;
+    }
+
+    /**
+     * 设置所有炉膛可见
+     */
+    showAllFurnaces() {
+        this.furnaceGroups.forEach(g => { g.visible = true; });
     }
 
     /**
@@ -284,12 +325,16 @@ class SceneManager {
         const spaceGap = ANIMATION_CONFIG.spaceGap;
         let currentXOffset = 0;
 
-        furnacesResult.forEach((furnace) => {
+        furnacesResult.forEach((furnace, index) => {
             const xPos = currentXOffset + (furnace.w / 2);
+
+            // 为每个炉膛创建独立的 Group（含边框和工件）
+            const furnaceGroup = new THREE.Group();
+            furnaceGroup.name = `furnace-${index}-${furnace.instanceId}`;
 
             // 添加炉膛边框（含名称标签）
             const furnaceBox = this.createFurnaceBox(furnace.w, furnace.h, furnace.d, xPos, furnace.instanceId);
-            this.itemsGroup.add(furnaceBox);
+            furnaceGroup.add(furnaceBox);
 
             // 添加工件
             furnace.packedItems.forEach(item => {
@@ -300,8 +345,11 @@ class SceneManager {
                 const targetZ = item.z - (furnace.d / 2) + (item.d / 2);
 
                 this.setItemPosition(mesh, targetX, targetY, targetZ);
-                this.itemsGroup.add(mesh);
+                furnaceGroup.add(mesh);
             });
+
+            this.itemsGroup.add(furnaceGroup);
+            this.furnaceGroups.push(furnaceGroup);
 
             currentXOffset += furnace.w + spaceGap;
         });

@@ -17,6 +17,63 @@ let globalSpacingValue = DEFAULT_SPACING;
 let isAnimating = false;
 
 /**
+ * 生成炉膛显示/隐藏切换按钮
+ */
+function renderFurnaceToggles() {
+    const container = document.getElementById('furnace-toggles');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (!globalFurnacesResult || globalFurnacesResult.length <= 1) {
+        container.style.display = 'none';
+        return;
+    }
+    container.style.display = 'flex';
+
+    // "全部显示" 按钮
+    const allBtn = document.createElement('button');
+    allBtn.textContent = '👁 全部显示';
+    allBtn.className = 'btn btn-secondary';
+    allBtn.style.cssText = 'flex:1; min-width:80px; padding:6px 8px; font-size:11px; background:#4f46e5; color:#fff; border:1px solid #6366f1;';
+    allBtn.addEventListener('click', () => {
+        sceneManager.showAllFurnaces();
+        // 更新所有按钮状态
+        container.querySelectorAll('.furnace-toggle-btn').forEach((btn, i) => {
+            btn.style.background = '#e67e22';
+            btn.style.color = '#fff';
+            btn.style.border = '2px solid #f39c12';
+            btn.querySelector('span').textContent = '👁';
+        });
+    });
+    container.appendChild(allBtn);
+
+    // 每个炉膛的切换按钮
+    globalFurnacesResult.forEach((furnace, index) => {
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-secondary furnace-toggle-btn';
+        btn.style.cssText = 'flex:1; min-width:80px; padding:6px 8px; font-size:11px; background:#e67e22; color:#fff; border:2px solid #f39c12; cursor:pointer; border-radius:4px; transition:all 0.2s;';
+        btn.innerHTML = `<span>👁</span> ${furnace.instanceId}`;
+
+        btn.addEventListener('click', () => {
+            const visible = sceneManager.toggleFurnaceVisible(index);
+            if (visible) {
+                btn.style.background = '#e67e22';
+                btn.style.color = '#fff';
+                btn.style.border = '2px solid #f39c12';
+                btn.querySelector('span').textContent = '👁';
+            } else {
+                btn.style.background = '#374151';
+                btn.style.color = '#9ca3af';
+                btn.style.border = '2px solid #4b5563';
+                btn.querySelector('span').textContent = '🚫';
+            }
+        });
+
+        container.appendChild(btn);
+    });
+}
+
+/**
  * 更新统计面板
  */
 function updateStatsText() {
@@ -72,6 +129,9 @@ function executeAndRender() {
 
     // 渲染3D场景
     sceneManager.renderPackingResult(globalFurnacesResult);
+
+    // 生成炉膛显隐切换按钮
+    renderFurnaceToggles();
 
     // 更新统计
     document.getElementById('summary-stats').innerHTML = updateStatsText();
