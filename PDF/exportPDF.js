@@ -11,7 +11,7 @@ import { generatePDFFilename } from '../js/utils/helpers.js';
  * @param {Array} options.furnaces - 已装炉炉膛数组
  * @param {Array} options.unpackedItems - 未装炉工件数组
  */
-export async function generateIndustrialPDF({ furnaces, unpackedItems = [] }) {
+export async function generateIndustrialPDF({ furnaces, unpackedItems = [], sopData = null }) {
     if (!furnaces || furnaces.length === 0) {
         console.warn('没有炉膛数据，无法生成PDF');
         return;
@@ -28,7 +28,7 @@ export async function generateIndustrialPDF({ furnaces, unpackedItems = [] }) {
     
     // ========== 第1页: 装炉作业总览 ==========
     console.log('📄 生成汇总页...');
-    createSummaryPage({ pdfWrapper, furnaces, unpackedItems });
+    createSummaryPage({ pdfWrapper, furnaces, unpackedItems, sopData });
     
     // ========== 为每个炉次生成详情页 ==========
     let globalSeq = 1;
@@ -115,7 +115,8 @@ export function exportPDF(packingResult) {
     
     return generateIndustrialPDF({
         furnaces: packingResult.furnaces,
-        unpackedItems: packingResult.unpacked || []
+        unpackedItems: packingResult.unpacked || [],
+        sopData: packingResult.sopData || null
     });
 }
 

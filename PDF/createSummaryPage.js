@@ -10,7 +10,7 @@ import { formatDateTime } from '../js/utils/helpers.js';
  * @param {Array} options.furnaces - 所有已装炉炉膛
  * @param {Array} options.unpackedItems - 未装炉工件
  */
-export function createSummaryPage({ pdfWrapper, furnaces, unpackedItems = [] }) {
+export function createSummaryPage({ pdfWrapper, furnaces, unpackedItems = [], sopData = null }) {
     const page = document.createElement('div');
     page.className = 'pdf-page';
     page.style.position = 'relative';
@@ -176,6 +176,43 @@ export function createSummaryPage({ pdfWrapper, furnaces, unpackedItems = [] }) 
     });
     
     html += `</div>`;
+    
+    // 规则5: 工艺校准单宏观决策看板 - 在签名区之前插入
+    if (sopData) {
+        html += `
+            <div style="font-size:16px; font-weight:800; color:#0f172a; border-left:5px solid #dc2626; padding-left:10px; margin:20px 0 12px 0;">📋 工艺校准单 — 宏观决策看板 (SOP Verification)</div>
+            <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:18px;">
+                <div style="background:#fef2f2; border:2px solid #fecaca; border-radius:8px; padding:12px; text-align:center;">
+                    <div style="font-size:9px; color:#991b1b; margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px;">目标真空度</div>
+                    <div style="font-size:20px; font-weight:900; color:#dc2626;">${sopData.vacuumLevel === '1e-2' ? '10⁻²' : sopData.vacuumLevel === '1e-3' ? '10⁻³' : '10⁻⁴'} Pa</div>
+                </div>
+                <div style="background:#fef2f2; border:2px solid #fecaca; border-radius:8px; padding:12px; text-align:center;">
+                    <div style="font-size:9px; color:#991b1b; margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px;">加热曲线程序</div>
+                    <div style="font-size:16px; font-weight:900; color:#dc2626;">${sopData.heatingProgram}</div>
+                </div>
+                <div style="background:#fef2f2; border:2px solid #fecaca; border-radius:8px; padding:12px; text-align:center;">
+                    <div style="font-size:9px; color:#991b1b; margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px;">校准确认时间</div>
+                    <div style="font-size:12px; font-weight:bold; color:#991b1b;">${sopData.verifiedAt || '—'}</div>
+                </div>
+                <div style="background:#fef2f2; border:2px solid #fecaca; border-radius:8px; padding:12px; text-align:center;">
+                    <div style="font-size:9px; color:#991b1b; margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px;">主操手</div>
+                    <div style="font-size:14px; font-weight:bold; color:#dc2626;">${sopData.operator || '—'}</div>
+                </div>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:20px;">
+                <div style="border:2px solid #cbd5e1; border-radius:6px; padding:14px; background:#fafafa;">
+                    <div style="font-size:10px; color:#64748b; margin-bottom:8px; text-transform:uppercase;">📝 主操手签字区 (Operator Signature)</div>
+                    <div style="min-height:60px; border-bottom:1px dashed #94a3b8;"></div>
+                    <div style="font-size:10px; color:#94a3b8; margin-top:4px;">签字: _____________ &nbsp;&nbsp; 日期: ____/____/____</div>
+                </div>
+                <div style="border:2px solid #cbd5e1; border-radius:6px; padding:14px; background:#fafafa;">
+                    <div style="font-size:10px; color:#64748b; margin-bottom:8px; text-transform:uppercase;">🔬 工艺工程师确认区 (Engineer Verification)</div>
+                    <div style="min-height:60px; border-bottom:1px dashed #94a3b8;"></div>
+                    <div style="font-size:10px; color:#94a3b8; margin-top:4px;">签字: _____________ &nbsp;&nbsp; 日期: ____/____/____</div>
+                </div>
+            </div>
+        `;
+    }
     
     html += createSignatureBlock();
     

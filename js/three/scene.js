@@ -9,8 +9,11 @@ import {
     FURNACE_BORDER_COLOR,
     MATERIAL_CONFIG,
     EDGE_COLOR,
-    ANIMATION_CONFIG
+    ANIMATION_CONFIG,
+    COG_SPHERE_COLOR,
+    COG_SPHERE_RADIUS
 } from '../utils/constants.js';
+import { calculateCenterOfGravity } from '../utils/helpers.js';
 
 /**
  * Three.js 场景管理器
@@ -317,7 +320,61 @@ class SceneManager {
     }
 
     /**
-     * 渲染装炉结果
+     * 创建重心标记球体（规则6）
+     * @param {number} x - 绝对X坐标
+     * @param {number} y - 绝对Y坐标
+     * @param {number} z - 绝对Z坐标
+     * @returns {THREE.Group} 重心标记组
+     */
+    _createCOGMarker(x, y, z) {
+        const cogGroup = new THREE.Group();
+        
+        // 半透明红色球体
+        const sphereGeo = new THREE.SphereGeometry(COG_SPHERE_RADIUS, 32, 32);
+        const sphereMat = new THREE.MeshStandardMaterial({
+            color: COG_SPHERE_COLOR,
+            emissive: 0x660000,
+            roughness: 0.2,
+            metalness: 0.1,
+            transparent: true,
+            opacity: 0.8
+        });
+        const sphere = new THREE.Mesh(sphereGeo, sphereMat);
+        cogGroup.add(sphere);
+        
+        // 十字准心环（规则6：线框结构标注）
+        const ringGeoX = new THREE.TorusGeometry(COG_SPHERE_RADIUS * 1.5, 2, 8, 16);
+        const ringMat = new THREE.MeshBasicMaterial({ color: 0xff4444 });
+        const ringX = new THREE.Mesh(ringGeoX, ringMat);
+        ringX.rotation.y = Math.PI / 2;
+        cogGroup.add(ringX);
+        
+        const ringGeoZ = new THREE.TorusGeometry(COG_SPHERE_RADIUS * 1.5, 2, 8, 16);
+        const ringZ = new THREE.Mesh(ringGeoZ, ringMat);
+        cogGroup.add(ringZ);
+        
+        // 垂直线（从重心向下引线至炉底标注）
+        const dashMat = new THREE.LineDashedMaterial({
+            color: 0xff4444,
+            dashSize: 8,
+            gapSize: 4,
+            linewidth: 1
+        });
+        const points = [
+            new THREE.Vector3(0, 0, 0),
+            new THREE.Vector3(0, -COG_SPHERE_RADIUS * 5, 0)
+        ];
+        const dashGeo = new THREE.BufferGeometry().setFromPoints(points);
+        const dashLine = new THREE.Line(dashGeo, dashMat);
+        dashLine.computeLineDistances();
+        cogGroup.add(dashLine);
+        
+        cogGroup.position.set(x, y, z);
+        return cogGroup;
+    }
+
+    /**
+     * 渲染装炉结果（规则6：含重心标识和料框线框优化）
      */
     renderPackingResult(furnacesResult) {
         this.clearItems();
@@ -332,9 +389,33 @@ class SceneManager {
             const furnaceGroup = new THREE.Group();
             furnaceGroup.name = `furnace-${index}-${furnace.instanceId}`;
 
-            // 添加炉膛边框（含名称标签）
+            // 添加炉膛边框（含名称标签、进炉方向）
             const furnaceBox = this.createFurnaceBox(furnace.w, furnace.h, furnace.d, xPos, furnace.instanceId);
             furnaceGroup.add(furnaceBox);
+
+            // 规则6: 料框提示线框 —— 炉膛底面半透明填充，展示料框大致形状
+            const trayGeo = new THREE.PlaneGeometry(furnace.w, furnace.d);
+            const trayMat = new THREE.MeshBasicMaterial({
+                color: 0x3a3a5f,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.15,
+                depthWrite: false
+            });
+            const trayPlane = new THREE.Mesh(trayGeo, trayMat);
+            trayPlane.rotation.x = -Math.PI / 2;
+            trayPlane.position.set(xPos, SCENE_CONFIG.groundOffset + 1, 0);
+            furnaceGroup.add(trayPlane);
+            
+            // 料框边框高亮线
+            const trayEdgeGeo = new THREE.EdgesGeometry(trayGeo);
+            const trayEdge = new THREE.LineSegments(
+                trayEdgeGeo,
+                new THREE.LineBasicMaterial({ color: 0x667799, transparent: true, opacity: 0.5 })
+            );
+            trayEdge.rotation.x = -Math.PI / 2;
+            trayEdge.position.copy(trayPlane.position);
+            furnaceGroup.add(trayEdge);
 
             // 添加工件
             furnace.packedItems.forEach(item => {
@@ -347,6 +428,36 @@ class SceneManager {
                 this.setItemPosition(mesh, targetX, targetY, targetZ);
                 furnaceGroup.add(mesh);
             });
+
+            // 规则6: 计算并标注装炉重心位置
+            if (furnace.packedItems.length > 0) {
+                // 为重心计算准备带weight的items
+                const itemsWithWeight = furnace.packedItems.map(item => ({
+                    x: item.x + item.w / 2,
+                    y: item.y + item.h / 2,
+                    z: item.z + item.d / 2,
+                    weight: item.weight || 1
+                }));
+                
+                const cog = calculateCenterOfGravity(itemsWithWeight);
+                
+                // 重心在场景中的绝对坐标
+                const cogAbsX = xPos - (furnace.w / 2) + cog.x;
+                const cogAbsY = cog.y + SCENE_CONFIG.groundOffset;
+                const cogAbsZ = cog.z - (furnace.d / 2);
+                
+                const cogMarker = this._createCOGMarker(cogAbsX, cogAbsY, cogAbsZ);
+                furnaceGroup.add(cogMarker);
+                
+                // 重心标签
+                const cogLabel = this._createTextSprite(
+                    `⚖️ 重心 (${Math.round(cog.x)}, ${Math.round(cog.y)}, ${Math.round(cog.z)})`,
+                    28, '#ff4444', 'rgba(0,0,0,0.7)'
+                );
+                cogLabel.position.set(cogAbsX, cogAbsY + COG_SPHERE_RADIUS * 3, cogAbsZ);
+                cogLabel.scale.set(180, 40, 1);
+                furnaceGroup.add(cogLabel);
+            }
 
             this.itemsGroup.add(furnaceGroup);
             this.furnaceGroups.push(furnaceGroup);

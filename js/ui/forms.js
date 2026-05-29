@@ -39,7 +39,7 @@ class FormManager {
     /**
      * 添加工件行
      */
-    addItemRow(name, shape, count, dim1, dim2, dim3, totalWeight, color) {
+    addItemRow(name, shape, count, dim1, dim2, dim3, totalWeight, color, materialType = '', isDedicated = false) {
         this.itemCounter++;
         const container = document.getElementById('items-container');
         const row = document.createElement('div');
@@ -63,6 +63,22 @@ class FormManager {
                 <label>高度 <input type="number" class="item-dim3" value="${dim3}"></label>
                 <label>整批总重(kg) <input type="number" class="item-weight" value="${totalWeight}"></label>
                 <label style="max-width: 65px;">渲染色彩 <input type="color" class="item-color" value="${color}" style="padding:0; height:32px; cursor:pointer;"></label>
+            </div>
+            <!-- 规则1: 材质/工艺属性下拉框 -->
+            <div class="form-line">
+                <label style="flex: 1;">材质/工艺属性 <select class="item-material-type">
+                    <option value="">-- 选择材质/工艺属性 --</option>
+                    <option value="普通结构钢" ${materialType==='普通结构钢'?'selected':''}>普通结构钢</option>
+                    <option value="碳素钢" ${materialType==='碳素钢'?'selected':''}>碳素钢</option>
+                    <option value="高合金模具钢" ${materialType==='高合金模具钢'?'selected':''}>高合金模具钢</option>
+                    <option value="特种不锈钢" ${materialType==='特种不锈钢'?'selected':''}>特种不锈钢</option>
+                    <option value="铝合金" ${materialType==='铝合金'?'selected':''}>铝合金</option>
+                </select></label>
+                <!-- 规则2: 专机包炉开关 -->
+                <label style="flex: 0.5; display: flex; align-items: center; gap: 6px; padding-top: 18px;">
+                    <input type="checkbox" class="item-dedicated" ${isDedicated?'checked':''} style="width: 18px; height: 18px; cursor: pointer;">
+                    <span style="font-size: 12px; color: #f59e0b; white-space: nowrap;">启用专机包炉</span>
+                </label>
             </div>
         `;
         container.appendChild(row);
@@ -92,6 +108,8 @@ class FormManager {
     getItemsData() {
         const items = [];
         document.querySelectorAll('.item-row:not(.furnace-row)').forEach(row => {
+            const materialEl = row.querySelector('.item-material-type');
+            const dedicatedEl = row.querySelector('.item-dedicated');
             items.push({
                 name: row.querySelector('.item-name').value,
                 shape: row.querySelector('.item-shape').value,
@@ -100,7 +118,9 @@ class FormManager {
                 dim2: parseFloat(row.querySelector('.item-dim2').value || 0),
                 dim3: parseFloat(row.querySelector('.item-dim3').value),
                 weight: parseFloat(row.querySelector('.item-weight').value),
-                color: row.querySelector('.item-color').value
+                color: row.querySelector('.item-color').value,
+                materialType: materialEl ? materialEl.value : '',
+                isDedicated: dedicatedEl ? dedicatedEl.checked : false
             });
         });
         return items;

@@ -3,14 +3,14 @@
 // 默认安全间距（毫米）
 export const DEFAULT_SPACING = 5;
 
-// 预设基础固定尺寸炉膛
+// 预设基础固定尺寸炉膛 (规则7: 小炉500kg，大炉1000kg承重上限)
 export const PRESET_FURNACES = [
     {
         name: "标准台车炉 (小型)",
         depth: 900,
         width: 600,
         height: 600,
-        maxWeight: 30000,
+        maxWeight: 500,
         count: 1
     },
     {
@@ -18,7 +18,7 @@ export const PRESET_FURNACES = [
         depth: 1200,
         width: 900,
         height: 900,
-        maxWeight: 50000,
+        maxWeight: 1000,
         count: 1
     }
 ];
@@ -26,7 +26,7 @@ export const PRESET_FURNACES = [
 // 默认炉膛配置（预设600x600x900 和 900x900x1200）
 export const DEFAULT_FURNACES = PRESET_FURNACES;
 
-// 默认工件配置
+// 默认工件配置（规则7: 单件重适配500kg/1000kg炉膛承重上限）
 export const DEFAULT_ITEMS = [
     {
         name: "齿轮轴批次",
@@ -35,7 +35,7 @@ export const DEFAULT_ITEMS = [
         dim1: 60,
         dim2: 0,
         dim3: 140,
-        weight: 4500,
+        weight: 180,  // 18件总重180kg，单件10kg
         color: "#2ecc71"
     },
     {
@@ -45,7 +45,7 @@ export const DEFAULT_ITEMS = [
         dim1: 70,
         dim2: 60,
         dim3: 50,
-        weight: 6000,
+        weight: 300,  // 15件总重300kg，单件20kg
         color: "#ff4d4d"
     },
     {
@@ -55,7 +55,7 @@ export const DEFAULT_ITEMS = [
         dim1: 120,
         dim2: 110,
         dim3: 100,
-        weight: 8000,
+        weight: 400,  // 5件总重400kg，单件80kg
         color: "#4da6ff"
     }
 ];
@@ -173,3 +173,93 @@ export const DATA_TYPES = {
     ORDER: 'order',
     RESULT: 'result'
 };
+
+// ==================== 规则1: 材质/工艺属性与防混装互斥矩阵 ====================
+// 材质类型定义
+export const MATERIAL_TYPES = {
+    STRUCTURAL_STEEL: '普通结构钢',
+    HIGH_ALLOY_TOOL_STEEL: '高合金模具钢',
+    SPECIAL_STAINLESS: '特种不锈钢',
+    CARBON_STEEL: '碳素钢',
+    ALUMINUM_ALLOY: '铝合金'
+};
+
+// 材质选项列表（用于下拉框）
+export const MATERIAL_TYPE_OPTIONS = [
+    { value: '', label: '-- 选择材质/工艺属性 --' },
+    { value: MATERIAL_TYPES.STRUCTURAL_STEEL, label: MATERIAL_TYPES.STRUCTURAL_STEEL },
+    { value: MATERIAL_TYPES.CARBON_STEEL, label: MATERIAL_TYPES.CARBON_STEEL },
+    { value: MATERIAL_TYPES.HIGH_ALLOY_TOOL_STEEL, label: MATERIAL_TYPES.HIGH_ALLOY_TOOL_STEEL },
+    { value: MATERIAL_TYPES.SPECIAL_STAINLESS, label: MATERIAL_TYPES.SPECIAL_STAINLESS },
+    { value: MATERIAL_TYPES.ALUMINUM_ALLOY, label: MATERIAL_TYPES.ALUMINUM_ALLOY }
+];
+
+// 防混装互斥矩阵 (真空环境蒸气压污染互串约束)
+// true 表示可以共炉, false 表示禁止混装
+export const CONFLICT_MATRIX = {
+    [MATERIAL_TYPES.STRUCTURAL_STEEL]: {
+        [MATERIAL_TYPES.CARBON_STEEL]: true,
+        [MATERIAL_TYPES.HIGH_ALLOY_TOOL_STEEL]: true,
+        [MATERIAL_TYPES.SPECIAL_STAINLESS]: true,
+        [MATERIAL_TYPES.ALUMINUM_ALLOY]: true
+    },
+    [MATERIAL_TYPES.CARBON_STEEL]: {
+        [MATERIAL_TYPES.STRUCTURAL_STEEL]: true,
+        [MATERIAL_TYPES.HIGH_ALLOY_TOOL_STEEL]: true,
+        [MATERIAL_TYPES.SPECIAL_STAINLESS]: true,
+        [MATERIAL_TYPES.ALUMINUM_ALLOY]: true
+    },
+    [MATERIAL_TYPES.HIGH_ALLOY_TOOL_STEEL]: {
+        [MATERIAL_TYPES.STRUCTURAL_STEEL]: true,
+        [MATERIAL_TYPES.CARBON_STEEL]: true,
+        [MATERIAL_TYPES.SPECIAL_STAINLESS]: false,  // 禁止！高合金模具钢 + 特种不锈钢 不可混装
+        [MATERIAL_TYPES.ALUMINUM_ALLOY]: false       // 禁止混装
+    },
+    [MATERIAL_TYPES.SPECIAL_STAINLESS]: {
+        [MATERIAL_TYPES.STRUCTURAL_STEEL]: true,
+        [MATERIAL_TYPES.CARBON_STEEL]: true,
+        [MATERIAL_TYPES.HIGH_ALLOY_TOOL_STEEL]: false, // 禁止混装
+        [MATERIAL_TYPES.ALUMINUM_ALLOY]: false          // 禁止混装
+    },
+    [MATERIAL_TYPES.ALUMINUM_ALLOY]: {
+        [MATERIAL_TYPES.STRUCTURAL_STEEL]: true,
+        [MATERIAL_TYPES.CARBON_STEEL]: true,
+        [MATERIAL_TYPES.HIGH_ALLOY_TOOL_STEEL]: false,
+        [MATERIAL_TYPES.SPECIAL_STAINLESS]: false
+    }
+};
+
+// ==================== 规则3: 多炉混合排布策略 ====================
+export const ROUTING_STRATEGIES = {
+    STRATEGY_A: '高精空间利用（最大化容积率）',
+    STRATEGY_B: '常规普通平铺（追求气流最优化）'
+};
+
+export const ROUTING_STRATEGY_OPTIONS = [
+    { value: 'STRATEGY_A', label: ROUTING_STRATEGIES.STRATEGY_A },
+    { value: 'STRATEGY_B', label: ROUTING_STRATEGIES.STRATEGY_B }
+];
+
+// ==================== 规则4: 截面差异度温控均匀性约束 ====================
+// 同一炉次内，最大截面积与最小截面积的比例阈值
+export const CROSS_SECTION_RATIO_THRESHOLD = 5;
+
+// ==================== 规则5: 工艺校准单确认 ====================
+export const VACUUM_LEVEL_OPTIONS = [
+    { value: '1e-2', label: '10⁻² Pa (粗真空)' },
+    { value: '1e-3', label: '10⁻³ Pa (高真空)' },
+    { value: '1e-4', label: '10⁻⁴ Pa (超高真空)' }
+];
+
+export const HEATING_PROGRAM_OPTIONS = [
+    { value: 'HT-Prog-001', label: 'HT-Prog-001 (普通退火)' },
+    { value: 'HT-Prog-002', label: 'HT-Prog-002 (淬火)' },
+    { value: 'HT-Prog-003', label: 'HT-Prog-003 (回火)' },
+    { value: 'HT-Prog-004', label: 'HT-Prog-004 (渗碳淬火)' },
+    { value: 'HT-Prog-005', label: 'HT-Prog-005 (固溶时效)' },
+    { value: 'HT-Prog-006', label: 'HT-Prog-006 (氮化处理)' }
+];
+
+// ==================== 规则6: 重心标识球体颜色 ====================
+export const COG_SPHERE_COLOR = 0xff4444;
+export const COG_SPHERE_RADIUS = 15;

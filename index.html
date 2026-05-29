@@ -71,6 +71,16 @@
             </div>
             <div id="furnace-toggles" style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px;"></div>
             <div id="summary-stats">等待预装方案下发计算...</div>
+            <!-- 规则3: 多炉混合排布策略切换 -->
+            <div style="margin-top: 15px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 6px; border: 1px solid #333344;">
+                <label style="display: flex; flex-direction: column; font-size: 12px; color: #9999aa; gap: 6px;">
+                    🎯 装载排布策略 (Routing Strategy)
+                    <select id="routing-strategy" style="padding: 8px 10px; background: #161620; border: 1px solid #333344; color: #fff; border-radius: 4px; font-size: 13px; width: 100%;">
+                        <option value="STRATEGY_A">策略A：高精空间利用（最大化容积率）</option>
+                        <option value="STRATEGY_B">策略B：常规普通平铺（追求气流最优化）</option>
+                    </select>
+                </label>
+            </div>
         </div>
     </div>
 
