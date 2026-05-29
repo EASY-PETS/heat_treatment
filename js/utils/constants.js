@@ -3,25 +3,28 @@
 // 默认安全间距（毫米）
 export const DEFAULT_SPACING = 5;
 
-// 默认炉膛配置
-export const DEFAULT_FURNACES = [
+// 预设基础固定尺寸炉膛
+export const PRESET_FURNACES = [
     {
-        name: "1号大型台车炉",
-        depth: 589,
-        width: 235,
-        height: 239,
-        maxWeight: 25000,
+        name: "标准台车炉 (小型)",
+        depth: 900,
+        width: 600,
+        height: 600,
+        maxWeight: 30000,
         count: 1
     },
     {
-        name: "3号高精井式炉",
-        depth: 350,
-        width: 200,
-        height: 180,
-        maxWeight: 12000,
-        count: 2
+        name: "标准台车炉 (大型)",
+        depth: 1200,
+        width: 900,
+        height: 900,
+        maxWeight: 50000,
+        count: 1
     }
 ];
+
+// 默认炉膛配置（预设600x600x900 和 900x900x1200）
+export const DEFAULT_FURNACES = PRESET_FURNACES;
 
 // 默认工件配置
 export const DEFAULT_ITEMS = [
@@ -111,6 +114,26 @@ export const ANIMATION_CONFIG = {
     stepDelay: 500,  // 毫秒
     spaceGap: 120    // 炉膛间距
 };
+
+// 批次颜色调色板（确保不同批次有区分度）
+export const BATCH_COLORS = [
+    '#2ecc71', // 绿色
+    '#ff4d4d', // 红色
+    '#4da6ff', // 蓝色
+    '#f39c12', // 橙色
+    '#9b59b6', // 紫色
+    '#1abc9c', // 青色
+    '#e74c3c', // 深红
+    '#3498db', // 深蓝
+    '#f1c40f', // 黄色
+    '#e67e22', // 橙棕
+    '#2c3e50', // 深灰蓝
+    '#16a085', // 翠绿
+    '#c0392b', // 暗红
+    '#2980b9', // 宝蓝
+    '#8e44ad', // 深紫
+    '#d35400'  // 深橙
+];
 
 // PDF配置
 export const PDF_CONFIG = {

@@ -4,7 +4,7 @@ import SceneManager from './three/scene.js';
 import { solveHeterogeneousPacking, calculateFurnaceUtilization, getPackingStats } from './packing/solver.js';
 import FormManager from './ui/forms.js';
 import dataStore from './data/store.js';
-import { DEFAULT_FURNACES, DEFAULT_ITEMS, DEFAULT_SPACING, ANIMATION_CONFIG, PDF_CONFIG, VIEW_CONFIGS } from './utils/constants.js';
+import { DEFAULT_FURNACES, DEFAULT_ITEMS, DEFAULT_SPACING, ANIMATION_CONFIG, PDF_CONFIG, VIEW_CONFIGS, BATCH_COLORS } from './utils/constants.js';
 import { formatNumber, sleep, generatePDFFilename, formatDateTime, calculateUtilization, calculateVolume } from './utils/helpers.js';
 import { exportPDF } from '../PDF/exportPDF.js';
 
@@ -15,6 +15,12 @@ let globalFurnacesResult = null;
 let globalUnpackedItems = [];
 let globalSpacingValue = DEFAULT_SPACING;
 let isAnimating = false;
+let animationPaused = false;
+let animationResolve = null;
+let animationActive = false;
+let animationItemSteps = [];
+let animationCurrentIndex = 0;
+let batchColorIndex = 0;
 
 /**
  * 生成炉膛显示/隐藏切换按钮
@@ -144,58 +150,115 @@ function executeAndRender() {
 }
 
 /**
- * 装炉动画
+ * 根据不同批次名称自动分配颜色
+ */
+function getBatchColor(batchName) {
+    if (!batchName) return BATCH_COLORS[0];
+    // 使用简单哈希确保同一批次名称始终获得相同颜色
+    let hash = 0;
+    for (let i = 0; i < batchName.length; i++) {
+        hash = ((hash << 5) - hash) + batchName.charCodeAt(i);
+        hash |= 0;
+    }
+    const idx = Math.abs(hash) % BATCH_COLORS.length;
+    return BATCH_COLORS[idx];
+}
+
+/**
+ * 装炉动画（支持暂停/继续，兼容隐藏/显示炉膛）
  */
 async function playLoadingAnimation() {
     if (isAnimating || !globalFurnacesResult || globalFurnacesResult.length === 0) return;
     isAnimating = true;
+    animationActive = true;
+    animationPaused = false;
 
     const btnAnimate = document.getElementById('btn-animate');
     btnAnimate.disabled = true;
-    btnAnimate.style.opacity = "0.5";
+    btnAnimate.style.opacity = '0.5';
+
+    // 显示暂停/停止按钮
+    const btnPause = document.getElementById('btn-pause-animation');
+    const btnStop = document.getElementById('btn-stop-animation');
+    if (btnPause) { btnPause.style.display = 'inline-block'; btnPause.textContent = '⏸ 暂停动画'; btnPause.style.background = '#f59e0b'; }
+    if (btnStop) btnStop.style.display = 'inline-block';
 
     // 清空场景
     sceneManager.clearItems();
 
+    // 保存当前炉膛可见状态
+    const savedVisibility = [];
+    if (sceneManager.furnaceGroups.length > 0) {
+        sceneManager.furnaceGroups.forEach(g => savedVisibility.push(g.visible));
+    }
+
     const spaceGap = ANIMATION_CONFIG.spaceGap;
     let currentXOffset = 0;
-    const itemDrawSteps = [];
+    animationItemSteps = [];
+    animationCurrentIndex = 0;
 
-    // 渲染炉膛边框和收集工件
-    globalFurnacesResult.forEach((furnace) => {
+    // 渲染所有炉膛边框
+    globalFurnacesResult.forEach((furnace, fi) => {
         const xPos = currentXOffset + (furnace.w / 2);
+        const isVisible = savedVisibility.length > 0 ? (savedVisibility[fi] !== false) : true;
         
-        const furnaceBox = sceneManager.createFurnaceBox(furnace.w, furnace.h, furnace.d, xPos);
+        const furnaceBox = sceneManager.createFurnaceBox(furnace.w, furnace.h, furnace.d, xPos, furnace.instanceId);
+        furnaceBox.visible = isVisible; // 根据先前可见性设置
         sceneManager.itemsGroup.add(furnaceBox);
 
-        furnace.packedItems.forEach((item, idx) => {
-            const mesh = sceneManager.createItemMesh(item);
+        // 只处理可见炉膛的工件
+        if (isVisible) {
+            furnace.packedItems.forEach((item, idx) => {
+                const mesh = sceneManager.createItemMesh(item);
+                const targetX = xPos + item.x - (furnace.w / 2) + (item.w / 2);
+                const targetY = item.y + (item.h / 2) - 120;
+                const targetZ = item.z - (furnace.d / 2) + (item.d / 2);
+                mesh.position.set(targetX, targetY, targetZ);
+                mesh.visible = false;
 
-            const targetX = xPos + item.x - (furnace.w / 2) + (item.w / 2);
-            const targetY = item.y + (item.h / 2) - 120;
-            const targetZ = item.z - (furnace.d / 2) + (item.d / 2);
-            mesh.position.set(targetX, targetY, targetZ);
-            
-            itemDrawSteps.push({
-                mesh: mesh,
-                infoHtml: `👉 <b>操作指引：</b>请将 【${item.name}】 的第 ${idx + 1} 件工件，吊装推入 <b>${furnace.instanceId}</b><br><span style="color:#aaa; font-size:11px;">内部绝对参考零点定位坐标 (X, Y, Z): (${Math.round(item.x)}, ${Math.round(item.y)}, ${Math.round(item.z)})</span>`
+                animationItemSteps.push({
+                    mesh: mesh,
+                    infoHtml: `👉 <b>操作指引：</b>请将 【${item.name}】 的第 ${idx + 1} 件工件，吊装推入 <b>${furnace.instanceId}</b><br><span style="color:#aaa; font-size:11px;">内部绝对参考零点定位坐标 (X, Y, Z): (${Math.round(item.x)}, ${Math.round(item.y)}, ${Math.round(item.z)})</span>`,
+                    furnaceIndex: fi,
+                    itemIndex: idx
+                });
+                sceneManager.itemsGroup.add(mesh);
             });
-        });
+        }
 
         currentXOffset += furnace.w + spaceGap;
     });
 
-    // 动画播放
+    // 重新建立 furnaceGroups 索引（仅包含渲染的边框对象）
+    sceneManager.furnaceGroups = [];
+    sceneManager.itemsGroup.children.forEach(child => {
+        // 边框组直接放在itemsGroup下（不是group包裹的）
+        if (child.type === 'Group' && child.children.length > 0) {
+            sceneManager.furnaceGroups.push(child);
+        }
+    });
+
     const statsPanel = document.getElementById('summary-stats');
     const baseStatsText = updateStatsText();
 
-    for (let i = 0; i < itemDrawSteps.length; i++) {
-        const step = itemDrawSteps[i];
-        sceneManager.itemsGroup.add(step.mesh);
-        
+    for (let i = 0; i < animationItemSteps.length; i++) {
+        animationCurrentIndex = i;
+        const step = animationItemSteps[i];
+
+        // 检查暂停
+        if (animationPaused) {
+            await new Promise(resolve => { animationResolve = resolve; });
+        }
+
+        // 如果动画被取消则中断
+        if (!animationActive) break;
+
+        // 显示工件
+        step.mesh.visible = true;
+
         statsPanel.innerHTML = `
             <div style="background:#4f46e5; padding:12px; border-radius:6px; margin-bottom:15px; border-left:4px solid #00ffff; box-shadow: 0 4px 12px rgba(0,0,0,0.4);">
-                <strong style="color:#fff; display:block; margin-bottom:4px;">🚚 车间现场吊装动画引导 (${i + 1} / ${itemDrawSteps.length})</strong>
+                <strong style="color:#fff; display:block; margin-bottom:4px;">🚚 车间现场吊装动画引导 (${i + 1} / ${animationItemSteps.length})</strong>
                 ${step.infoHtml}
             </div>
         ` + baseStatsText;
@@ -204,15 +267,63 @@ async function playLoadingAnimation() {
     }
 
     // 动画结束
-    statsPanel.innerHTML = `
-        <div style="background:#16a34a; padding:12px; border-radius:6px; margin-bottom:15px; color:#fff;">
-            🎉 <b>装炉模拟动画播放完毕！</b> 共指引完成 ${itemDrawSteps.length} 件资产配位，工人可核对现场。
-        </div>
-    ` + baseStatsText;
+    if (animationActive) {
+        statsPanel.innerHTML = `
+            <div style="background:#16a34a; padding:12px; border-radius:6px; margin-bottom:15px; color:#fff;">
+                🎉 <b>装炉模拟动画播放完毕！</b> 共指引完成 ${animationItemSteps.length} 件资产配位，工人可核对现场。
+            </div>
+        ` + baseStatsText;
+    } else {
+        statsPanel.innerHTML = `
+            <div style="background:#f59e0b; padding:12px; border-radius:6px; margin-bottom:15px; color:#fff;">
+                ⏹ <b>装炉动画已停止。</b>
+            </div>
+        ` + baseStatsText;
+    }
 
     btnAnimate.disabled = false;
-    btnAnimate.style.opacity = "1";
+    btnAnimate.style.opacity = '1';
+    if (btnPause) btnPause.style.display = 'none';
+    if (btnStop) btnStop.style.display = 'none';
     isAnimating = false;
+    animationActive = false;
+    animationPaused = false;
+    animationItemSteps = [];
+    animationCurrentIndex = 0;
+}
+
+/**
+ * 暂停/继续装炉动画
+ */
+function toggleAnimationPause() {
+    if (!isAnimating) return;
+    animationPaused = !animationPaused;
+
+    const btnPause = document.getElementById('btn-pause-animation');
+    if (animationPaused) {
+        if (btnPause) btnPause.textContent = '▶ 继续动画';
+        if (btnPause) btnPause.style.background = '#16a34a';
+    } else {
+        if (btnPause) btnPause.textContent = '⏸ 暂停动画';
+        if (btnPause) btnPause.style.background = '#f59e0b';
+        if (animationResolve) {
+            animationResolve();
+            animationResolve = null;
+        }
+    }
+}
+
+/**
+ * 停止装炉动画
+ */
+function stopAnimation() {
+    if (!isAnimating) return;
+    animationActive = false;
+    animationPaused = false;
+    if (animationResolve) {
+        animationResolve();
+        animationResolve = null;
+    }
 }
 
 // ==================== PDF 生成 (已迁移至 PDF/ 模块) ====================
@@ -242,14 +353,22 @@ function init() {
 
     // 绑定按钮事件
     document.getElementById('btn-add-furnace').addEventListener('click', () => {
-        formManager.addFurnaceRow("自定义新增空闲炉膛", 400, 200, 200, 15000, 1);
+        formManager.addFurnaceRow('自定义新增空闲炉膛', 400, 200, 200, 15000, 1);
     });
     document.getElementById('btn-add-item').addEventListener('click', () => {
-        formManager.addItemRow("新工件批次", "cuboid", 10, 50, 50, 60, 1500, "#e67e22");
+        // 新批次使用自动分配的颜色
+        batchColorIndex++;
+        const color = BATCH_COLORS[batchColorIndex % BATCH_COLORS.length];
+        const batchName = `工件批次_${batchColorIndex}`;
+        formManager.addItemRow(batchName, 'cuboid', 10, 50, 50, 60, 1500, color);
     });
     document.getElementById('btn-calculate').addEventListener('click', executeAndRender);
     document.getElementById('btn-animate').addEventListener('click', playLoadingAnimation);
     document.getElementById('btn-export-pdf').addEventListener('click', exportToProfessionalPDF);
+
+    // 暂停/继续动画按钮
+    document.getElementById('btn-pause-animation').addEventListener('click', toggleAnimationPause);
+    document.getElementById('btn-stop-animation').addEventListener('click', stopAnimation);
 
     // 视角对准按钮
     document.getElementById('btn-view-front').addEventListener('click', () => {

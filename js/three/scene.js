@@ -359,38 +359,57 @@ class SceneManager {
     }
 
     /**
-     * 调整相机位置
+     * 获取当前可见的炉膛数据
+     */
+    _getVisibleFurnaces(furnacesResult) {
+        if (!furnacesResult || furnacesResult.length === 0) return [];
+        return furnacesResult.filter((f, idx) => {
+            if (idx >= this.furnaceGroups.length) return true;
+            return this.furnaceGroups[idx].visible;
+        });
+    }
+
+    /**
+     * 调整相机位置（基于可见炉膛）
      */
     _adjustCamera(furnacesResult, totalWidth) {
-        if (furnacesResult.length === 0) return;
+        const visibleFurnaces = this._getVisibleFurnaces(furnacesResult);
+        if (visibleFurnaces.length === 0) return;
+
+        // 计算可见炉膛的实际范围
+        const spaceGap = ANIMATION_CONFIG.spaceGap;
+        let visibleTotalWidth = 0;
+        visibleFurnaces.forEach(f => { visibleTotalWidth += f.w + spaceGap; });
+        visibleTotalWidth -= spaceGap;
 
         const sceneCenterX = totalWidth / 2;
         this.controls.target.set(sceneCenterX, 0, 0);
 
-        const maxH = Math.max(...furnacesResult.map(f => f.h));
-        const maxD = Math.max(...furnacesResult.map(f => f.d));
+        const maxH = Math.max(...visibleFurnaces.map(f => f.h));
+        const maxD = Math.max(...visibleFurnaces.map(f => f.d));
         
         this.camera.position.set(sceneCenterX, maxH * 2.2, maxD * 2.5);
         this.controls.update();
     }
 
     /**
-     * 视角对准 - 切换到指定视角
+     * 视角对准 - 切换到指定视角（基于可见炉膛）
      * @param {string} viewName - 'front' | 'top' | 'side' | 'default'
      * @param {Object} furnacesResult - 当前炉膛结果数据
      */
     focusOnView(viewName, furnacesResult) {
-        if (!furnacesResult || furnacesResult.length === 0) return;
+        const visibleFurnaces = this._getVisibleFurnaces(furnacesResult);
+        if (!visibleFurnaces || visibleFurnaces.length === 0) return;
 
-        // 计算场景中心
+        // 计算可见炉膛的场景中心
         const spaceGap = ANIMATION_CONFIG.spaceGap;
         let totalWidth = 0;
         furnacesResult.forEach(f => { totalWidth += f.w + spaceGap; });
         totalWidth -= spaceGap;
 
         const sceneCenterX = totalWidth / 2;
-        const maxH = Math.max(...furnacesResult.map(f => f.h));
-        const maxD = Math.max(...furnacesResult.map(f => f.d));
+        const maxH = Math.max(...visibleFurnaces.map(f => f.h));
+        const maxD = Math.max(...visibleFurnaces.map(f => f.d));
         const centerY = maxH / 2 + SCENE_CONFIG.groundOffset;
 
         const distance = Math.max(maxH, maxD) * 2.5;

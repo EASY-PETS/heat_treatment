@@ -15,11 +15,12 @@ export function createSummaryPage({ pdfWrapper, furnaces, unpackedItems = [] }) 
     page.className = 'pdf-page';
     page.style.position = 'relative';
     page.style.width = '1122px';
-    page.style.height = '760px';
+    page.style.minHeight = '793px';
     page.style.background = '#ffffff';
-    page.style.padding = '35px 40px';
+    page.style.padding = '30px 35px';
     page.style.boxSizing = 'border-box';
     page.style.fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    page.style.overflow = 'hidden';
     
     let totalWeight = 0;
     let totalCount = 0;
