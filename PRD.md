@@ -70,7 +70,9 @@ Industrial Furnace Loading System
 输出：
 
 * A4/A3 PDF
-* SVG 工程图（后续）
+* SVG 工程图
+* SVG 工程图尺寸标注
+* SVG 工程图排版引擎
 
 ---
 
@@ -277,6 +279,8 @@ project/
 ## Phase 2
 
 * SVG 工程图
+* SVG 工程图尺寸标注
+* SVG 工程图排版引擎
 * 尺寸标注
 * 页码与 REV
 * 工程图框
@@ -314,4 +318,4 @@ project/
 * 工业数字化
 * AI 装炉优化
 * 工厂 MES 协同
-* 工业工程图输出
+* 工业工程图（含尺寸标注、排版）输出
