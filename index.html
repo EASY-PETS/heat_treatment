@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="css/main.css">
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
     <script type="importmap">
       {
@@ -21,6 +22,7 @@
           "./js/data/store.js": "./js/data/store.js",
           "./js/utils/constants.js": "./js/utils/constants.js",
           "./js/utils/helpers.js": "./js/utils/helpers.js",
+          "./js/utils/excel.js": "./js/utils/excel.js",
           "./PDF/exportPDF.js": "./PDF/exportPDF.js",
           "./PDF/createSummaryPage.js": "./PDF/createSummaryPage.js",
           "./PDF/createViewPage.js": "./PDF/createViewPage.js",
@@ -31,61 +33,130 @@
     </script>
 </head>
 <body>
+    <!-- 窄屏面板折叠/展开切换按钮 -->
+    <button id="panel-toggle-btn" title="打开配置面板">☰</button>
+    <!-- 面板打开时的背景遮罩层（点击关闭面板） -->
+    <div id="panel-overlay" class="panel-overlay"></div>
+    
     <div id="control-panel">
         <div class="panel-scroll">
             <h2>热处理预装炉智能体</h2>
             
-            <div class="section">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                    <h3 style="margin: 0;">1. 车间可用炉膛资产配置</h3>
-                    <button class="btn btn-secondary" id="btn-add-furnace" style="width: auto; padding: 6px 12px; margin: 0; font-size: 11px;">+ 增加炉膛资产</button>
-                </div>
-                <div id="furnaces-container"></div>
-                <div class="form-line" style="margin-top: 10px;">
-                    <label>工件安全间距缓冲 (Spacing/mm) <input type="number" id="global-spacing" value="5"></label>
-                </div>
-            </div>
-
-            <div class="section">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                    <h3 style="margin: 0;">2. 待处理预装物料明细</h3>
-                    <button class="btn btn-secondary" id="btn-add-item" style="width: auto; padding: 6px 12px; margin: 0; font-size: 11px;">+ 增加工件批次</button>
-                </div>
-                <div id="items-container"></div>
-            </div>
-        </div>
-
-        <div class="action-area">
-            <button class="btn btn-primary" id="btn-calculate">生成多炉混合排布方案 🚀</button>
-            <button class="btn btn-animate" id="btn-animate">逐步模拟装炉引导 🎬</button>
-            <div style="display: flex; gap: 8px; margin-bottom: 12px;">
-                <button class="btn btn-secondary" id="btn-pause-animation" style="display:none; flex:1; padding:8px 0; font-size:12px; background:#f59e0b; color:#fff;">⏸ 暂停动画</button>
-                <button class="btn btn-secondary" id="btn-stop-animation" style="display:none; flex:1; padding:8px 0; font-size:12px; background:#dc2626; color:#fff;">⏹ 停止动画</button>
-            </div>
-            <button class="btn btn-success" id="btn-export-pdf">导出混装方案 PDF 📄</button>
-            <div style="margin-top: 10px; display: flex; gap: 8px;">
-                <button class="btn btn-secondary" id="btn-view-front" style="flex:1; padding: 8px 0; font-size: 12px;">🔲 正视图</button>
-                <button class="btn btn-secondary" id="btn-view-top" style="flex:1; padding: 8px 0; font-size: 12px;">🔲 顶视图</button>
-                <button class="btn btn-secondary" id="btn-view-side" style="flex:1; padding: 8px 0; font-size: 12px;">🔲 侧视图</button>
-                <button class="btn btn-secondary" id="btn-view-default" style="flex:1; padding: 8px 0; font-size: 12px;">🔄 3D默认</button>
-            </div>
-            <div id="furnace-toggles" style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px;"></div>
-            <div id="summary-stats">等待预装方案下发计算...</div>
-            <!-- 规则3: 多炉混合排布策略切换 -->
-            <div style="margin-top: 15px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 6px; border: 1px solid #333344;">
-                <label style="display: flex; flex-direction: column; font-size: 12px; color: #9999aa; gap: 6px;">
-                    🎯 装载排布策略 (Routing Strategy)
-                    <select id="routing-strategy" style="padding: 8px 10px; background: #161620; border: 1px solid #333344; color: #fff; border-radius: 4px; font-size: 13px; width: 100%;">
+            <!-- 装载排布策略（上移到标签页上方） -->
+            <div class="strategy-bar">
+                <label>
+                    🎯 装载排布策略
+                    <select id="routing-strategy">
                         <option value="STRATEGY_A">策略A：高精空间利用（最大化容积率）</option>
                         <option value="STRATEGY_B">策略B：常规普通平铺（追求气流最优化）</option>
                     </select>
                 </label>
+            </div>
+            
+            <!-- 标签页导航 -->
+            <div class="tab-nav">
+                <button class="tab-btn active" data-tab="tab-furnaces">
+                    <span class="tab-icon">🏭</span> 车间可用炉膛资产配置
+                </button>
+                <button class="tab-btn" data-tab="tab-items">
+                    <span class="tab-icon">📦</span> 待处理预装物料明细
+                </button>
+            </div>
+
+            <!-- 标签页 1：车间可用炉膛资产配置 -->
+            <div id="tab-furnaces" class="tab-panel active">
+                <div class="section">
+                    <!-- 可折叠详情区块 -->
+                    <div class="tab-section-collapse">
+                        <div class="tab-section-header" data-target="furnaces-detail-body">
+                            <span>🏭 车间可用炉膛资产配置</span>
+                            <span class="tab-section-toggle">▼</span>
+                        </div>
+                        <div id="furnaces-detail-body" class="tab-section-body">
+                            <div style="display: flex; justify-content: flex-end; align-items: center; margin-bottom: 10px;">
+                                <button class="btn btn-secondary" id="btn-add-furnace" style="width: auto; padding: 6px 12px; margin: 0; font-size: 11px;">+ 增加炉膛资产</button>
+                            </div>
+                            <div id="furnaces-container"></div>
+                        </div>
+                    </div>
+                    <div class="form-line" style="margin-top: 10px;">
+                        <label>工件安全间距缓冲 (Spacing/mm) <input type="number" id="global-spacing" value="5"></label>
+                    </div>
+                    <!-- 炉膛装载优先级排序 -->
+                    <div style="margin-top: 12px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <h4 style="margin: 0; font-size: 13px; color: #f39c12;">🔥 炉膛装载优先级</h4>
+                            <span style="font-size: 10px; color: #666;">拖拽排序 · 上方优先装满</span>
+                        </div>
+                        <div id="furnace-priority-list" class="furnace-priority-list">
+                            <div style="color: #666; font-size: 11px; text-align: center; padding: 10px;">添加炉膛后自动生成排序节点</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 标签页 2：待处理预装物料明细 -->
+            <div id="tab-items" class="tab-panel">
+                <div class="section">
+                    <!-- 可折叠详情区块 -->
+                    <div class="tab-section-collapse">
+                        <div class="tab-section-header" data-target="items-detail-body">
+                            <span>📦 待处理预装物料明细</span>
+                            <span class="tab-section-toggle">▼</span>
+                        </div>
+                        <div id="items-detail-body" class="tab-section-body">
+                            <div style="display: flex; justify-content: flex-end; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 6px;">
+                                <button class="btn btn-secondary" id="btn-import-excel" style="width: auto; padding: 6px 10px; margin: 0; font-size: 11px; background: #217346; border-color: #2ecc71;">📥 导入Excel</button>
+                                <input type="file" id="excel-file-input" accept=".xlsx,.xls,.csv" style="display: none;">
+                                <button class="btn btn-secondary" id="btn-add-item" style="width: auto; padding: 6px 12px; margin: 0; font-size: 11px;">+ 增加工件批次</button>
+                            </div>
+                            <div id="items-container"></div>
+                        </div>
+                    </div>
+                    <!-- 物料汇总速览：精简列表，点击可在3D炉膛中高亮对应物料 -->
+                    <div id="item-quick-summary-container" class="item-quick-summary"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="action-area">
+            <div style="display: flex; gap: 6px; margin-bottom: 6px;">
+                <button class="btn btn-primary btn-sm" id="btn-calculate" style="flex:1; margin-bottom:0;">🚀 生成方案</button>
+                <button class="btn btn-animate btn-sm" id="btn-animate" style="flex:1; margin-bottom:0;">🎬 模拟装炉</button>
+                <button class="btn btn-success btn-sm" id="btn-export-pdf" style="flex:1; margin-bottom:0;">📄 导出PDF</button>
+            </div>
+            <div style="display: flex; gap: 6px; margin-bottom: 6px;">
+                <button class="btn btn-secondary btn-xs" id="btn-pause-animation" style="display:none; flex:1; padding:5px 0; font-size:10px; background:#f59e0b; color:#fff;">⏸ 暂停</button>
+                <button class="btn btn-secondary btn-xs" id="btn-stop-animation" style="display:none; flex:1; padding:5px 0; font-size:10px; background:#dc2626; color:#fff;">⏹ 停止</button>
+            </div>
+            <div style="margin-top: 6px; display: flex; gap: 4px;">
+                <button class="btn btn-secondary btn-xs" id="btn-view-front" style="flex:1; padding:5px 2px; font-size:10px;">🔲正</button>
+                <button class="btn btn-secondary btn-xs" id="btn-view-top" style="flex:1; padding:5px 2px; font-size:10px;">🔲顶</button>
+                <button class="btn btn-secondary btn-xs" id="btn-view-side" style="flex:1; padding:5px 2px; font-size:10px;">🔲侧</button>
+                <button class="btn btn-secondary btn-xs" id="btn-view-default" style="flex:1; padding:5px 2px; font-size:10px;">🔄3D</button>
+            </div>
+            <div id="furnace-toggles" style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px;"></div>
+            <!-- 计算结果：默认折叠，点击展开 -->
+            <div id="summary-wrapper" class="summary-collapsed">
+                <div id="summary-header" class="summary-header">
+                    <span id="summary-title-text">📊 计算结果</span>
+                    <span id="summary-toggle-icon" class="summary-toggle-icon">▶</span>
+                </div>
+                <div id="summary-body" class="summary-body">
+                    <div id="summary-stats">等待预装方案下发计算...</div>
+                </div>
             </div>
         </div>
     </div>
 
     <div id="canvas-container"></div>
     <div id="pdf-hidden-template"></div>
+
+    <!-- Excel导入预览弹窗 -->
+    <div id="excel-preview-overlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.75); z-index:10000; align-items:center; justify-content:center;">
+        <div id="excel-preview-modal" style="background:#1a1a24; border:2px solid #0066cc; border-radius:12px; padding:24px; width:700px; max-height:85vh; overflow-y:auto; color:#d1d1de; box-shadow:0 20px 60px rgba(0,0,0,0.6);">
+        </div>
+    </div>
 
     <script type="module" src="js/app.js"></script>
 </body>

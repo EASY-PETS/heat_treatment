@@ -18,21 +18,42 @@ class FormManager {
         const row = document.createElement('div');
         row.className = 'item-row furnace-row';
         row.id = `furnace-row-${this.furnaceCounter}`;
-        row.innerHTML = `
-            <button class="btn-delete" onclick="document.getElementById('${row.id}').remove()">X</button>
-            <div class="form-line">
-                <label style="flex: 1.8;">炉膛资产名称 <input type="text" class="f-name" value="${name}"></label>
-                <label style="flex: 1.2;">车间可用台数 <input type="number" class="f-count" value="${count}"></label>
-            </div>
-            <div class="form-line">
-                <label>有效纵深 (Z/mm) <input type="number" class="f-depth" value="${depth}"></label>
-                <label>有效宽度 (X/mm) <input type="number" class="f-width" value="${width}"></label>
-            </div>
-            <div class="form-line">
-                <label>有效高度 (Y/mm) <input type="number" class="f-height" value="${height}"></label>
-                <label>承重上限 (kg) <input type="number" class="f-weight" value="${maxWeight}"></label>
-            </div>
+        
+        // 删除按钮 - 移除炉膛时触发自定义事件以刷新优先级列表
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'btn-delete';
+        deleteBtn.textContent = 'X';
+        deleteBtn.addEventListener('click', () => {
+            row.remove();
+            // 触发自定义事件通知 app.js 刷新优先级列表
+            window.dispatchEvent(new CustomEvent('furnace-deleted'));
+        });
+        row.appendChild(deleteBtn);
+        
+        const formLine1 = document.createElement('div');
+        formLine1.className = 'form-line';
+        formLine1.innerHTML = `
+            <label style="flex: 1.8;">炉膛资产名称 <input type="text" class="f-name" value="${name}"></label>
+            <label style="flex: 1.2;">车间可用台数 <input type="number" class="f-count" value="${count}"></label>
         `;
+        row.appendChild(formLine1);
+        
+        const formLine2 = document.createElement('div');
+        formLine2.className = 'form-line';
+        formLine2.innerHTML = `
+            <label>有效纵深 (Z/mm) <input type="number" class="f-depth" value="${depth}"></label>
+            <label>有效宽度 (X/mm) <input type="number" class="f-width" value="${width}"></label>
+        `;
+        row.appendChild(formLine2);
+        
+        const formLine3 = document.createElement('div');
+        formLine3.className = 'form-line';
+        formLine3.innerHTML = `
+            <label>有效高度 (Y/mm) <input type="number" class="f-height" value="${height}"></label>
+            <label>承重上限 (kg) <input type="number" class="f-weight" value="${maxWeight}"></label>
+        `;
+        row.appendChild(formLine3);
+        
         container.appendChild(row);
     }
 

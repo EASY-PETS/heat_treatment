@@ -1,4 +1,4 @@
-// ==================== 装炉排布算法模块（集成规则1-4、7） ====================
+// ==================== 装炉排布算法模块（集成规则1-4、7、8） ====================
 
 import { getSingleItemWeight, getItemDimensions } from '../utils/helpers.js';
 import { CONFLICT_MATRIX, CROSS_SECTION_RATIO_THRESHOLD, ROUTING_STRATEGIES } from '../utils/constants.js';
@@ -69,9 +69,18 @@ function checkMaterialConflict(existingItems, newItem) {
  * @param {Array} itemsInput - 工件输入
  * @param {number} spacing - 安全间距
  * @param {string} routingStrategy - 排布策略 'STRATEGY_A' 或 'STRATEGY_B'
+ * @param {Array} furnacePriorityOrder - 规则8: 炉膛装载优先级顺序（炉膛名称数组，越靠前越优先装满）
  * @returns {Object} 排布结果
  */
-export function solveHeterogeneousPacking(furnacePoolInput, itemsInput, spacing, routingStrategy = 'STRATEGY_A') {
+export function solveHeterogeneousPacking(furnacePoolInput, itemsInput, spacing, routingStrategy = 'STRATEGY_A', furnacePriorityOrder = []) {
+    // 规则8: 构建炉膛装载优先级映射（炉膛名称 → 优先级索引，越小越优先）
+    const priorityMap = {};
+    if (furnacePriorityOrder && furnacePriorityOrder.length > 0) {
+        furnacePriorityOrder.forEach((fName, idx) => {
+            priorityMap[fName] = idx;
+        });
+    }
+
     // 创建炉膛实例
     let availableFurnaceInstances = [];
     furnacePoolInput.forEach(f => {
@@ -87,13 +96,18 @@ export function solveHeterogeneousPacking(furnacePoolInput, itemsInput, spacing,
                 totalWeight: 0,
                 materialTypes: new Set(),  // 规则1: 记录炉内材质类型
                 emptySpaces: [{ x: 0, y: 0, z: 0, w: f.width, h: f.height, d: f.depth }],
-                isDedicated: false  // 规则2: 是否被某VIP订单独占
+                isDedicated: false,  // 规则2: 是否被某VIP订单独占
+                priority: priorityMap[f.name] !== undefined ? priorityMap[f.name] : 9999  // 规则8: 装载优先级
             });
         }
     });
 
-    // 按体积从大到小排序炉膛
-    availableFurnaceInstances.sort((a, b) => (b.w * b.h * b.d) - (a.w * a.h * a.d));
+    // 规则8: 按用户指定的优先级排序（同优先级按体积从大到小）
+    availableFurnaceInstances.sort((a, b) => {
+        const pDiff = a.priority - b.priority;
+        if (pDiff !== 0) return pDiff;
+        return (b.w * b.h * b.d) - (a.w * a.h * a.d);
+    });
 
     // 展平工件为单个实例
     let flattenedItems = [];
@@ -205,7 +219,7 @@ export function solveHeterogeneousPacking(furnacePoolInput, itemsInput, spacing,
         }
     }
 
-    // 再处理普通工件（规则3策略控制）
+    // 再处理普通工件（规则3策略控制 + 规则8按优先级顺序遍历炉膛）
     for (let furnace of availableFurnaceInstances) {
         // 规则2: 跳过已被独占的炉膛
         if (furnace.isDedicated) {

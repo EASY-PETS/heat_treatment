@@ -96,7 +96,7 @@ export const LIGHT_CONFIG = {
 };
 
 // 炉膛边框颜色
-export const FURNACE_BORDER_COLOR = 0xe67e22;
+export const FURNACE_BORDER_COLOR = 0xffffff;
 
 // 工件材质配置
 export const MATERIAL_CONFIG = {
