@@ -1,0 +1,402 @@
+/* ==================== 主样式表 ==================== */
+:root {
+    --bg-color: #121216;
+    --panel-bg: #1a1a24;
+    --card-bg: #222230;
+    --input-bg: #161620;
+    --text-color: #d1d1de;
+    --accent-color: #0066cc;
+    --accent-hover: #0052a3;
+    --success-color: #1f7a3a;
+    --danger-color: #b32424;
+    --border-color: #333344;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    display: flex;
+    height: 100vh;
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    overflow: hidden;
+}
+
+/* 左侧配置面板 */
+#control-panel {
+    width: 490px;
+    min-width: 490px;
+    background-color: var(--panel-bg);
+    border-right: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    box-shadow: 5px 0 20px rgba(0,0,0,0.5);
+    z-index: 10;
+    box-sizing: border-box;
+}
+
+.panel-scroll {
+    flex: 1;
+    padding: 20px;
+    overflow-y: auto;
+    box-sizing: border-box;
+}
+
+.panel-scroll::-webkit-scrollbar { width: 6px; }
+.panel-scroll::-webkit-scrollbar-track { background: var(--panel-bg); }
+.panel-scroll::-webkit-scrollbar-thumb { background: #3a3a4f; border-radius: 3px; }
+
+h2 {
+    margin-top: 0;
+    font-size: 20px;
+    color: #fff;
+    border-bottom: 2px solid var(--border-color);
+    padding-bottom: 12px;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+
+h3 {
+    margin-top: 0;
+    font-size: 14px;
+    color: #0088ff;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.section {
+    margin-bottom: 25px;
+    background: rgba(0,0,0,0.15);
+    padding: 15px;
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.02);
+}
+
+.form-line {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.form-line label {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    font-size: 12px;
+    color: #9999aa;
+}
+
+.form-line label input, .form-line label select {
+    margin-top: 5px;
+    padding: 7px 10px;
+    background: var(--input-bg);
+    border: 1px solid var(--border-color);
+    color: #fff;
+    border-radius: 4px;
+    box-sizing: border-box;
+    width: 100%;
+    font-size: 13px;
+}
+
+.form-line label input:focus, .form-line label select:focus {
+    border-color: #007bff;
+    outline: none;
+}
+
+/* 动态卡片样式 */
+.item-row {
+    background: var(--card-bg);
+    padding: 12px 14px;
+    border-radius: 6px;
+    margin-bottom: 12px;
+    border-left: 4px solid var(--accent-color);
+    position: relative;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.15);
+}
+.furnace-row {
+    border-left-color: #e67e22;
+}
+
+.btn-delete {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: transparent;
+    border: none;
+    color: var(--danger-color);
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 13px;
+    opacity: 0.7;
+}
+.btn-delete:hover { opacity: 1; }
+
+.action-area {
+    padding: 20px;
+    background: #15151f;
+    border-top: 1px solid var(--border-color);
+    box-sizing: border-box;
+}
+
+.btn {
+    width: 100%;
+    padding: 12px;
+    font-size: 15px;
+    font-weight: bold;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    margin-bottom: 12px;
+}
+.btn-primary { background-color: var(--accent-color); }
+.btn-primary:hover { background-color: var(--accent-hover); }
+.btn-secondary { background-color: #3e3e52; }
+.btn-secondary:hover { background-color: #4e4e66; }
+.btn-success { background-color: var(--success-color); display: none; }
+.btn-success:hover { background-color: #165c2b; }
+
+/* 装炉动画专属按钮样式 */
+.btn-animate { background-color: #6366f1; display: none; }
+.btn-animate:hover { background-color: #4f46e5; }
+
+#summary-stats {
+    margin-top: 5px;
+    font-size: 13px;
+    color: #ccc;
+    line-height: 1.6;
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+#canvas-container {
+    flex: 1;
+    position: relative;
+    background: #111116;
+}
+
+/* ==================== 工业级 PDF 报表隐藏渲染底座 ==================== */
+#pdf-hidden-template {
+    display: none;
+    background: #ffffff;
+    color: #1e293b;
+    font-family: -apple-system, sans-serif;
+}
+.pdf-header {
+    border-bottom: 3px solid #0066cc;
+    padding-bottom: 12px;
+    margin-bottom: 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+}
+.pdf-title { margin: 0; color: #0f172a; font-size: 22px; font-weight: 800; }
+.pdf-subtitle { margin: 4px 0 0 0; color: #64748b; font-size: 11px; }
+.pdf-meta-right { text-align: right; color: #475569; font-size: 11px; line-height: 1.5; }
+
+.pdf-section-title {
+    font-size: 14px;
+    color: #0f172a;
+    border-left: 4px solid #0066cc;
+    padding-left: 8px;
+    margin: 20px 0 12px 0;
+    font-weight: 700;
+}
+.pdf-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 20px;
+    font-size: 11px;
+}
+.pdf-table th {
+    background: #f1f5f9;
+    color: #334155;
+    font-weight: 600;
+    border: 1px solid #cbd5e1;
+    padding: 8px;
+}
+.pdf-table td {
+    border: 1px solid #cbd5e1;
+    padding: 7px;
+    text-align: center;
+    color: #334155;
+}
+
+.pdf-views-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 12px;
+    background: #f8fafc;
+    padding: 12px;
+    border-radius: 6px;
+    border: 1px solid #e2e8f0;
+    margin: 15px 0;
+}
+.pdf-view-block {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+.pdf-view-label { font-size: 10px; font-weight: 700; color: #1e293b; margin-bottom: 6px; }
+.pdf-canvas-2d {
+    position: relative;
+    border: 2px solid #0f172a;
+    background: #ffffff;
+    box-shadow: inset 0 0 8px rgba(0,0,0,0.05);
+    overflow: hidden;
+}
+
+.pdf-ruler-text {
+    position:absolute;
+    font-size:8px;
+    color:#475569;
+    font-weight:bold;
+    pointer-events:none;
+}
+
+.pdf-grid-line-x {
+    position:absolute;
+    top:0;
+    width:1px;
+    background:rgba(0,0,0,0.08);
+}
+
+.pdf-grid-line-y {
+    position:absolute;
+    left:0;
+    height:1px;
+    background:rgba(0,0,0,0.08);
+}
+
+.pdf-signature-box {
+    margin-top:30px;
+    border-top:2px solid #cbd5e1;
+    padding-top:18px;
+}
+
+.pdf-signature-table {
+    width:100%;
+    border-collapse:collapse;
+    margin-top:12px;
+}
+
+.pdf-signature-table td {
+    border:1px solid #cbd5e1;
+    padding:22px;
+    font-size:12px;
+}
+.pdf-element-2d {
+    position: absolute;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: #000000;
+    font-size: 9px;
+    font-weight: 900;
+    text-shadow: 0px 0px 3px #ffffff, 0px 0px 3px #ffffff;
+    box-sizing: border-box;
+    border: 1.5px solid #0f172a;
+    opacity: 0.7;
+    box-shadow: 1px 1px 2px rgba(0,0,0,0.15);
+    overflow: hidden;
+}
+
+/* PDF 汇总页面卡片样式 */
+.summary-card {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 16px;
+    text-align: center;
+}
+
+.summary-title {
+    font-size: 12px;
+    color: #64748b;
+    margin-bottom: 8px;
+}
+
+.summary-value {
+    font-size: 24px;
+    font-weight: bold;
+    color: #0f172a;
+}
+
+/* ==================== 增强PDF工业报告样式 ==================== */
+.pdf-page {
+    width: 1122px;
+    min-height: 793px;
+    padding: 30px;
+    box-sizing: border-box;
+    background: #ffffff !important;
+    page-break-after: always;
+    position: relative;
+    color: #0f172a;
+}
+.pdf-page:last-child { page-break-after: avoid; }
+
+/* 增强工业图框 */
+.pdf-industry-title {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-weight: 900;
+    color: #0f172a;
+}
+
+.pdf-industry-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #64748b;
+}
+
+/* 工程图网格覆盖层 */
+.pdf-engineering-grid {
+    position: absolute;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.pdf-engineering-grid-major {
+    stroke: rgba(0, 0, 0, 0.12);
+    stroke-width: 1;
+}
+
+.pdf-engineering-grid-minor {
+    stroke: rgba(0, 0, 0, 0.05);
+    stroke-width: 0.5;
+}
+
+/* 进炉方向指示器样式 */
+.pdf-entry-arrow {
+    position: absolute;
+    pointer-events: none;
+    z-index: 5;
+    color: #ef4444;
+    font-weight: bold;
+}
+
+/* 工件标签增强 */
+.pdf-item-label {
+    text-shadow: 0 0 3px #ffffff, 0 0 3px #ffffff;
+    font-weight: 900;
+    color: #1e293b;
+}
+
+/* 放置序号标记 */
+.pdf-seq-badge {
+    position: absolute;
+    background: #ef4444;
+    color: #ffffff;
+    border-radius: 50%;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid #ffffff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+    z-index: 10;
+    pointer-events: none;
+}

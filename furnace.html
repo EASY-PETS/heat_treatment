@@ -1,0 +1,1704 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>热处理预装炉智能体 - 影在科技</title>
+    <style>
+        :root {
+            --bg-color: #121216;
+            --panel-bg: #1a1a24;
+            --card-bg: #222230;
+            --input-bg: #161620;
+            --text-color: #d1d1de;
+            --accent-color: #0066cc;
+            --accent-hover: #0052a3;
+            --success-color: #1f7a3a;
+            --danger-color: #b32424;
+            --border-color: #333344;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            height: 100vh;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            overflow: hidden;
+        }
+
+        /* 左侧配置面板 */
+        #control-panel {
+            width: 490px;
+            min-width: 490px;
+            background-color: var(--panel-bg);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            box-shadow: 5px 0 20px rgba(0,0,0,0.5);
+            z-index: 10;
+            box-sizing: border-box;
+        }
+
+        .panel-scroll {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            box-sizing: border-box;
+        }
+
+        .panel-scroll::-webkit-scrollbar { width: 6px; }
+        .panel-scroll::-webkit-scrollbar-track { background: var(--panel-bg); }
+        .panel-scroll::-webkit-scrollbar-thumb { background: #3a3a4f; border-radius: 3px; }
+
+        h2 {
+            margin-top: 0;
+            font-size: 20px;
+            color: #fff;
+            border-bottom: 2px solid var(--border-color);
+            padding-bottom: 12px;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+
+        h3 {
+            margin-top: 0;
+            font-size: 14px;
+            color: #0088ff;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .section {
+            margin-bottom: 25px;
+            background: rgba(0,0,0,0.15);
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid rgba(255,255,255,0.02);
+        }
+
+        .form-line {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .form-line label {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            font-size: 12px;
+            color: #9999aa;
+        }
+
+        .form-line label input, .form-line label select {
+            margin-top: 5px;
+            padding: 7px 10px;
+            background: var(--input-bg);
+            border: 1px solid var(--border-color);
+            color: #fff;
+            border-radius: 4px;
+            box-sizing: border-box;
+            width: 100%;
+            font-size: 13px;
+        }
+
+        .form-line label input:focus, .form-line label select:focus {
+            border-color: #007bff;
+            outline: none;
+        }
+
+        /* 动态卡片样式 */
+        .item-row {
+            background: var(--card-bg);
+            padding: 12px 14px;
+            border-radius: 6px;
+            margin-bottom: 12px;
+            border-left: 4px solid var(--accent-color);
+            position: relative;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.15);
+        }
+        .furnace-row {
+            border-left-color: #e67e22;
+        }
+        
+        .btn-delete {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: transparent;
+            border: none;
+            color: var(--danger-color);
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 13px;
+            opacity: 0.7;
+        }
+        .btn-delete:hover { opacity: 1; }
+
+        .action-area {
+            padding: 20px;
+            background: #15151f;
+            border-top: 1px solid var(--border-color);
+            box-sizing: border-box;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 12px;
+            font-size: 15px;
+            font-weight: bold;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            margin-bottom: 12px;
+        }
+        .btn-primary { background-color: var(--accent-color); }
+        .btn-primary:hover { background-color: var(--accent-hover); }
+        .btn-secondary { background-color: #3e3e52; }
+        .btn-secondary:hover { background-color: #4e4e66; }
+        .btn-success { background-color: var(--success-color); display: none; }
+        .btn-success:hover { background-color: #165c2b; }
+        
+        /* 装炉动画专属按钮样式 */
+        .btn-animate { background-color: #6366f1; display: none; }
+        .btn-animate:hover { background-color: #4f46e5; }
+
+        #summary-stats {
+            margin-top: 5px;
+            font-size: 13px;
+            color: #ccc;
+            line-height: 1.6;
+            max-height: 220px;
+            overflow-y: auto;
+        }
+
+        #canvas-container {
+            flex: 1;
+            position: relative;
+            background: #111116;
+        }
+
+        /* ==================== 工业级 PDF 报表隐藏渲染底座 ==================== */
+        #pdf-hidden-template {
+            display: none;
+            background: #ffffff;
+            color: #1e293b;
+            font-family: -apple-system, sans-serif;
+        }
+        .pdf-page {
+            width: 794px;
+            min-height: 1123px;
+            padding: 40px;
+            box-sizing: border-box;
+            background: #ffffff;
+            page-break-after: always;
+            position: relative;
+        }
+        .pdf-page:last-child { page-break-after: avoid; }
+        .pdf-header {
+            border-bottom: 3px solid #0066cc;
+            padding-bottom: 12px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+        }
+        .pdf-title { margin: 0; color: #0f172a; font-size: 22px; font-weight: 800; }
+        .pdf-subtitle { margin: 4px 0 0 0; color: #64748b; font-size: 11px; }
+        .pdf-meta-right { text-align: right; color: #475569; font-size: 11px; line-height: 1.5; }
+        
+        .pdf-section-title {
+            font-size: 14px;
+            color: #0f172a;
+            border-left: 4px solid #0066cc;
+            padding-left: 8px;
+            margin: 20px 0 12px 0;
+            font-weight: 700;
+        }
+        .pdf-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+            font-size: 11px;
+        }
+        .pdf-table th {
+            background: #f1f5f9;
+            color: #334155;
+            font-weight: 600;
+            border: 1px solid #cbd5e1;
+            padding: 8px;
+        }
+        .pdf-table td {
+            border: 1px solid #cbd5e1;
+            padding: 7px;
+            text-align: center;
+            color: #334155;
+        }
+        
+        .pdf-views-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            gap: 12px;
+            background: #f8fafc;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+            margin: 15px 0;
+        }
+        .pdf-view-block {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .pdf-view-label { font-size: 10px; font-weight: 700; color: #1e293b; margin-bottom: 6px; }
+        .pdf-canvas-2d {
+            position: relative;
+            border: 2px solid #0f172a;
+            background: #ffffff;
+            box-shadow: inset 0 0 8px rgba(0,0,0,0.05);
+            overflow: hidden;
+        }
+
+        .pdf-ruler-text {
+            position:absolute;
+            font-size:8px;
+            color:#475569;
+            font-weight:bold;
+            pointer-events:none;
+        }
+
+        .pdf-grid-line-x {
+            position:absolute;
+            top:0;
+            width:1px;
+            background:rgba(0,0,0,0.08);
+        }
+
+        .pdf-grid-line-y {
+            position:absolute;
+            left:0;
+            height:1px;
+            background:rgba(0,0,0,0.08);
+        }
+
+        .pdf-signature-box {
+            margin-top:30px;
+            border-top:2px solid #cbd5e1;
+            padding-top:18px;
+        }
+
+        .pdf-signature-table {
+            width:100%;
+            border-collapse:collapse;
+            margin-top:12px;
+        }
+
+        .pdf-signature-table td {
+            border:1px solid #cbd5e1;
+            padding:22px;
+            font-size:12px;
+        }
+        .pdf-element-2d {
+            position: absolute;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: #000000;
+            font-size: 9px;
+            font-weight: 900;
+            text-shadow: 0px 0px 3px #ffffff, 0px 0px 3px #ffffff;
+            box-sizing: border-box;
+            border: 1.5px solid #0f172a;
+            opacity: 0.7;
+            box-shadow: 1px 1px 2px rgba(0,0,0,0.15);
+            overflow: hidden;
+        }
+    </style>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+</head>
+<body>
+
+    <div id="control-panel">
+        <div class="panel-scroll">
+            <h2>热处理预装炉智能体</h2>
+            
+            <div class="section">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <h3 style="margin: 0;">1. 车间可用炉膛资产配置</h3>
+                    <button class="btn btn-secondary" id="btn-add-furnace" style="width: auto; padding: 6px 12px; margin: 0; font-size: 11px;">+ 增加炉膛资产</button>
+                </div>
+                <div id="furnaces-container"></div>
+                <div class="form-line" style="margin-top: 10px;">
+                    <label>工件安全间距缓冲 (Spacing/mm) <input type="number" id="global-spacing" value="5"></label>
+                </div>
+            </div>
+
+            <div class="section">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <h3 style="margin: 0;">2. 待处理预装物料明细</h3>
+                    <button class="btn btn-secondary" id="btn-add-item" style="width: auto; padding: 6px 12px; margin: 0; font-size: 11px;">+ 增加工件批次</button>
+                </div>
+                <div id="items-container"></div>
+            </div>
+        </div>
+
+        <div class="action-area">
+            <button class="btn btn-primary" id="btn-calculate">生成多炉混合排布方案 🚀</button>
+            <button class="btn btn-animate" id="btn-animate">逐步模拟装炉引导 🎬</button>
+            <button class="btn btn-success" id="btn-export-pdf">导出混装方案 PDF 📄</button>
+            <div id="summary-stats">等待预装方案下发计算...</div>
+        </div>
+    </div>
+
+    <div id="canvas-container"></div>
+    <div id="pdf-hidden-template"></div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        let scene, camera, renderer, controls;
+        let itemsGroup = null;
+
+        // 全局核心计算结果变量锚点
+        let globalFurnacesResult = null;
+        let globalUnpackedItems = [];
+        let globalSpacingValue = 5;
+        let isAnimating = false; // 动画状态锁
+
+        function initThree() {
+            const container = document.getElementById('canvas-container');
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0e0e12);
+
+            camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 1, 10000);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+            const mainLight = new THREE.DirectionalLight(0xffffff, 0.7);
+            mainLight.position.set(400, 800, 500);
+            scene.add(mainLight);
+            
+            const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
+            fillLight.position.set(-400, -200, -300);
+            scene.add(fillLight);
+
+            const gridHelper = new THREE.GridHelper(4000, 80, 0x222233, 0x151520);
+            gridHelper.position.y = -120;
+            scene.add(gridHelper);
+
+            itemsGroup = new THREE.Group();
+            scene.add(itemsGroup);
+
+            window.addEventListener('resize', () => {
+                camera.aspect = container.clientWidth / container.clientHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(container.clientWidth, container.clientHeight);
+            });
+
+            function animate() {
+                requestAnimationFrame(animate);
+                controls.update();
+                renderer.render(scene, camera);
+            }
+            animate();
+        }
+
+        // --- 炉膛资产动态表单维护 ---
+        const furnacesContainer = document.getElementById('furnaces-container');
+        let furnaceCounter = 0;
+
+        function addFurnaceRow(name, depth, width, height, maxWeight, count) {
+            furnaceCounter++;
+            const row = document.createElement('div');
+            row.className = 'item-row furnace-row';
+            row.id = `furnace-row-${furnaceCounter}`;
+            row.innerHTML = `
+                <button class="btn-delete" onclick="document.getElementById('${row.id}').remove()">X</button>
+                <div class="form-line">
+                    <label style="flex: 1.8;">炉膛资产名称 <input type="text" class="f-name" value="${name}"></label>
+                    <label style="flex: 1.2;">车间可用台数 <input type="number" class="f-count" value="${count}"></label>
+                </div>
+                <div class="form-line">
+                    <label>有效纵深 (Z/mm) <input type="number" class="f-depth" value="${depth}"></label>
+                    <label>有效宽度 (X/mm) <input type="number" class="f-width" value="${width}"></label>
+                </div>
+                <div class="form-line">
+                    <label>有效高度 (Y/mm) <input type="number" class="f-height" value="${height}"></label>
+                    <label>承重上限 (kg) <input type="number" class="f-weight" value="${maxWeight}"></label>
+                </div>
+            `;
+            furnacesContainer.appendChild(row);
+        }
+
+        // --- 工件物料动态表单维护 ---
+        const itemsContainer = document.getElementById('items-container');
+        let rowCounter = 0;
+
+        function addItemRow(name, shape, count, dim1, dim2, dim3, totalWeight, color) {
+            rowCounter++;
+            const row = document.createElement('div');
+            row.className = 'item-row';
+            row.id = `item-row-${rowCounter}`;
+            row.innerHTML = `
+                <button class="btn-delete" onclick="document.getElementById('${row.id}').remove()">X</button>
+                <div class="form-line">
+                    <label style="flex: 1.8;">工件批次名称 <input type="text" class="item-name" value="${name}"></label>
+                    <label style="flex: 1.2;">几何形态 <select class="item-shape" onchange="toggleShapeInputs(${rowCounter}, this.value)">
+                        <option value="cuboid" ${shape==='cuboid'?'selected':''}>立方体</option>
+                        <option value="cylinder" ${shape==='cylinder'?'selected':''}>圆柱体</option>
+                    </select></label>
+                </div>
+                <div class="form-line">
+                    <label>批次总量 <input type="number" class="item-count" value="${count}"></label>
+                    <label class="lbl-dim1"><span>${shape==='cylinder'?'直径':'长度'}</span> <input type="number" class="item-dim1" value="${dim1}"></label>
+                    <label class="lbl-dim2" style="display: ${shape==='cylinder'?'none':'block'}">宽度 <input type="number" class="item-dim2" value="${dim2}"></label>
+                </div>
+                <div class="form-line">
+                    <label>高度 <input type="number" class="item-dim3" value="${dim3}"></label>
+                    <label>整批总重(kg) <input type="number" class="item-weight" value="${totalWeight}"></label>
+                    <label style="max-width: 65px;">渲染色彩 <input type="color" class="item-color" value="${color}" style="padding:0; height:32px; cursor:pointer;"></label>
+                </div>
+            `;
+            itemsContainer.appendChild(row);
+        }
+
+        window.toggleShapeInputs = function(id, val) {
+            const row = document.getElementById(`item-row-${id}`);
+            const lblDim2 = row.querySelector('.lbl-dim2');
+            const lblDim1Span = row.querySelector('.lbl-dim1 span');
+            if (val === 'cylinder') {
+                lblDim2.style.display = 'none';
+                lblDim1Span.innerText = "直径";
+            } else {
+                lblDim2.style.display = 'block';
+                lblDim1Span.innerText = "长度";
+            }
+        }
+
+        // --- 异构多规格炉膛空间智能排载算法 ---
+        function solveHeterogeneousPacking(furnacePoolInput, itemsInput, spacing) {
+            let availableFurnaceInstances = [];
+            furnacePoolInput.forEach(f => {
+                for(let i = 0; i < f.count; i++) {
+                    availableFurnaceInstances.push({
+                        typeName: f.name,
+                        instanceId: `${f.name} (炉次 #${i+1})`,
+                        w: f.width, h: f.height, d: f.depth, max_weight: f.maxWeight,
+                        packedItems: [],
+                        totalWeight: 0,
+                        emptySpaces: [{ x: 0, y: 0, z: 0, w: f.width, h: f.height, d: f.depth }]
+                    });
+                }
+            });
+
+            availableFurnaceInstances.sort((a,b) => (b.w * b.h * b.d) - (a.w * a.h * a.d));
+
+            let flattenedItems = [];
+            itemsInput.forEach(item => {
+                let w, h, d;
+                if (item.shape === 'cylinder') {
+                    w = item.dim1; d = item.dim1; h = item.dim3;
+                } else {
+                    w = item.dim1; d = item.dim2; h = item.dim3;
+                }
+                let singleWeight = item.count > 0 ? (item.weight / item.count) : 0;
+                for (let i = 0; i < item.count; i++) {
+                    flattenedItems.push({
+                        id: `${item.name}_${i}`, name: item.name, shape: item.shape,
+                        w_algo: w + spacing, h_algo: h + spacing, d_algo: d + spacing,
+                        w: w, h: h, d: d, weight: singleWeight, color: item.color
+                    });
+                }
+            });
+
+            flattenedItems.sort((a, b) => (b.w_algo * b.d_algo) - (a.w_algo * a.d_algo) || (b.h_algo - a.h_algo));
+
+            let completedFurnaces = [];
+            
+            for (let furnace of availableFurnaceInstances) {
+                if (flattenedItems.length === 0) break;
+
+                for (let i = 0; i < flattenedItems.length; i++) {
+                    let item = flattenedItems[i];
+                    
+                    if (furnace.totalWeight + item.weight > furnace.max_weight) continue;
+
+                    let spaceIdx = -1;
+                    for (let j = 0; j < furnace.emptySpaces.length; j++) {
+                        let s = furnace.emptySpaces[j];
+                        if (item.w_algo <= s.w && item.h_algo <= s.h && item.d_algo <= s.d) {
+                            spaceIdx = j;
+                            break;
+                        }
+                    }
+
+                    if (spaceIdx !== -1) {
+                        let s = furnace.emptySpaces[spaceIdx];
+                        item.x = s.x; item.y = s.y; item.z = s.z;
+                        
+                        furnace.packedItems.push({...item});
+                        furnace.totalWeight += item.weight;
+
+                        let currentSpaces = [...furnace.emptySpaces];
+                        currentSpaces.splice(spaceIdx, 1);
+
+                        const remainW = s.w - item.w_algo;
+                        const remainH = s.h - item.h_algo;
+                        const remainD = s.d - item.d_algo;
+
+                        if (remainW > 0) currentSpaces.push({ x: s.x + item.w_algo, y: s.y, z: s.z, w: remainW, h: s.h, d: s.d });
+                        if (remainD > 0) currentSpaces.push({ x: s.x, y: s.y, z: s.z + item.d_algo, w: item.w_algo, h: s.h, d: remainD });
+                        if (remainH > 0) currentSpaces.push({ x: s.x, y: s.y + item.h_algo, z: s.z, w: item.w_algo, h: remainH, d: item.d_algo });
+
+                        currentSpaces.sort((a, b) => (a.y - b.y) || (a.z - b.z) || (a.x - b.x));
+                        furnace.emptySpaces = currentSpaces;
+
+                        flattenedItems.splice(i, 1);
+                        i--;
+                    }
+                }
+
+                if (furnace.packedItems.length > 0) {
+                    completedFurnaces.push(furnace);
+                }
+            }
+
+            return {
+                completedFurnaces: completedFurnaces,
+                unpackedItems: flattenedItems
+            };
+        }
+
+        // 更新看板文字数据的公共提取函数
+        function updateStatsText() {
+            let htmlStats = `<strong>多规格混合装炉计算完成！</strong><br>已启用物理炉膛台数: <span style="color:#00ffff; font-size:15px; font-weight:bold;">${globalFurnacesResult.length}</span> 台<br><br>`;
+            
+            globalFurnacesResult.forEach(f => {
+                const totalVol = f.w * f.h * f.d;
+                let packedVol = f.packedItems.reduce((acc, curr) => acc + (curr.w * curr.h * curr.d), 0);
+                htmlStats += `
+                    <div style="background:#171722; padding:10px; border-radius:4px; margin-bottom:8px; border-left:4px solid #e67e22;">
+                        <strong style="color:#fff;">${f.instanceId}</strong> <span style="font-size:10px;color:#aaa;">(${Math.round(f.w)}x${Math.round(f.h)}x${Math.round(f.d)})</span><br>
+                        • 实际负载重: ${f.totalWeight.toFixed(1)} / ${f.max_weight} kg<br>
+                        • 空间利用率: ${((packedVol / totalVol) * 100).toFixed(2)} %<br>
+                    </div>
+                `;
+            });
+
+            if (globalUnpackedItems.length > 0) {
+                htmlStats += `<div style="background:rgba(179,36,36,0.2); padding:10px; border-radius:4px; border:1px solid var(--danger-color); color:#ff6666; margin-top:10px;">`;
+                htmlStats += `<strong>⚠️ 异常提示 (车间剩余炉膛总容量暴库)：</strong><br>以下共计 <strong style="color:#fff;">${globalUnpackedItems.length}</strong> 件工件无法塞入现有炉膛资产，请增加车间炉膛或拆分批次：<br>`;
+                
+                let summaryUnpacked = {};
+                globalUnpackedItems.forEach(u => { summaryUnpacked[u.name] = (summaryUnpacked[u.name] || 0) + 1; });
+                for(let k in summaryUnpacked) {
+                    htmlStats += `• ${k} × ${summaryUnpacked[k]} 件<br>`;
+                }
+                htmlStats += `</div>`;
+            }
+            return htmlStats;
+        }
+
+        // --- 动态尺寸 3D 静态渲染执行 ---
+        function executeAndRender() {
+            if (isAnimating) return; // 如果正在播放动画，拦截全新计算渲染
+
+            let furnacePoolInput = [];
+            document.querySelectorAll('.furnace-row').forEach(row => {
+                furnacePoolInput.push({
+                    name: row.querySelector('.f-name').value,
+                    count: parseInt(row.querySelector('.f-count').value || 1),
+                    width: parseFloat(row.querySelector('.f-width').value),
+                    height: parseFloat(row.querySelector('.f-height').value),
+                    depth: parseFloat(row.querySelector('.f-depth').value),
+                    maxWeight: parseFloat(row.querySelector('.f-weight').value)
+                });
+            });
+
+            let itemsInput = [];
+            document.querySelectorAll('.item-row:not(.furnace-row)').forEach(row => {
+                itemsInput.push({
+                    name: row.querySelector('.item-name').value,
+                    shape: row.querySelector('.item-shape').value,
+                    count: parseInt(row.querySelector('.item-count').value),
+                    dim1: parseFloat(row.querySelector('.item-dim1').value),
+                    dim2: parseFloat(row.querySelector('.item-dim2').value || 0),
+                    dim3: parseFloat(row.querySelector('.item-dim3').value),
+                    weight: parseFloat(row.querySelector('.item-weight').value), 
+                    color: row.querySelector('.item-color').value
+                });
+            });
+
+            const spacing = parseFloat(document.getElementById('global-spacing').value || 0);
+            globalSpacingValue = spacing;
+
+            const result = solveHeterogeneousPacking(furnacePoolInput, itemsInput, spacing);
+            globalFurnacesResult = result.completedFurnaces;
+            globalUnpackedItems = result.unpackedItems;
+
+            // 激活功能控制按钮
+            document.getElementById('btn-export-pdf').style.display = 'block';
+            document.getElementById('btn-animate').style.display = 'block';
+
+            // 清空 3D 舞台并直接画满
+            while(itemsGroup.children.length > 0) {
+                itemsGroup.remove(itemsGroup.children[0]);
+            }
+
+            const spaceGap = 120; 
+            let currentXOffset = 0;
+
+            globalFurnacesResult.forEach((furnace, fIdx) => {
+                const xPos = currentXOffset + (furnace.w / 2);
+                
+                const containerGeo = new THREE.BoxGeometry(furnace.w, furnace.h, furnace.d);
+                const containerEdges = new THREE.EdgesGeometry(containerGeo);
+                const containerLine = new THREE.LineSegments(containerEdges, new THREE.LineBasicMaterial({ color: 0xe67e22, linewidth: 2 }));
+                containerLine.position.set(xPos, (furnace.h / 2) - 120, 0);
+                itemsGroup.add(containerLine);
+
+                furnace.packedItems.forEach(item => {
+                    let geometry;
+                    if (item.shape === 'cylinder') {
+                        geometry = new THREE.CylinderGeometry(item.w/2, item.w/2, item.h, 32);
+                    } else {
+                        geometry = new THREE.BoxGeometry(item.w, item.h, item.d);
+                    }
+
+                    const material = new THREE.MeshStandardMaterial({
+                        color: new THREE.Color(item.color),
+                        transparent: true, opacity: 0.85, roughness: 0.3, metalness: 0.2
+                    });
+                    const mesh = new THREE.Mesh(geometry, material);
+                    const edges = new THREE.EdgesGeometry(geometry);
+                    mesh.add(new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x000000 })));
+
+                    const targetX = xPos + item.x - (furnace.w / 2) + (item.w / 2);
+                    const targetY = item.y + (item.h / 2) - 120;
+                    const targetZ = item.z - (furnace.d / 2) + (item.d / 2);
+
+                    mesh.position.set(targetX, targetY, targetZ);
+                    itemsGroup.add(mesh);
+                });
+
+                currentXOffset += furnace.w + spaceGap;
+            });
+
+            // 视角对齐
+            const totalWidthUsed = currentXOffset - spaceGap;
+            const sceneCenterX = totalWidthUsed / 2;
+            controls.target.set(sceneCenterX, 0, 0);
+            
+            let maxH = globalFurnacesResult.length > 0 ? Math.max(...globalFurnacesResult.map(f=>f.h)) : 300;
+            let maxD = globalFurnacesResult.length > 0 ? Math.max(...globalFurnacesResult.map(f=>f.d)) : 300;
+            camera.position.set(sceneCenterX, maxH * 2.2, maxD * 2.5);
+            controls.update();
+
+            document.getElementById('summary-stats').innerHTML = updateStatsText();
+        }
+
+        // --- 核心新增：逐一显示工件的异步装炉动画引擎 ---
+        async function playLoadingAnimation() {
+            if (isAnimating || !globalFurnacesResult || globalFurnacesResult.length === 0) return;
+            isAnimating = true;
+
+            const btnAnimate = document.getElementById('btn-animate');
+            const originalBtnText = btnAnimate.innerText;
+            btnAnimate.disabled = true;
+            btnAnimate.style.opacity = "0.5";
+
+            // 1. 清空 3D 舞台容器内的既有模型
+            while(itemsGroup.children.length > 0) {
+                itemsGroup.remove(itemsGroup.children[0]);
+            }
+
+            const spaceGap = 120; 
+            let currentXOffset = 0;
+            const itemDrawSteps = [];
+
+            // 2. 首先渲染全部可用的空炉膛钢丝外框底座（让工人看清目标空间边界）
+            globalFurnacesResult.forEach((furnace) => {
+                const xPos = currentXOffset + (furnace.w / 2);
+                
+                const containerGeo = new THREE.BoxGeometry(furnace.w, furnace.h, furnace.d);
+                const containerEdges = new THREE.EdgesGeometry(containerGeo);
+                const containerLine = new THREE.LineSegments(containerEdges, new THREE.LineBasicMaterial({ color: 0xe67e22, linewidth: 2 }));
+                containerLine.position.set(xPos, (furnace.h / 2) - 120, 0);
+                itemsGroup.add(containerLine);
+
+                // 预编译收集这台炉子内部所有的工件实例网格及其提示文本
+                furnace.packedItems.forEach((item, idx) => {
+                    let geometry;
+                    if (item.shape === 'cylinder') {
+                        geometry = new THREE.CylinderGeometry(item.w/2, item.w/2, item.h, 32);
+                    } else {
+                        geometry = new THREE.BoxGeometry(item.w, item.h, item.d);
+                    }
+
+                    const material = new THREE.MeshStandardMaterial({
+                        color: new THREE.Color(item.color),
+                        transparent: true, opacity: 0.85, roughness: 0.3, metalness: 0.2
+                    });
+                    const mesh = new THREE.Mesh(geometry, material);
+                    const edges = new THREE.EdgesGeometry(geometry);
+                    mesh.add(new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x000000 })));
+
+                    const targetX = xPos + item.x - (furnace.w / 2) + (item.w / 2);
+                    const targetY = item.y + (item.h / 2) - 120;
+                    const targetZ = item.z - (furnace.d / 2) + (item.d / 2);
+                    mesh.position.set(targetX, targetY, targetZ);
+                    
+                    itemDrawSteps.push({
+                        mesh: mesh,
+                        infoHtml: `👉 <b>操作指引：</b>请将 【${item.name}】 的第 ${idx + 1} 件工件，吊装推入 <b>${furnace.instanceId}</b><br><span style="color:#aaa; font-size:11px;">内部绝对参考零点定位坐标 (X, Y, Z): (${Math.round(item.x)}, ${Math.round(item.y)}, ${Math.round(item.z)})</span>`
+                    });
+                });
+
+                currentXOffset += furnace.w + spaceGap;
+            });
+
+            // 3. 异步迭代：每隔 500ms 依次“放入”一个工件，配合左侧控制区进行施工交底提示
+            const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+            const statsPanel = document.getElementById('summary-stats');
+            const baseStatsText = updateStatsText(); // 提取底层的静态汇总统计数据
+
+            for (let i = 0; i < itemDrawSteps.length; i++) {
+                const step = itemDrawSteps[i];
+                itemsGroup.add(step.mesh); // 让物体显形
+                
+                // 将当前实时的动画装载指引卡片，挂载到统计面板最顶部
+                statsPanel.innerHTML = `
+                    <div style="background:#4f46e5; padding:12px; border-radius:6px; margin-bottom:15px; border-left:4px solid #00ffff; box-shadow: 0 4px 12px rgba(0,0,0,0.4);">
+                        <strong style="color:#fff; display:block; margin-bottom:4px;">🚚 车间现场吊装动画引导 (${i + 1} / ${itemDrawSteps.length})</strong>
+                        ${step.infoHtml}
+                    </div>
+                ` + baseStatsText;
+
+                await sleep(500); // 步进间隔时间为 500毫秒（可根据车间大屏实际观看体验调整速度）
+            }
+
+            // 4. 动画播放圆满结束，复原按钮状态
+            statsPanel.innerHTML = `
+                <div style="background:#16a34a; padding:12px; border-radius:6px; margin-bottom:15px; color:#fff;">
+                    🎉 <b>装炉模拟动画播放完毕！</b> 共指引完成 ${itemDrawSteps.length} 件资产配位，工人可核对现场。
+                </div>
+            ` + baseStatsText;
+
+            btnAnimate.disabled = false;
+            btnAnimate.style.opacity = "1";
+            isAnimating = false;
+        }
+
+        // --- 多规格自适应 PDF 柔性三视图投影引擎 ---
+        function createRulerOverlay(width, height, scaleFactor, axisX, axisY) {
+
+            let html = '';
+
+            const stepMM = 50;
+            const stepPX = stepMM * scaleFactor;
+
+            for (let x = 0; x <= width; x += stepPX) {
+
+                html += `
+                <div class="pdf-grid-line-x"
+                    style="left:${x}px;height:${height}px;"></div>
+                `;
+
+                html += `
+                <div class="pdf-ruler-text"
+                    style="left:${x + 2}px;top:2px;">
+                    ${Math.round(x / scaleFactor)}
+                </div>
+                `;
+            }
+
+            for (let y = 0; y <= height; y += stepPX) {
+
+                html += `
+                <div class="pdf-grid-line-y"
+                    style="top:${y}px;width:${width}px;"></div>
+                `;
+            }
+
+            html += `
+            <div style="
+                position:absolute;
+                left:6px;
+                bottom:6px;
+                font-size:9px;
+                font-weight:bold;
+                color:#000;
+                background:rgba(255,255,255,0.8);
+                padding:2px 5px;
+                border-radius:4px;
+            ">
+                ${axisX} → / ${axisY} ↑ / 单位:mm
+            </div>
+            `;
+
+            return html;
+        }
+
+        function createViewPage({
+            pdfWrapper,
+            furnace,
+            title,
+            axisX,
+            axisY,
+            canvasWidth,
+            canvasHeight,
+            drawItems
+        }) {
+
+            const page = document.createElement('div');
+
+            page.className = 'pdf-page';
+
+            page.style.position = 'relative';
+            page.style.width = '1122px';
+            page.style.height = '760px';
+            page.style.background = '#fff';
+            page.style.padding = '30px';
+            page.style.boxSizing = 'border-box';
+
+            const scaleFactor = Math.min(
+                (canvasWidth - 120) / furnace.w,
+                (canvasHeight - 160) / furnace.d
+            );
+
+            const offsetX =
+                (canvasWidth - furnace.w * scaleFactor) / 2;
+
+            const offsetY =
+                (canvasHeight - furnace.d * scaleFactor) / 2;
+
+            let html = `
+
+            <div style="
+                display:flex;
+                justify-content:space-between;
+                align-items:center;
+                border-bottom:2px solid #000;
+                padding-bottom:10px;
+                margin-bottom:20px;
+            ">
+
+                <div>
+                    <div style="
+                        font-size:24px;
+                        font-weight:bold;
+                    ">
+                        ${title}
+                    </div>
+
+                    <div style="
+                        font-size:12px;
+                        margin-top:4px;
+                        color:#666;
+                    ">
+                        炉次：${furnace.instanceId}
+                    </div>
+                </div>
+
+                <div style="
+                    text-align:right;
+                    font-size:12px;
+                    line-height:1.8;
+                ">
+                    工件数：${furnace.packedItems.length}<br>
+                    总重量：${furnace.totalWeight.toFixed(1)} kg
+                </div>
+
+            </div>
+
+            <div style="
+                position:relative;
+                width:${canvasWidth}px;
+                height:${canvasHeight}px;
+                border:2px solid #000;
+                margin:0;
+                overflow:hidden;
+                background:#fff;
+            ">
+            `;
+
+            html += createRulerOverlay(
+                canvasWidth,
+                canvasHeight,
+                scaleFactor,
+                axisX,
+                axisY
+            );
+
+            furnace.packedItems.forEach((item, idx) => {
+
+                html += drawItems(
+                    item,
+                    idx,
+                    scaleFactor,
+                    offsetX,
+                    offsetY
+                );
+            });
+
+            html += `</div>`;
+
+            // ===== Legend =====
+
+            html += `
+            <div style="
+                margin-top:20px;
+                border:1px solid #ccc;
+                padding:12px;
+            ">
+
+                <div style="
+                    font-weight:bold;
+                    margin-bottom:10px;
+                ">
+                    图例 Legend
+                </div>
+
+                <div style="
+                    display:flex;
+                    flex-wrap:wrap;
+                    gap:14px;
+                ">
+            `;
+
+            const added = new Set();
+
+            furnace.packedItems.forEach(item => {
+
+                if (added.has(item.name)) return;
+
+                added.add(item.name);
+
+                html += `
+                <div style="
+                    display:flex;
+                    align-items:center;
+                    gap:8px;
+                    font-size:12px;
+                ">
+
+                    <div style="
+                        width:18px;
+                        height:18px;
+                        background:${item.color};
+                        border:1px solid #000;
+                    "></div>
+
+                    <div>${item.name}</div>
+
+                </div>
+                `;
+            });
+
+            html += `</div></div>`;
+
+            page.innerHTML = html;
+
+            pdfWrapper.appendChild(page);
+        };
+        
+        function createSummaryPage({
+
+            pdfWrapper,
+            furnaces
+
+        }) {
+
+            const page = document.createElement('div');
+
+            page.className = 'pdf-page';
+
+            page.style.position = 'relative';
+            page.style.width = '1122px';
+            page.style.height = '760px';
+            page.style.background = '#fff';
+            page.style.padding = '40px';
+            page.style.boxSizing = 'border-box';
+
+            let totalWeight = 0;
+            let totalCount = 0;
+
+            furnaces.forEach(f => {
+
+                totalWeight += f.totalWeight;
+                totalCount += f.packedItems.length;
+
+            });
+
+            let html = `
+
+            <div style="
+                display:flex;
+                justify-content:space-between;
+                align-items:center;
+                border-bottom:3px solid #000;
+                padding-bottom:16px;
+                margin-bottom:30px;
+            ">
+
+                <div>
+
+                    <div style="
+                        font-size:34px;
+                        font-weight:bold;
+                    ">
+                        热处理装炉作业总览
+                    </div>
+
+                    <div style="
+                        margin-top:8px;
+                        color:#666;
+                        font-size:14px;
+                    ">
+                        Industrial Furnace Loading Summary
+                    </div>
+
+                </div>
+
+                <div style="
+                    text-align:right;
+                    line-height:1.8;
+                    font-size:13px;
+                ">
+                    输出时间：${new Date().toLocaleString()}<br>
+                    炉次数量：${furnaces.length}
+                </div>
+
+            </div>
+
+            `;
+
+            // =====================
+            // 总体统计
+            // =====================
+
+            html += `
+
+            <div style="
+                display:grid;
+                grid-template-columns:repeat(4,1fr);
+                gap:20px;
+                margin-bottom:30px;
+            ">
+
+                <div class="summary-card">
+                    <div class="summary-title">总炉次</div>
+                    <div class="summary-value">
+                        ${furnaces.length}
+                    </div>
+                </div>
+
+                <div class="summary-card">
+                    <div class="summary-title">总工件数</div>
+                    <div class="summary-value">
+                        ${totalCount}
+                    </div>
+                </div>
+
+                <div class="summary-card">
+                    <div class="summary-title">总重量</div>
+                    <div class="summary-value">
+                        ${totalWeight.toFixed(1)} kg
+                    </div>
+                </div>
+
+                <div class="summary-card">
+                    <div class="summary-title">未装炉</div>
+                    <div class="summary-value">
+                        ${globalUnpackedItems.length}
+                    </div>
+                </div>
+
+            </div>
+
+            `;
+
+            // =====================
+            // 炉次总表
+            // =====================
+
+            html += `
+
+            <div style="
+                font-size:20px;
+                font-weight:bold;
+                margin-bottom:14px;
+            ">
+                炉次清单总览
+            </div>
+
+            <table style="
+                width:100%;
+                border-collapse:collapse;
+                font-size:13px;
+            ">
+
+                <thead>
+
+                    <tr style="
+                        background:#f1f5f9;
+                    ">
+
+                        <th style="border:1px solid #000;padding:10px;">
+                            炉号
+                        </th>
+
+                        <th style="border:1px solid #000;padding:10px;">
+                            工件数量
+                        </th>
+
+                        <th style="border:1px solid #000;padding:10px;">
+                            总重量
+                        </th>
+
+                        <th style="border:1px solid #000;padding:10px;">
+                            利用率
+                        </th>
+
+                        <th style="border:1px solid #000;padding:10px;">
+                            主要物料
+                        </th>
+
+                    </tr>
+
+                </thead>
+
+                <tbody>
+            `;
+
+            furnaces.forEach(furnace => {
+
+                const names =
+                    [...new Set(
+                        furnace.packedItems
+                            .map(i => i.name)
+                    )]
+                    .slice(0, 5)
+                    .join(' / ');
+
+                const utilization =
+                    (
+                        furnace.totalWeight
+                        / furnace.maxWeight
+                        * 100
+                    ).toFixed(1);
+
+                html += `
+
+                <tr>
+
+                    <td style="
+                        border:1px solid #000;
+                        padding:10px;
+                        text-align:center;
+                        font-weight:bold;
+                    ">
+                        ${furnace.instanceId}
+                    </td>
+
+                    <td style="
+                        border:1px solid #000;
+                        padding:10px;
+                        text-align:center;
+                    ">
+                        ${furnace.packedItems.length}
+                    </td>
+
+                    <td style="
+                        border:1px solid #000;
+                        padding:10px;
+                        text-align:center;
+                    ">
+                        ${furnace.totalWeight.toFixed(1)} kg
+                    </td>
+
+                    <td style="
+                        border:1px solid #000;
+                        padding:10px;
+                        text-align:center;
+                    ">
+                        ${utilization}%
+                    </td>
+
+                    <td style="
+                        border:1px solid #000;
+                        padding:10px;
+                    ">
+                        ${names}
+                    </td>
+
+                </tr>
+                `;
+            });
+
+            html += `</tbody></table>`;
+
+            // =====================
+            // 全局图例
+            // =====================
+
+            html += `
+
+            <div style="
+                margin-top:30px;
+            ">
+
+                <div style="
+                    font-size:18px;
+                    font-weight:bold;
+                    margin-bottom:14px;
+                ">
+                    全局物料图例
+                </div>
+
+                <div style="
+                    display:flex;
+                    flex-wrap:wrap;
+                    gap:16px;
+                ">
+            `;
+
+            const legendMap = new Map();
+
+            furnaces.forEach(f => {
+
+                f.packedItems.forEach(item => {
+
+                    if (!legendMap.has(item.name)) {
+
+                        legendMap.set(
+                            item.name,
+                            item.color
+                        );
+
+                    }
+
+                });
+
+            });
+
+            legendMap.forEach((color, name) => {
+
+                html += `
+
+                <div style="
+                    display:flex;
+                    align-items:center;
+                    gap:8px;
+                    border:1px solid #ccc;
+                    padding:8px 12px;
+                    border-radius:6px;
+                    background:#fafafa;
+                ">
+
+                    <div style="
+                        width:22px;
+                        height:22px;
+                        background:${color};
+                        border:1px solid #000;
+                    "></div>
+
+                    <div style="
+                        font-size:13px;
+                        font-weight:bold;
+                    ">
+                        ${name}
+                    </div>
+
+                </div>
+                `;
+            });
+
+            html += `</div></div>`;
+
+            page.innerHTML = html;
+
+            pdfWrapper.appendChild(page);
+        }
+
+        function exportToProfessionalPDF() {
+
+            if (!globalFurnacesResult) return;
+
+            const pdfWrapper =
+                document.getElementById('pdf-hidden-template');
+
+            pdfWrapper.innerHTML = '';
+
+            // ======================
+            // 总览页（第一页）
+            // ======================
+
+            createSummaryPage({
+
+                pdfWrapper,
+                furnaces: globalFurnacesResult
+
+            });
+
+            // =========================
+            // 页面参数
+            // =========================
+
+            const PAGE_W = 1000;
+            const PAGE_H = 500;
+
+            // =========================
+            // 遍历炉次
+            // =========================
+
+            globalFurnacesResult.forEach(furnace => {
+
+                // ==================================================
+                // X-Z 顶视图
+                // ==================================================
+
+                createViewPage({
+
+                    pdfWrapper,
+
+                    furnace,
+
+                    title: 'X-Z 顶视图',
+
+                    axisX: 'X',
+
+                    axisY: 'Z',
+
+                    canvasWidth: PAGE_W,
+
+                    canvasHeight: PAGE_H,
+
+                    drawItems: (
+                        item,
+                        idx,
+                        scaleFactor,
+                        offsetX,
+                        offsetY
+                    ) => {
+
+                        const x =
+                            offsetX + item.x * scaleFactor;
+
+                        const y =
+                            offsetY + item.z * scaleFactor;
+
+                        const w =
+                            item.w * scaleFactor;
+
+                        const h =
+                            item.d * scaleFactor;
+
+                        const fontSize =
+                            Math.max(
+                                10,
+                                Math.min(18, w / 6)
+                            );
+
+                        // 圆柱
+                        if (item.shape === 'cylinder') {
+
+                            return `
+                            <div style="
+                                position:absolute;
+                                left:${x}px;
+                                top:${y}px;
+                                width:${w}px;
+                                height:${h}px;
+                                background:${item.color};
+                                border-radius:50%;
+                                border:1px solid #000;
+                                display:flex;
+                                align-items:center;
+                                justify-content:center;
+                                font-size:${fontSize}px;
+                                font-weight:bold;
+                                color:#000;
+                                overflow:hidden;
+                                text-align:center;
+                            ">
+                                ${item.name}
+                            </div>
+                            `;
+                        }
+
+                        // 方块
+
+                        return `
+                        <div style="
+                            position:absolute;
+                            left:${x}px;
+                            top:${y}px;
+                            width:${w}px;
+                            height:${h}px;
+                            background:${item.color};
+                            border:1px solid #000;
+                            display:flex;
+                            align-items:center;
+                            justify-content:center;
+                            font-size:${fontSize}px;
+                            font-weight:bold;
+                            color:#000;
+                            overflow:hidden;
+                            text-align:center;
+                            padding:2px;
+                            box-sizing:border-box;
+                        ">
+                            ${item.name}
+                        </div>
+                        `;
+                    }
+
+                });
+
+                // ==================================================
+                // X-Y 正视图
+                // ==================================================
+
+                createViewPage({
+
+                    pdfWrapper,
+
+                    furnace,
+
+                    title: 'X-Y 正视图',
+
+                    axisX: 'X',
+
+                    axisY: 'Y',
+
+                    canvasWidth: PAGE_W,
+
+                    canvasHeight: PAGE_H,
+
+                    drawItems: (
+                        item,
+                        idx,
+                        scaleFactor,
+                        offsetX,
+                        offsetY
+                    ) => {
+
+                        const x =
+                            offsetX + item.x * scaleFactor;
+
+                        const y =
+                            PAGE_H
+                            - offsetY
+                            - item.y * scaleFactor
+                            - item.h * scaleFactor;
+
+                        const w =
+                            item.w * scaleFactor;
+
+                        const h =
+                            item.h * scaleFactor;
+
+                        const fontSize =
+                            Math.max(
+                                10,
+                                Math.min(18, w / 6)
+                            );
+
+                        return `
+                        <div style="
+                            position:absolute;
+                            left:${x}px;
+                            top:${y}px;
+                            width:${w}px;
+                            height:${h}px;
+                            background:${item.color};
+                            border:1px solid #000;
+                            display:flex;
+                            align-items:center;
+                            justify-content:center;
+                            font-size:${fontSize}px;
+                            font-weight:bold;
+                            color:#000;
+                            overflow:hidden;
+                            text-align:center;
+                            padding:2px;
+                            box-sizing:border-box;
+                        ">
+                            ${item.name}
+                        </div>
+                        `;
+                    }
+
+                });
+
+                // ==================================================
+                // Z-Y 侧视图
+                // ==================================================
+
+                createViewPage({
+
+                    pdfWrapper,
+
+                    furnace,
+
+                    title: 'Z-Y 侧视图',
+
+                    axisX: 'Z',
+
+                    axisY: 'Y',
+
+                    canvasWidth: PAGE_W,
+
+                    canvasHeight: PAGE_H,
+
+                    drawItems: (
+                        item,
+                        idx,
+                        scaleFactor,
+                        offsetX,
+                        offsetY
+                    ) => {
+
+                        const x =
+                            offsetX + item.z * scaleFactor;
+
+                        const y =
+                            PAGE_H
+                            - offsetY
+                            - item.y * scaleFactor
+                            - item.h * scaleFactor;
+
+                        const w =
+                            item.d * scaleFactor;
+
+                        const h =
+                            item.h * scaleFactor;
+
+                        const fontSize =
+                            Math.max(
+                                10,
+                                Math.min(18, w / 6)
+                            );
+
+                        return `
+                        <div style="
+                            position:absolute;
+                            left:${x}px;
+                            top:${y}px;
+                            width:${w}px;
+                            height:${h}px;
+                            background:${item.color};
+                            border:1px solid #000;
+                            display:flex;
+                            align-items:center;
+                            justify-content:center;
+                            font-size:${fontSize}px;
+                            font-weight:bold;
+                            color:#000;
+                            overflow:hidden;
+                            text-align:center;
+                            padding:2px;
+                            box-sizing:border-box;
+                        ">
+                            ${item.name}
+                        </div>
+                        `;
+                    }
+
+                });
+
+            });
+
+            // =========================
+            // PDF 导出
+            // =========================
+
+            pdfWrapper.style.display = 'block';
+
+            const opt = {
+
+                margin: 0,
+
+                filename:
+                    `工业热处理装炉工艺报告_${Date.now()}.pdf`,
+
+                image: {
+                    type: 'jpeg',
+                    quality: 1
+                },
+
+                html2canvas: {
+                    scale: 4,
+                    useCORS: true,
+                    logging: false
+                },
+
+                jsPDF: {
+                    unit: 'px',
+                    format: [1122, 793],
+                    orientation: 'landscape'
+                }
+            };
+
+            html2pdf()
+                .set(opt)
+                .from(pdfWrapper)
+                .save()
+                .then(() => {
+
+                    pdfWrapper.style.display = 'none';
+
+                });
+        }
+
+        // --- 核心按键绑定及系统初始化预载 ---
+        document.getElementById('btn-add-furnace').addEventListener('click', () => {
+            addFurnaceRow("自定义新增空闲炉膛", 400, 200, 200, 15000, 1);
+        });
+        document.getElementById('btn-add-item').addEventListener('click', () => {
+            addItemRow("新工件批次", "cuboid", 10, 50, 50, 60, 1500, "#e67e22");
+        });
+        document.getElementById('btn-calculate').addEventListener('click', executeAndRender);
+        document.getElementById('btn-animate').addEventListener('click', playLoadingAnimation); // 新增动画按键绑定
+        document.getElementById('btn-export-pdf').addEventListener('click', exportToProfessionalPDF);
+
+        initThree();
+        
+        // 初始化预载车间里的 2 种不同规格的炉膛资产
+        addFurnaceRow("1号大型台车炉", 589, 235, 239, 25000, 1);
+        addFurnaceRow("3号高精井式炉", 350, 200, 180, 12000, 2);
+
+        // 初始化预载待处理的生产工件明细
+        addItemRow("齿轮轴批次", "cylinder", 18, 60, 0, 140, 4500, "#2ecc71");
+        addItemRow("精密箱体批次", "cuboid", 15, 70, 60, 50, 6000, "#ff4d4d");
+        addItemRow("重型工模具夹具", "cuboid", 5, 120, 110, 100, 8000, "#4da6ff");
+
+        setTimeout(executeAndRender, 350);
+    </script>
+</body>
+</html>
