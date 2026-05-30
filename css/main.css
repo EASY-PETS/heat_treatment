@@ -25,9 +25,9 @@ body {
 
 /* 左侧配置面板 */
 #control-panel {
-    width: 460px;
-    min-width: 320px;
-    max-width: 50vw;
+    width: 520px;
+    min-width: 380px;
+    max-width: 55vw;
     background-color: var(--panel-bg);
     border-right: 1px solid var(--border-color);
     display: flex;
@@ -421,10 +421,150 @@ h3 {
     display: none;
 }
 
+/* ==================== 右侧面板（3D视图 + 装配信息） ==================== */
+#right-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
 #canvas-container {
     flex: 1;
     position: relative;
     background: #111116;
+    min-height: 0;
+}
+
+/* ==================== 炉膛装配信息面板 ==================== */
+#furnace-info-panel {
+    background: var(--panel-bg);
+    border-top: 2px solid #e67e22;
+    max-height: 260px;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+}
+
+#furnace-info-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    background: rgba(230, 126, 34, 0.08);
+    border-bottom: 1px solid var(--border-color);
+}
+
+#furnace-info-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #f39c12;
+}
+
+#furnace-info-hint {
+    font-size: 10px;
+    color: #666;
+}
+
+#furnace-info-body {
+    flex: 1;
+    padding: 10px 14px;
+    overflow-y: auto;
+}
+
+#furnace-info-body::-webkit-scrollbar { width: 5px; }
+#furnace-info-body::-webkit-scrollbar-track { background: transparent; }
+#furnace-info-body::-webkit-scrollbar-thumb { background: #3a3a4f; border-radius: 3px; }
+
+.furnace-info-empty {
+    text-align: center;
+    color: #666;
+    font-size: 12px;
+    padding: 20px;
+}
+
+.furnace-info-card {
+    margin-bottom: 8px;
+}
+
+.furnace-info-card .fi-name {
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 4px;
+}
+
+.furnace-info-card .fi-spec {
+    font-size: 11px;
+    color: #888;
+    margin-bottom: 10px;
+}
+
+.furnace-info-card .fi-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+
+.fi-stat-item {
+    background: rgba(0,0,0,0.25);
+    padding: 8px 10px;
+    border-radius: 4px;
+    text-align: center;
+}
+
+.fi-stat-item .fi-stat-value {
+    font-size: 18px;
+    font-weight: 700;
+    color: #f39c12;
+}
+
+.fi-stat-item .fi-stat-label {
+    font-size: 10px;
+    color: #888;
+    margin-top: 2px;
+}
+
+.furnace-info-card .fi-items-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10px;
+}
+
+.fi-items-table th {
+    background: rgba(0,0,0,0.3);
+    padding: 5px 6px;
+    text-align: left;
+    color: #999;
+    font-weight: 600;
+    border-bottom: 1px solid #333344;
+}
+
+.fi-items-table td {
+    padding: 4px 6px;
+    border-bottom: 1px solid #1a1a28;
+    color: #ccc;
+}
+
+.fi-items-table tr:hover td {
+    background: rgba(243, 156, 18, 0.05);
+}
+
+.fi-item-color-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 4px;
+    vertical-align: middle;
+}
+
+.fi-no-items {
+    text-align: center;
+    color: #555;
+    font-size: 11px;
+    padding: 8px;
 }
 
 /* ==================== 工业级 PDF 报表隐藏渲染底座 ==================== */

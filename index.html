@@ -5,6 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>热处理预装炉智能体 - 影在科技</title>
     <link rel="stylesheet" href="css/main.css">
+    <script>
+        // 登录验证
+        window.addEventListener('load', () => {
+            const token = sessionStorage.getItem('auth_token');
+            if (!token) {
+                window.location.href = 'login.html';
+            }
+        });
+    </script>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -136,6 +145,15 @@
                 <button class="btn btn-secondary btn-xs" id="btn-view-default" style="flex:1; padding:5px 2px; font-size:10px;">🔄3D</button>
             </div>
             <div id="furnace-toggles" style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px;"></div>
+            <!-- 炉膛展开/折叠按钮 + 选择器 -->
+            <div id="furnace-selector-area" style="margin-top: 8px; display: none;">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <button class="btn btn-secondary btn-xs" id="btn-toggle-furnace-view" style="flex: 0.8; padding: 5px 6px; font-size: 10px; white-space: nowrap;">🔓 展开</button>
+                    <label style="font-size: 11px; color: #9999aa; white-space: nowrap;">🔍 查看炉膛:</label>
+                    <select id="furnace-selector" style="flex: 1; padding: 5px 6px; background: #161620; border: 1px solid #333344; color: #fff; border-radius: 4px; font-size: 11px;">
+                    </select>
+                </div>
+            </div>
             <!-- 计算结果：默认折叠，点击展开 -->
             <div id="summary-wrapper" class="summary-collapsed">
                 <div id="summary-header" class="summary-header">
@@ -149,7 +167,19 @@
         </div>
     </div>
 
-    <div id="canvas-container"></div>
+    <!-- 右侧区域：3D视图 + 炉膛装配信息 -->
+    <div id="right-panel">
+        <div id="canvas-container"></div>
+        <div id="furnace-info-panel">
+            <div id="furnace-info-header">
+                <span id="furnace-info-title">🔍 炉膛装配信息</span>
+                <span id="furnace-info-hint">生成方案后查看当前炉膛详情</span>
+            </div>
+            <div id="furnace-info-body">
+                <div class="furnace-info-empty">暂无装炉方案，请先配置并点击「生成方案」</div>
+            </div>
+        </div>
+    </div>
     <div id="pdf-hidden-template"></div>
 
     <!-- Excel导入预览弹窗 -->

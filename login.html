@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>热处理预装炉智能体 - 登录</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .login-container {
+            background: #1a1a24;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+            padding: 40px;
+            width: 100%;
+            max-width: 400px;
+            border: 1px solid #333344;
+        }
+        
+        .login-header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+        
+        .login-header h1 {
+            font-size: 24px;
+            color: #fff;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+        
+        .login-header p {
+            font-size: 13px;
+            color: #9999aa;
+        }
+        
+        .login-logo {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            color: #9999aa;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+        
+        .form-group input {
+            width: 100%;
+            padding: 12px 14px;
+            background: #161620;
+            border: 1px solid #333344;
+            border-radius: 6px;
+            color: #fff;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+        
+        .form-group input:focus {
+            outline: none;
+            border-color: #0066cc;
+            box-shadow: 0 0 0 3px rgba(0, 102, 204, 0.1);
+        }
+        
+        .form-group input::placeholder {
+            color: #666677;
+        }
+        
+        .btn-login {
+            width: 100%;
+            padding: 12px 14px;
+            background: linear-gradient(135deg, #0066cc 0%, #0052a3 100%);
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 8px;
+        }
+        
+        .btn-login:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(0, 102, 204, 0.3);
+        }
+        
+        .btn-login:active {
+            transform: translateY(0);
+        }
+        
+        .btn-login:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .error-message {
+            display: none;
+            background: rgba(179, 36, 36, 0.2);
+            border: 1px solid #b32424;
+            border-radius: 6px;
+            padding: 12px 14px;
+            color: #ff6666;
+            font-size: 13px;
+            margin-bottom: 20px;
+        }
+        
+        .error-message.show {
+            display: block;
+        }
+        
+        .login-footer {
+            text-align: center;
+            margin-top: 24px;
+            font-size: 12px;
+            color: #666677;
+        }
+        
+        .loading-spinner {
+            display: none;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-right: 8px;
+        }
+        
+        .btn-login.loading {
+            position: relative;
+            color: transparent;
+        }
+        
+        .btn-login.loading .loading-spinner {
+            display: inline-block;
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-header">
+            <div class="login-logo">🏭</div>
+            <h1>热处理预装炉智能体</h1>
+            <p>工业热处理装炉工艺管理系统</p>
+        </div>
+        
+        <div id="error-message" class="error-message"></div>
+        
+        <form id="login-form">
+            <div class="form-group">
+                <label for="username">账户名</label>
+                <input 
+                    type="text" 
+                    id="username" 
+                    name="username" 
+                    placeholder="输入用户名" 
+                    autocomplete="username"
+                    required
+                >
+            </div>
+            
+            <div class="form-group">
+                <label for="password">密码</label>
+                <input 
+                    type="password" 
+                    id="password" 
+                    name="password" 
+                    placeholder="输入密码" 
+                    autocomplete="current-password"
+                    required
+                >
+            </div>
+            
+            <button type="submit" class="btn-login" id="login-btn">
+                <span class="loading-spinner"></span>
+                <span id="btn-text">登录进入</span>
+            </button>
+        </form>
+        
+        <div class="login-footer">
+            <p>© 2026 影在科技 - 热处理智能装炉系统</p>
+        </div>
+    </div>
+    
+    <script>
+        // 登录凭证（生产环境应使用安全的后端认证）
+        const VALID_USERNAME = 'admin';
+        const VALID_PASSWORD = 'Aut0de$k';
+        
+        const form = document.getElementById('login-form');
+        const usernameInput = document.getElementById('username');
+        const passwordInput = document.getElementById('password');
+        const loginBtn = document.getElementById('login-btn');
+        const errorMessage = document.getElementById('error-message');
+        const btnText = document.getElementById('btn-text');
+        
+        // 页面加载时检查是否已登录
+        window.addEventListener('load', () => {
+            const token = sessionStorage.getItem('auth_token');
+            if (token) {
+                window.location.href = 'index.html';
+            }
+        });
+        
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const username = usernameInput.value.trim();
+            const password = passwordInput.value;
+            
+            // 验证输入
+            if (!username || !password) {
+                showError('请输入账户名和密码');
+                return;
+            }
+            
+            // 禁用按钮并显示加载状态
+            loginBtn.disabled = true;
+            loginBtn.classList.add('loading');
+            errorMessage.classList.remove('show');
+            
+            // 模拟网络延迟
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // 验证凭证
+            if (username === VALID_USERNAME && password === VALID_PASSWORD) {
+                // 登录成功
+                const token = btoa(`${username}:${Date.now()}`);
+                sessionStorage.setItem('auth_token', token);
+                sessionStorage.setItem('username', username);
+                
+                // 重定向到主页
+                window.location.href = 'index.html';
+            } else {
+                // 登录失败
+                showError('账户名或密码错误，请检查后重试');
+                loginBtn.disabled = false;
+                loginBtn.classList.remove('loading');
+                passwordInput.value = '';
+                passwordInput.focus();
+            }
+        });
+        
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorMessage.classList.add('show');
+        }
+        
+        // Enter键登录
+        passwordInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                form.dispatchEvent(new Event('submit'));
+            }
+        });
+    </script>
+</body>
+</html>

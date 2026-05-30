@@ -30,6 +30,10 @@ class SceneManager {
         this.animationId = null;
         this._highlightPulseId = null;
         this._highlightPulseTime = 0;
+        // 单炉膛渲染模式
+        this._singleFurnaceMode = false;
+        this._currentFurnaceIndex = -1;
+        this._allFurnacesResult = null;
     }
 
     /**
@@ -201,12 +205,16 @@ class SceneManager {
     /**
      * 高亮指定批次名称的所有工件
      * 遍历所有炉膛组，找到匹配批次名的工件并将其发光/高亮
+     * 同时透明化其他非选中的工件
      * @param {string} batchName - 批次名称
      */
     highlightItemsByName(batchName) {
         this.clearHighlight();
         if (!batchName) return;
         
+        const highlightedMeshes = [];
+        
+        // 第一遍：找到所有匹配的工件并高亮
         this.furnaceGroups.forEach(group => {
             group.children.forEach(child => {
                 // 工件是 Mesh 且有 material.color（炉膛边框元素没有 material.color 或者在不同的 sub-group 中）
@@ -222,6 +230,23 @@ class SceneManager {
                     
                     // 给工件添加脉冲缩放效果标记
                     child.userData._highlighted = true;
+                    highlightedMeshes.push(child);
+                }
+            });
+        });
+        
+        // 第二遍：透明化其他非选中的工件
+        this.furnaceGroups.forEach(group => {
+            group.children.forEach(child => {
+                if (child.isMesh && child.material && child.material.color && child.userData && !child.userData._highlighted) {
+                    // 保存原始不透明度
+                    if (!child.userData._originalOpacityForDim) {
+                        child.userData._originalOpacityForDim = child.material.opacity || 0.85;
+                    }
+                    // 降低其他工件的透明度
+                    child.material.opacity = 0.15;
+                    child.material.needsUpdate = true;
+                    child.userData._dimmed = true;
                 }
             });
         });
@@ -238,20 +263,31 @@ class SceneManager {
         
         this.furnaceGroups.forEach(group => {
             group.children.forEach(child => {
-                if (child.isMesh && child.material && child.userData && child.userData._highlighted) {
-                    // 恢复原始材质属性
-                    if (child.userData._originalEmissive !== null && child.userData._originalEmissive !== undefined) {
-                        child.material.emissive.setHex(child.userData._originalEmissive);
-                    } else {
-                        child.material.emissive = new THREE.Color(0x000000);
+                if (child.isMesh && child.material && child.userData) {
+                    // 恢复高亮工件的原始材质属性
+                    if (child.userData._highlighted) {
+                        if (child.userData._originalEmissive !== null && child.userData._originalEmissive !== undefined) {
+                            child.material.emissive.setHex(child.userData._originalEmissive);
+                        } else {
+                            child.material.emissive = new THREE.Color(0x000000);
+                        }
+                        child.material.emissiveIntensity = child.userData._originalEmissiveIntensity || 0;
+                        child.material.opacity = child.userData._originalOpacity || 0.85;
+                        child.material.needsUpdate = true;
+                        child.userData._highlighted = false;
+                        delete child.userData._originalEmissive;
+                        delete child.userData._originalEmissiveIntensity;
+                        delete child.userData._originalOpacity;
                     }
-                    child.material.emissiveIntensity = child.userData._originalEmissiveIntensity || 0;
-                    child.material.opacity = child.userData._originalOpacity || 0.85;
-                    child.material.needsUpdate = true;
-                    child.userData._highlighted = false;
-                    delete child.userData._originalEmissive;
-                    delete child.userData._originalEmissiveIntensity;
-                    delete child.userData._originalOpacity;
+                    
+                    // 恢复被透明化的工件
+                    if (child.userData._dimmed) {
+                        const originalOpacity = child.userData._originalOpacityForDim || 0.85;
+                        child.material.opacity = originalOpacity;
+                        child.material.needsUpdate = true;
+                        child.userData._dimmed = false;
+                        delete child.userData._originalOpacityForDim;
+                    }
                 }
             });
         });
@@ -638,14 +674,121 @@ class SceneManager {
     }
 
     /**
+     * 创建单个炉膛的内部模型结构（不含边框）
+     */
+    _createSingleFurnaceContent(furnace, xPos) {
+        const group = new THREE.Group();
+
+        // 料框底部面板
+        const trayGeo = new THREE.PlaneGeometry(furnace.w, furnace.d);
+        const trayMat = new THREE.MeshBasicMaterial({
+            color: 0x2a3a5f,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.25,
+            depthWrite: false
+        });
+        const trayPlane = new THREE.Mesh(trayGeo, trayMat);
+        trayPlane.rotation.x = -Math.PI / 2;
+        trayPlane.position.set(xPos, SCENE_CONFIG.groundOffset + 1, 0);
+        group.add(trayPlane);
+        
+        // 料框底部高亮边框线
+        const trayEdgeGeo = new THREE.EdgesGeometry(trayGeo);
+        const trayEdge = new THREE.LineSegments(
+            trayEdgeGeo,
+            new THREE.LineBasicMaterial({ color: 0x8899cc, transparent: true, opacity: 0.7 })
+        );
+        trayEdge.rotation.x = -Math.PI / 2;
+        trayEdge.position.copy(trayPlane.position);
+        group.add(trayEdge);
+
+        // 料框底部十字辅助线
+        const crossLenX = furnace.w * 0.8;
+        const crossLenZ = furnace.d * 0.8;
+        const crossMat = new THREE.LineBasicMaterial({ color: 0x556688, transparent: true, opacity: 0.4, depthTest: true });
+        const crossGeoX = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(xPos - crossLenX / 2, SCENE_CONFIG.groundOffset + 1.5, 0),
+            new THREE.Vector3(xPos + crossLenX / 2, SCENE_CONFIG.groundOffset + 1.5, 0)
+        ]);
+        group.add(new THREE.Line(crossGeoX, crossMat));
+        const crossGeoZ = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(xPos, SCENE_CONFIG.groundOffset + 1.5, -crossLenZ / 2),
+            new THREE.Vector3(xPos, SCENE_CONFIG.groundOffset + 1.5, crossLenZ / 2)
+        ]);
+        group.add(new THREE.Line(crossGeoZ, crossMat));
+
+        // 炉膛四周立柱特征
+        const pillarRadius = 5;
+        const pillarHeight = furnace.h;
+        const pillarMat = new THREE.MeshStandardMaterial({
+            color: 0x556688,
+            roughness: 0.5,
+            metalness: 0.6,
+            transparent: true,
+            opacity: 0.5
+        });
+        const halfW = furnace.w / 2;
+        const halfD = furnace.d / 2;
+        const pillarY = SCENE_CONFIG.groundOffset + pillarHeight / 2;
+        const corners = [
+            [xPos - halfW, pillarY, -halfD],
+            [xPos + halfW, pillarY, -halfD],
+            [xPos - halfW, pillarY, halfD],
+            [xPos + halfW, pillarY, halfD]
+        ];
+        corners.forEach(([cx, cy, cz]) => {
+            const pillarGeo = new THREE.CylinderGeometry(pillarRadius, pillarRadius, pillarHeight, 8);
+            const pillar = new THREE.Mesh(pillarGeo, pillarMat);
+            pillar.position.set(cx, cy, cz);
+            group.add(pillar);
+        });
+
+        // 添加工件
+        furnace.packedItems.forEach(item => {
+            const mesh = this.createItemMesh(item);
+            const targetX = xPos + item.x - (furnace.w / 2) + (item.w / 2);
+            const targetY = item.y + (item.h / 2) + SCENE_CONFIG.groundOffset;
+            const targetZ = item.z - (furnace.d / 2) + (item.d / 2);
+            this.setItemPosition(mesh, targetX, targetY, targetZ);
+            group.add(mesh);
+        });
+
+        // 重心标记
+        if (furnace.packedItems.length > 0) {
+            const itemsWithWeight = furnace.packedItems.map(item => ({
+                x: item.x + item.w / 2,
+                y: item.y + item.h / 2,
+                z: item.z + item.d / 2,
+                weight: item.weight || 1
+            }));
+            const cog = calculateCenterOfGravity(itemsWithWeight);
+            const cogAbsX = xPos - (furnace.w / 2) + cog.x;
+            const cogAbsY = cog.y + SCENE_CONFIG.groundOffset;
+            const cogAbsZ = cog.z - (furnace.d / 2);
+            const cogMarker = this._createCOGMarker(cogAbsX, cogAbsY, cogAbsZ);
+            group.add(cogMarker);
+            const cogLabel = this._createTextSprite(
+                `⚖️ 重心 (${Math.round(cog.x)}, ${Math.round(cog.y)}, ${Math.round(cog.z)})`,
+                28, '#ff4444', 'rgba(0,0,0,0.7)'
+            );
+            cogLabel.position.set(cogAbsX, cogAbsY + COG_SPHERE_RADIUS * 3, cogAbsZ);
+            cogLabel.scale.set(180, 40, 1);
+            group.add(cogLabel);
+        }
+
+        return group;
+    }
+
+    /**
      * 渲染装炉结果 — 所有炉膛居中于场景原点
      */
     renderPackingResult(furnacesResult) {
         this.clearItems();
+        this._allFurnacesResult = furnacesResult;
 
         const spaceGap = ANIMATION_CONFIG.spaceGap;
 
-        // 计算总宽度，所有炉膛居中放置在原点附近
         let totalWidth = 0;
         furnacesResult.forEach(f => { totalWidth += f.w + spaceGap; });
         totalWidth -= spaceGap;
@@ -656,117 +799,14 @@ class SceneManager {
         furnacesResult.forEach((furnace, index) => {
             const xPos = currentXOffset + (furnace.w / 2);
 
-            // 为每个炉膛创建独立的 Group（含边框和工件）
             const furnaceGroup = new THREE.Group();
             furnaceGroup.name = `furnace-${index}-${furnace.instanceId}`;
 
-            // 添加炉膛边框（含半透明侧面、进炉方向箭头）
             const furnaceBox = this.createFurnaceBox(furnace.w, furnace.h, furnace.d, xPos, furnace.instanceId);
             furnaceGroup.add(furnaceBox);
 
-            // 料框底部面板 — 带网格纹理的半透明底面，展示摆料区域
-            const trayGeo = new THREE.PlaneGeometry(furnace.w, furnace.d);
-            const trayMat = new THREE.MeshBasicMaterial({
-                color: 0x2a3a5f,
-                side: THREE.DoubleSide,
-                transparent: true,
-                opacity: 0.25,
-                depthWrite: false
-            });
-            const trayPlane = new THREE.Mesh(trayGeo, trayMat);
-            trayPlane.rotation.x = -Math.PI / 2;
-            trayPlane.position.set(xPos, SCENE_CONFIG.groundOffset + 1, 0);
-            furnaceGroup.add(trayPlane);
-            
-            // 料框底部高亮边框线
-            const trayEdgeGeo = new THREE.EdgesGeometry(trayGeo);
-            const trayEdge = new THREE.LineSegments(
-                trayEdgeGeo,
-                new THREE.LineBasicMaterial({ color: 0x8899cc, transparent: true, opacity: 0.7 })
-            );
-            trayEdge.rotation.x = -Math.PI / 2;
-            trayEdge.position.copy(trayPlane.position);
-            furnaceGroup.add(trayEdge);
-
-            // 料框底部十字辅助线（摆料定位参考）
-            const crossLenX = furnace.w * 0.8;
-            const crossLenZ = furnace.d * 0.8;
-            const crossMat = new THREE.LineBasicMaterial({ color: 0x556688, transparent: true, opacity: 0.4, depthTest: true });
-            const crossGeoX = new THREE.BufferGeometry().setFromPoints([
-                new THREE.Vector3(xPos - crossLenX / 2, SCENE_CONFIG.groundOffset + 1.5, 0),
-                new THREE.Vector3(xPos + crossLenX / 2, SCENE_CONFIG.groundOffset + 1.5, 0)
-            ]);
-            furnaceGroup.add(new THREE.Line(crossGeoX, crossMat));
-            const crossGeoZ = new THREE.BufferGeometry().setFromPoints([
-                new THREE.Vector3(xPos, SCENE_CONFIG.groundOffset + 1.5, -crossLenZ / 2),
-                new THREE.Vector3(xPos, SCENE_CONFIG.groundOffset + 1.5, crossLenZ / 2)
-            ]);
-            furnaceGroup.add(new THREE.Line(crossGeoZ, crossMat));
-
-            // 炉膛四周立柱特征（4角标记）
-            const pillarRadius = 5;
-            const pillarHeight = furnace.h;
-            const pillarMat = new THREE.MeshStandardMaterial({
-                color: 0x556688,
-                roughness: 0.5,
-                metalness: 0.6,
-                transparent: true,
-                opacity: 0.5
-            });
-            const halfW = furnace.w / 2;
-            const halfD = furnace.d / 2;
-            const pillarY = SCENE_CONFIG.groundOffset + pillarHeight / 2;
-            const corners = [
-                [xPos - halfW, pillarY, -halfD],
-                [xPos + halfW, pillarY, -halfD],
-                [xPos - halfW, pillarY, halfD],
-                [xPos + halfW, pillarY, halfD]
-            ];
-            corners.forEach(([cx, cy, cz]) => {
-                const pillarGeo = new THREE.CylinderGeometry(pillarRadius, pillarRadius, pillarHeight, 8);
-                const pillar = new THREE.Mesh(pillarGeo, pillarMat);
-                pillar.position.set(cx, cy, cz);
-                furnaceGroup.add(pillar);
-            });
-
-            // 添加工件
-            furnace.packedItems.forEach(item => {
-                const mesh = this.createItemMesh(item);
-
-                const targetX = xPos + item.x - (furnace.w / 2) + (item.w / 2);
-                const targetY = item.y + (item.h / 2) + SCENE_CONFIG.groundOffset;
-                const targetZ = item.z - (furnace.d / 2) + (item.d / 2);
-
-                this.setItemPosition(mesh, targetX, targetY, targetZ);
-                furnaceGroup.add(mesh);
-            });
-
-            // 规则6: 计算并标注装炉重心位置
-            if (furnace.packedItems.length > 0) {
-                const itemsWithWeight = furnace.packedItems.map(item => ({
-                    x: item.x + item.w / 2,
-                    y: item.y + item.h / 2,
-                    z: item.z + item.d / 2,
-                    weight: item.weight || 1
-                }));
-                
-                const cog = calculateCenterOfGravity(itemsWithWeight);
-                
-                const cogAbsX = xPos - (furnace.w / 2) + cog.x;
-                const cogAbsY = cog.y + SCENE_CONFIG.groundOffset;
-                const cogAbsZ = cog.z - (furnace.d / 2);
-                
-                const cogMarker = this._createCOGMarker(cogAbsX, cogAbsY, cogAbsZ);
-                furnaceGroup.add(cogMarker);
-                
-                const cogLabel = this._createTextSprite(
-                    `⚖️ 重心 (${Math.round(cog.x)}, ${Math.round(cog.y)}, ${Math.round(cog.z)})`,
-                    28, '#ff4444', 'rgba(0,0,0,0.7)'
-                );
-                cogLabel.position.set(cogAbsX, cogAbsY + COG_SPHERE_RADIUS * 3, cogAbsZ);
-                cogLabel.scale.set(180, 40, 1);
-                furnaceGroup.add(cogLabel);
-            }
+            const content = this._createSingleFurnaceContent(furnace, xPos);
+            furnaceGroup.add(content);
 
             this.itemsGroup.add(furnaceGroup);
             this.furnaceGroups.push(furnaceGroup);
@@ -774,8 +814,13 @@ class SceneManager {
             currentXOffset += furnace.w + spaceGap;
         });
 
-        // 调整相机位置（所有炉膛已居中于原点）
+        // 初始显示所有炉膛
         this._adjustCamera(furnacesResult, totalWidth);
+
+        // 如果有多炉膛，默认显示单炉膛模式（第一个）
+        if (furnacesResult.length > 0) {
+            this.showSingleFurnace(0);
+        }
     }
 
     /**
@@ -800,13 +845,76 @@ class SceneManager {
         const maxD = Math.max(...visibleFurnaces.map(f => f.d));
         const furnaceCount = visibleFurnaces.length;
 
-        // 动态调整相机距离，确保场景居中
         const countFactor = Math.max(1, Math.sqrt(furnaceCount) * 0.7);
         const cameraDistance = Math.max(maxH, maxD, totalWidth * 0.5) * (2.0 + countFactor * 0.3);
 
-        // 目标点在原点（炉膛已居中）
         this.controls.target.set(0, maxH * 0.35, 0);
         this.camera.position.set(0, maxH * 2.0, cameraDistance);
+        this.controls.update();
+    }
+
+    /**
+     * 单炉膛模式：仅显示指定编号的炉膛，其余隐藏
+     * @param {number} index - 炉膛索引 (0-based)
+     */
+    showSingleFurnace(index) {
+        if (!this._allFurnacesResult || this._allFurnacesResult.length === 0) return;
+
+        // 隐藏所有炉膛
+        this.furnaceGroups.forEach((g, i) => {
+            g.visible = (i === index);
+        });
+
+        this._singleFurnaceMode = true;
+        this._currentFurnaceIndex = index;
+
+        // 重新调整相机聚焦到当前显示的炉膛
+        this._adjustCameraForSingleFurnace(index);
+    }
+
+    /**
+     * 显示所有炉膛（退出单炉膛模式）
+     */
+    showAllFurnaces() {
+        this.furnaceGroups.forEach(g => { g.visible = true; });
+        this._singleFurnaceMode = false;
+        this._currentFurnaceIndex = -1;
+
+        if (this._allFurnacesResult) {
+            let totalWidth = 0;
+            const spaceGap = ANIMATION_CONFIG.spaceGap;
+            this._allFurnacesResult.forEach(f => { totalWidth += f.w + spaceGap; });
+            totalWidth -= spaceGap;
+            this._adjustCamera(this._allFurnacesResult, totalWidth);
+        }
+    }
+
+    /**
+     * 获取当前单炉膛模式状态
+     */
+    getSingleFurnaceIndex() {
+        return this._currentFurnaceIndex;
+    }
+
+    /**
+     * 是否为单炉膛显示模式
+     */
+    isSingleFurnaceMode() {
+        return this._singleFurnaceMode;
+    }
+
+    /**
+     * 调整相机聚焦到单个炉膛（居中、自动缩放）
+     */
+    _adjustCameraForSingleFurnace(index) {
+        if (!this._allFurnacesResult || index >= this._allFurnacesResult.length) return;
+
+        const furnace = this._allFurnacesResult[index];
+        const maxDim = Math.max(furnace.w, furnace.h, furnace.d);
+        const cameraDistance = maxDim * 2.0;
+
+        this.controls.target.set(0, furnace.h * 0.35 + SCENE_CONFIG.groundOffset, 0);
+        this.camera.position.set(0, furnace.h * 2.0, cameraDistance);
         this.controls.update();
     }
 

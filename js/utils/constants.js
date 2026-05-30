@@ -62,9 +62,9 @@ export const DEFAULT_ITEMS = [
 
 // 3D场景配置
 export const SCENE_CONFIG = {
-    backgroundColor: 0x0e0e12,
-    gridColor: 0x444466,
-    gridCenterColor: 0x333355,
+    backgroundColor: 0xffffff,
+    gridColor: 0x000000,
+    gridCenterColor: 0x000000,
     gridSize: 4000,
     gridDivisions: 80,
     groundOffset: -120

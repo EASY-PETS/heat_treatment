@@ -28,58 +28,160 @@ let furnacePriorityOrder = [];
 let highlightedBatchName = null;
 
 /**
- * 生成炉膛显示/隐藏切换按钮
+ * 生成炉膛显示/隐藏切换按钮（旧版多炉膛切换）
  */
 function renderFurnaceToggles() {
     const container = document.getElementById('furnace-toggles');
     if (!container) return;
     container.innerHTML = '';
 
+    // 如果只有1个炉膛，隐藏旧的切换按钮区域（现在使用新的单炉膛选择器）
     if (!globalFurnacesResult || globalFurnacesResult.length <= 1) {
         container.style.display = 'none';
         return;
     }
-    container.style.display = 'flex';
+    // 新模式下隐藏旧的 toggle 区域，使用 furnace-selector-area 替代
+    container.style.display = 'none';
+}
 
-    // "全部显示" 按钮
-    const allBtn = document.createElement('button');
-    allBtn.textContent = '全部显示';
-    allBtn.className = 'btn btn-secondary';
-    allBtn.style.cssText = 'flex:1; min-width:80px; padding:6px 8px; font-size:11px; background:#4f46e5; color:#fff; border:1px solid #6366f1;';
-    allBtn.addEventListener('click', () => {
-        sceneManager.showAllFurnaces();
-        container.querySelectorAll('.furnace-toggle-btn').forEach((btn, i) => {
-            btn.style.background = '#e67e22';
-            btn.style.color = '#fff';
-            btn.style.border = '2px solid #f39c12';
-            btn.querySelector('span').textContent = '眼';
-        });
-    });
-    container.appendChild(allBtn);
+/**
+ * 生成单炉膛选择器下拉列表
+ */
+function renderFurnaceSelector() {
+    const area = document.getElementById('furnace-selector-area');
+    const select = document.getElementById('furnace-selector');
+    if (!area || !select) return;
+
+    if (!globalFurnacesResult || globalFurnacesResult.length <= 1) {
+        area.style.display = 'none';
+        return;
+    }
+
+    area.style.display = 'block';
+    select.innerHTML = '';
+
+    // 添加"全部显示"选项
+    const allOpt = document.createElement('option');
+    allOpt.value = '-1';
+    allOpt.textContent = '🗂️ 全部炉膛（并排显示）';
+    select.appendChild(allOpt);
 
     globalFurnacesResult.forEach((furnace, index) => {
-        const btn = document.createElement('button');
-        btn.className = 'btn btn-secondary furnace-toggle-btn';
-        btn.style.cssText = 'flex:1; min-width:80px; padding:6px 8px; font-size:11px; background:#e67e22; color:#fff; border:2px solid #f39c12; cursor:pointer; border-radius:4px; transition:all 0.2s;';
-        btn.innerHTML = '<span>眼</span> ' + furnace.instanceId;
-
-        btn.addEventListener('click', () => {
-            const visible = sceneManager.toggleFurnaceVisible(index);
-            if (visible) {
-                btn.style.background = '#e67e22';
-                btn.style.color = '#fff';
-                btn.style.border = '2px solid #f39c12';
-                btn.querySelector('span').textContent = '眼';
-            } else {
-                btn.style.background = '#374151';
-                btn.style.color = '#9ca3af';
-                btn.style.border = '2px solid #4b5563';
-                btn.querySelector('span').textContent = '禁';
-            }
-        });
-
-        container.appendChild(btn);
+        const opt = document.createElement('option');
+        opt.value = index;
+        const totalVol = calculateVolume(furnace.w, furnace.h, furnace.d);
+        let packedVol = furnace.packedItems.reduce((acc, curr) => acc + (curr.w * curr.h * curr.d), 0);
+        const utilPct = ((packedVol / totalVol) * 100).toFixed(1);
+        opt.textContent = `${furnace.instanceId} (${Math.round(furnace.w)}×${Math.round(furnace.h)}×${Math.round(furnace.d)}) · ${furnace.packedItems.length}件 · ${utilPct}%`;
+        select.appendChild(opt);
     });
+
+    // 当前如果是单炉膛模式，选中对应
+    if (sceneManager.isSingleFurnaceMode()) {
+        select.value = sceneManager.getSingleFurnaceIndex();
+    } else {
+        select.value = '-1';
+    }
+
+    // 绑定change事件（先移除旧的避免重复绑定）
+    select.removeEventListener('change', onFurnaceSelectorChange);
+    select.addEventListener('change', onFurnaceSelectorChange);
+}
+
+function onFurnaceSelectorChange(e) {
+    const idx = parseInt(e.target.value, 10);
+    if (idx === -1) {
+        sceneManager.showAllFurnaces();
+    } else {
+        sceneManager.showSingleFurnace(idx);
+    }
+    updateFurnaceInfoPanel();
+}
+
+/**
+ * 更新底部炉膛装配信息面板
+ */
+function updateFurnaceInfoPanel() {
+    const body = document.getElementById('furnace-info-body');
+    const hint = document.getElementById('furnace-info-hint');
+    if (!body) return;
+
+    if (!globalFurnacesResult || globalFurnacesResult.length === 0) {
+        body.innerHTML = '<div class="furnace-info-empty">暂无装炉方案，请先配置并点击「生成方案」</div>';
+        if (hint) hint.textContent = '生成方案后查看当前炉膛详情';
+        return;
+    }
+
+    // 确定当前显示的炉膛
+    let furnaceIndex = 0;
+    if (sceneManager.isSingleFurnaceMode()) {
+        furnaceIndex = sceneManager.getSingleFurnaceIndex();
+    }
+
+    if (furnaceIndex >= globalFurnacesResult.length) furnaceIndex = 0;
+    const furnace = globalFurnacesResult[furnaceIndex];
+
+    const totalVol = calculateVolume(furnace.w, furnace.h, furnace.d);
+    let packedVol = furnace.packedItems.reduce((acc, curr) => acc + (curr.w * curr.h * curr.d), 0);
+    const utilPct = ((packedVol / totalVol) * 100).toFixed(1);
+    const weightPct = ((furnace.totalWeight / furnace.maxWeight) * 100).toFixed(1);
+
+    if (hint) {
+        hint.textContent = `当前显示: 第 ${furnaceIndex + 1} / ${globalFurnacesResult.length} 台`;
+    }
+
+    // 按物料名称汇总
+    const itemSummary = {};
+    furnace.packedItems.forEach(item => {
+        const key = item.name;
+        if (!itemSummary[key]) {
+            itemSummary[key] = {
+                name: key,
+                color: item.color,
+                count: 0,
+                totalWeight: 0,
+                dimensions: item.shape === 'cylinder'
+                    ? `Φ${Math.round(item.w)}×H${Math.round(item.h)}`
+                    : `${Math.round(item.w)}×${Math.round(item.h)}×${Math.round(item.d)}`
+            };
+        }
+        itemSummary[key].count++;
+        itemSummary[key].totalWeight += (item.weight || 0);
+    });
+
+    let itemsRows = '';
+    const sortedKeys = Object.keys(itemSummary).sort();
+    sortedKeys.forEach(key => {
+        const s = itemSummary[key];
+        itemsRows += `<tr>
+            <td><span class="fi-item-color-dot" style="background:${s.color};box-shadow:0 0 4px ${s.color};"></span>${s.name}</td>
+            <td>${s.dimensions}</td>
+            <td>${s.count} 件</td>
+            <td>${s.totalWeight.toFixed(1)} kg</td>
+        </tr>`;
+    });
+
+    let html = '<div class="furnace-info-card">';
+    html += `<div class="fi-name">🔥 ${furnace.instanceId}</div>`;
+    html += `<div class="fi-spec">规格: ${Math.round(furnace.w)} × ${Math.round(furnace.h)} × ${Math.round(furnace.d)} mm · 容积: ${(totalVol / 1e6).toFixed(2)} m³</div>`;
+    html += '<div class="fi-stats">';
+    html += `<div class="fi-stat-item"><div class="fi-stat-value">${furnace.packedItems.length}</div><div class="fi-stat-label">装载工件总数/件</div></div>`;
+    html += `<div class="fi-stat-item"><div class="fi-stat-value">${utilPct}%</div><div class="fi-stat-label">空间利用率</div></div>`;
+    html += `<div class="fi-stat-item"><div class="fi-stat-value">${furnace.totalWeight.toFixed(1)}</div><div class="fi-stat-label">实际负载重 / kg</div></div>`;
+    html += `<div class="fi-stat-item"><div class="fi-stat-value">${weightPct}%</div><div class="fi-stat-label">重量负载率 (max ${furnace.maxWeight}kg)</div></div>`;
+    html += '</div>';
+
+    if (sortedKeys.length > 0) {
+        html += '<table class="fi-items-table">';
+        html += '<thead><tr><th>物料名称</th><th>规格尺寸</th><th>数量</th><th>总重</th></tr></thead>';
+        html += '<tbody>' + itemsRows + '</tbody>';
+        html += '</table>';
+    } else {
+        html += '<div class="fi-no-items">此炉膛暂无装载工件</div>';
+    }
+
+    html += '</div>';
+    body.innerHTML = html;
 }
 
 function updateStatsText() {
@@ -136,6 +238,8 @@ function executeAndRender() {
 
     sceneManager.renderPackingResult(globalFurnacesResult);
     renderFurnaceToggles();
+    renderFurnaceSelector();
+    updateFurnaceInfoPanel();
     document.getElementById('summary-stats').innerHTML = updateStatsText();
 
     dataStore.saveResults({
@@ -844,6 +948,28 @@ function init() {
     });
     document.getElementById('btn-view-default').addEventListener('click', () => {
         if (globalFurnacesResult) sceneManager.focusOnView('default', globalFurnacesResult);
+    });
+
+    // 炉膛展开/折叠按钮
+    document.getElementById('btn-toggle-furnace-view').addEventListener('click', () => {
+        const btn = document.getElementById('btn-toggle-furnace-view');
+        const selector = document.getElementById('furnace-selector');
+        
+        if (sceneManager.isSingleFurnaceMode()) {
+            // 当前是收缩模式，展开显示全部
+            sceneManager.showAllFurnaces();
+            btn.textContent = '🔒 折叠';
+            selector.value = '-1';
+            updateFurnaceInfoPanel();
+        } else {
+            // 当前是展开模式，折叠显示第一个
+            if (globalFurnacesResult && globalFurnacesResult.length > 0) {
+                sceneManager.showSingleFurnace(0);
+                btn.textContent = '🔓 展开';
+                selector.value = '0';
+                updateFurnaceInfoPanel();
+            }
+        }
     });
 
     // Excel 导入按钮事件
