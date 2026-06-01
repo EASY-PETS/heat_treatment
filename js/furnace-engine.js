@@ -17,6 +17,147 @@
 
 import { placementRules } from './state.js';
 
+// ==================== 工件摆放姿态优化 ====================
+
+/**
+ * 计算长方体工件的最佳摆放姿态
+ * 原则：最小面积面朝下，提高单层利用率
+ * 
+ * @param {Object} item - 工件对象 {w, h, d, shape}
+ * @returns {Object} {w, h, d, orientation} - 调整后的尺寸和姿态描述
+ */
+function calculateOptimalOrientation(item) {
+    // 仅对长方体工件生效，圆柱体保持原逻辑
+    if (item.shape === 'cylinder') {
+        return {
+            w: item.w,
+            h: item.h,
+            d: item.d,
+            orientation: '默认姿态（圆柱体）'
+        };
+    }
+
+    // 如果未启用旋转规则，保持原始姿态
+    if (!placementRules.rotate) {
+        return {
+            w: item.w,
+            h: item.h,
+            d: item.d,
+            orientation: '默认姿态（未启用旋转）'
+        };
+    }
+
+    // 计算三个可能的底面面积
+    const dims = [
+        { w: item.w, h: item.h, d: item.d, area: item.w * item.d, name: 'W×D朝下' },
+        { w: item.h, h: item.w, d: item.d, area: item.h * item.d, name: 'H×D朝下（X轴旋转90°）' },
+        { w: item.w, h: item.d, d: item.h, area: item.w * item.h, name: 'W×H朝下（Z轴旋转90°）' }
+    ];
+
+    // 选择最小面积的姿态
+    dims.sort((a, b) => a.area - b.area);
+    const optimal = dims[0];
+
+    return {
+        w: optimal.w,
+        h: optimal.h,
+        d: optimal.d,
+        orientation: optimal.name,
+        bottomArea: optimal.area
+    };
+}
+
+// ==================== 材质/工艺聚集规则 ====================
+
+/**
+ * 根据材质和工艺对工件进行分组排序
+ * 优先级：专炉限制 > 工艺一致 > 材质一致 > 空间利用率 > 重量利用率
+ * 
+ * @param {Array} items - 工件列表
+ * @returns {Array} 排序后的工件列表
+ */
+function sortItemsByClusteringRules(items) {
+    // 如果未启用聚集规则，使用默认排序
+    if (!placementRules.sameMaterial && !placementRules.sameProcess) {
+        return items.sort((a, b) => (b.w_algo * b.d_algo) - (a.w_algo * a.d_algo) || (b.h_algo - a.h_algo));
+    }
+
+    // 创建分组键
+    const getGroupKey = (item) => {
+        const parts = [];
+        if (placementRules.sameProcess && item.process) {
+            parts.push(`P:${item.process}`);
+        }
+        if (placementRules.sameMaterial && item.material) {
+            parts.push(`M:${item.material}`);
+        }
+        return parts.length > 0 ? parts.join('|') : 'DEFAULT';
+    };
+
+    // 按分组键分组
+    const groups = {};
+    items.forEach(item => {
+        const key = getGroupKey(item);
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(item);
+    });
+
+    // 对每组内部按体积排序
+    Object.values(groups).forEach(group => {
+        group.sort((a, b) => (b.w_algo * b.d_algo) - (a.w_algo * a.d_algo) || (b.h_algo - a.h_algo));
+    });
+
+    // 按组大小排序（大组优先），然后合并
+    const sortedGroups = Object.entries(groups).sort((a, b) => b[1].length - a[1].length);
+    return sortedGroups.flatMap(([key, group]) => group);
+}
+
+/**
+ * 计算聚集率统计
+ * 
+ * @param {Array} furnaces - 完成的炉膛列表
+ * @returns {Object} {materialClusterRate, processClusterRate}
+ */
+export function calculateClusteringStats(furnaces) {
+    if (!furnaces || furnaces.length === 0) {
+        return { materialClusterRate: 0, processClusterRate: 0 };
+    }
+
+    let totalMaterialScore = 0;
+    let totalProcessScore = 0;
+    let totalFurnaces = 0;
+
+    furnaces.forEach(furnace => {
+        if (furnace.packedItems.length === 0) return;
+        totalFurnaces++;
+
+        // 材质聚集率：同一炉中相同材质的比例
+        const materialGroups = {};
+        furnace.packedItems.forEach(item => {
+            const mat = item.material || 'UNKNOWN';
+            materialGroups[mat] = (materialGroups[mat] || 0) + 1;
+        });
+        const maxMaterialCount = Math.max(...Object.values(materialGroups));
+        const materialRate = maxMaterialCount / furnace.packedItems.length;
+        totalMaterialScore += materialRate;
+
+        // 工艺聚集率：同一炉中相同工艺的比例
+        const processGroups = {};
+        furnace.packedItems.forEach(item => {
+            const proc = item.process || 'UNKNOWN';
+            processGroups[proc] = (processGroups[proc] || 0) + 1;
+        });
+        const maxProcessCount = Math.max(...Object.values(processGroups));
+        const processRate = maxProcessCount / furnace.packedItems.length;
+        totalProcessScore += processRate;
+    });
+
+    return {
+        materialClusterRate: totalFurnaces > 0 ? (totalMaterialScore / totalFurnaces * 100).toFixed(1) : 0,
+        processClusterRate: totalFurnaces > 0 ? (totalProcessScore / totalFurnaces * 100).toFixed(1) : 0
+    };
+}
+
 // ==================== HETEROGENEOUS SPACE-FILLING PACKING ====================
 
 /**
@@ -56,15 +197,24 @@ export function solveHeterogeneousPacking(furnacePoolInput, itemsInput, spacing)
         else { w = item.dim1; d = item.dim2; h = item.dim3; }
         let singleWeight = item.count > 0 ? (item.weight / item.count) : 0;
         for (let i = 0; i < item.count; i++) {
+            // 计算最佳摆放姿态
+            const oriented = calculateOptimalOrientation({ w, h, d, shape: item.shape });
+            
             flattenedItems.push({
                 id: `${item.name}_${i}`, name: item.name, shape: item.shape,
-                w_algo: w + spacing, h_algo: h + spacing, d_algo: d + spacing,
-                w, h, d, weight: singleWeight, color: item.color
+                w_algo: oriented.w + spacing, h_algo: oriented.h + spacing, d_algo: oriented.d + spacing,
+                w: oriented.w, h: oriented.h, d: oriented.d, 
+                weight: singleWeight, color: item.color,
+                material: item.material || '',
+                process: item.process || '',
+                orientation: oriented.orientation,
+                bottomArea: oriented.bottomArea
             });
         }
     });
 
-    flattenedItems.sort((a, b) => (b.w_algo * b.d_algo) - (a.w_algo * a.d_algo) || (b.h_algo - a.h_algo));
+    // 应用聚集规则排序
+    flattenedItems = sortItemsByClusteringRules(flattenedItems);
 
     let completedFurnaces = [];
     for (let furnace of availableFurnaceInstances) {
@@ -320,9 +470,17 @@ export function solveShelfLayeredMultiFurnace(furnacePoolInput, itemsInput, spac
         else { w = item.dim1; d = item.dim2; h = item.dim3; }
         let singleWeight = item.count > 0 ? (item.weight / item.count) : 0;
         for (let i = 0; i < item.count; i++) {
+            // 计算最佳摆放姿态
+            const oriented = calculateOptimalOrientation({ w, h, d, shape: item.shape });
+            
             flattenedItems.push({
                 id: `${item.name}_${i}`, name: item.name, shape: item.shape,
-                w, h, d, weight: singleWeight, color: item.color
+                w: oriented.w, h: oriented.h, d: oriented.d, 
+                weight: singleWeight, color: item.color,
+                material: item.material || '',
+                process: item.process || '',
+                orientation: oriented.orientation,
+                bottomArea: oriented.bottomArea
             });
         }
     });
@@ -531,9 +689,17 @@ export function solveCenterOfGravityMultiFurnace(furnacePoolInput, itemsInput, s
         else { w = item.dim1; d = item.dim2; h = item.dim3; }
         let singleWeight = item.count > 0 ? (item.weight / item.count) : 0;
         for (let i = 0; i < item.count; i++) {
+            // 计算最佳摆放姿态
+            const oriented = calculateOptimalOrientation({ w, h, d, shape: item.shape });
+            
             flattenedItems.push({
                 id: `${item.name}_${i}`, name: item.name, shape: item.shape,
-                w, h, d, weight: singleWeight, color: item.color
+                w: oriented.w, h: oriented.h, d: oriented.d, 
+                weight: singleWeight, color: item.color,
+                material: item.material || '',
+                process: item.process || '',
+                orientation: oriented.orientation,
+                bottomArea: oriented.bottomArea
             });
         }
     });

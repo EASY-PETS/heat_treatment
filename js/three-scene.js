@@ -35,6 +35,7 @@ import {
     setCurrentFurnaceIndex, setSelectedFurnaceCardId,
     setOriginalOpacityStore, setOpacityResetTimerId
 } from './state.js';
+import { createBasketModel, createShelfModel } from './basket-model.js';
 
 /**
  * Color palette for unique material color generation.
@@ -200,9 +201,9 @@ export function disposeShelfMeshes() {
 /**
  * Create semi-transparent shelf models for visual reference.
  * Automatically detects unique Y-layers from packedItems and creates
- * thin box geometries at each shelf height.
+ * realistic grid-based shelf models.
  *
- * @param {Object} furnace - {w, h, d, packedItems}
+ * @param {Object} furnace - {w, h, d, packedItems, shelfThickness}
  * @param {number} baseY - Base Y offset (typically -120)
  */
 export function renderShelvesForFurnace(furnace, baseY) {
@@ -215,7 +216,8 @@ export function renderShelvesForFurnace(furnace, baseY) {
 
     if (shelfYs.size === 0) return;
 
-    const shelfThickness = 2;
+    // 搁板厚度：优先使用炉膛配置的厚度，否则默认20mm
+    const shelfThickness = furnace.shelfThickness || 20;
     const fw = furnace.w;
     const fd = furnace.d;
     const fh = furnace.h;
@@ -226,24 +228,12 @@ export function renderShelvesForFurnace(furnace, baseY) {
             return;
         }
 
-        const shelfGeo = new THREE.BoxGeometry(fw, shelfThickness, fd);
-        const shelfMat = new THREE.MeshStandardMaterial({
-            color: 0xb4b4c8,
-            transparent: true,
-            opacity: 0.5,
-            depthWrite: false,
-            roughness: 0.6,
-            metalness: 0.3,
-            side: THREE.DoubleSide
-        });
+        // 使用真实网格模型替代简单Box
+        const shelfModel = createShelfModel(fw, fd, shelfThickness, shelfY + baseY);
+        shelfModel.userData = { isShelfMesh: true, shelfY: shelfY };
 
-        const shelfMesh = new THREE.Mesh(shelfGeo, shelfMat);
-        const shelfCenterY = shelfY + shelfThickness / 2 + baseY;
-        shelfMesh.position.set(0, shelfCenterY, 0);
-        shelfMesh.userData = { isShelfMesh: true, shelfY: shelfY };
-
-        itemsGroup.add(shelfMesh);
-        shelfMeshes.push(shelfMesh);
+        itemsGroup.add(shelfModel);
+        shelfMeshes.push(shelfModel);
     });
 }
 
@@ -270,12 +260,9 @@ export function renderSingleFurnace(index, filterMaterialName) {
     const furnace = globalFurnacesResult[index];
     const baseY = -120;
 
-    // Furnace wireframe
-    const containerGeo = new THREE.BoxGeometry(furnace.w, furnace.h, furnace.d);
-    const containerEdges = new THREE.EdgesGeometry(containerGeo);
-    const containerLine = new THREE.LineSegments(containerEdges, new THREE.LineBasicMaterial({ color: 0xe67e22, linewidth: 2 }));
-    containerLine.position.set(0, furnace.h / 2 + baseY, 0);
-    itemsGroup.add(containerLine);
+    // 料框模型（替代原有的简单wireframe）
+    const basketModel = createBasketModel(furnace.w, furnace.h, furnace.d, baseY);
+    itemsGroup.add(basketModel);
 
     // Render each packed item
     furnace.packedItems.forEach(item => {
@@ -373,9 +360,10 @@ export function resetAllItemOpacityToOpaque() {
 
 /**
  * Highlight items matching a specific card in the 3D scene.
- * Selected items get emissive glow + full opacity.
- * Non-selected items become semi-transparent (opacity 0.2).
- * Pass null to reset all items to opaque.
+ * 增强版高亮效果：
+ * - 选中工件：高亮绿色 + 外发光 + 边框描边
+ * - 未选中工件：透明度降至20% + 颜色变灰
+ * - 相机自动定位聚焦目标工件
  *
  * @param {string|null} cardId - Material card ID to highlight, or null to reset
  */
@@ -392,36 +380,70 @@ export function highlightItemsInScene(cardId) {
     if (!card) return;
     const selectedName = card.querySelector('.m-name').textContent;
 
+    let selectedMesh = null;
+    const baseY = -120;
+
     itemsGroup.children.forEach(child => {
         if (!child.isMesh) return;
         if (!child.material || child.material.isLineBasicMaterial) return;
+        // 跳过料框和搁板
+        if (child.userData && (child.userData.isBasket || child.userData.isShelfMesh)) return;
 
         const isSelected = (child.userData && child.userData.itemName === selectedName);
 
         if (isSelected) {
+            // 高亮绿色 + 外发光效果
             if (child.material.emissive !== undefined) {
-                child.material.emissive = new THREE.Color(0x666666);
-                child.material.emissiveIntensity = 0.7;
+                child.material.emissive = new THREE.Color(0x00ff00);
+                child.material.emissiveIntensity = 1.2;
             }
             child.material.transparent = true;
             child.material.opacity = 1.0;
             child.material.needsUpdate = true;
+
+            // 边框描边（绿色加粗）
+            child.children.forEach(subChild => {
+                if (subChild.isLineSegments && subChild.material && subChild.material.isLineBasicMaterial) {
+                    subChild.material.color = new THREE.Color(0x00ff00);
+                    subChild.material.linewidth = 3;
+                }
+            });
+
+            selectedMesh = child;
         } else {
             const origTransparent = child.material.transparent;
             const origOpacity = child.material.opacity;
             originalOpacityStore.set(child, { transparent: origTransparent, opacity: origOpacity });
 
+            // 透明度降低至20% + 颜色变灰
             child.material.transparent = true;
             child.material.opacity = 0.2;
+            child.material.color = new THREE.Color(0x666666);
             child.material.needsUpdate = true;
 
             child.children.forEach(subChild => {
                 if (subChild.isLineSegments && subChild.material && subChild.material.isLineBasicMaterial) {
-                    subChild.material.color = new THREE.Color(0x222222);
+                    subChild.material.color = new THREE.Color(0x333333);
                 }
             });
         }
     });
+
+    // 相机自动定位聚焦目标工件
+    if (selectedMesh && camera && controls) {
+        const targetPos = selectedMesh.position.clone();
+        controls.target.copy(targetPos);
+        
+        // 计算合适的相机距离
+        const furnace = globalFurnacesResult[currentFurnaceIndex];
+        const distance = Math.max(furnace.w, furnace.h, furnace.d) * 1.5;
+        camera.position.set(
+            targetPos.x + distance * 0.6,
+            targetPos.y + distance * 0.8,
+            targetPos.z + distance * 1.0
+        );
+        controls.update();
+    }
 }
 
 // ==================== ANIMATION ====================

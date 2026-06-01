@@ -89,7 +89,7 @@ import {
     importJsonPlanToMaster
 } from './ui.js';
 
-import { executePacking } from './furnace-engine.js';
+import { executePacking, calculateClusteringStats } from './furnace-engine.js';
 
 import {
     showPdfSelectModal,
@@ -117,7 +117,8 @@ function executeAndRender() {
         const d = getFurnaceDataFromCard(card);
         furnacePoolInput.push({
             name: d.name, count: d.count, width: d.width, height: d.height,
-            depth: d.depth, maxWeight: d.maxWeight, actualSpacing: d.actualSpacing
+            depth: d.depth, maxWeight: d.maxWeight, actualSpacing: d.actualSpacing,
+            shelfThickness: d.shelfThickness
         });
     });
 
@@ -127,7 +128,8 @@ function executeAndRender() {
         itemsInput.push({
             name: d.name, shape: d.shape, count: d.count,
             dim1: d.dim1, dim2: d.dim2, dim3: d.dim3,
-            weight: d.totalWeight, color: d.color
+            weight: d.totalWeight, color: d.color,
+            material: d.material, process: d.process
         });
     });
 
@@ -135,8 +137,21 @@ function executeAndRender() {
     setGlobalSpacingValue(spacing);
 
     const result = executePacking(furnacePoolInput, itemsInput, spacing);
+    
+    // 将搁板厚度传递给炉膛结果
+    result.completedFurnaces.forEach((furnace, idx) => {
+        const matchingInput = furnacePoolInput.find(f => f.name === furnace.typeName);
+        if (matchingInput && matchingInput.shelfThickness) {
+            furnace.shelfThickness = matchingInput.shelfThickness;
+        }
+    });
+    
     setGlobalFurnacesResult(result.completedFurnaces);
     setGlobalUnpackedItems(result.unpackedItems);
+
+    // 计算聚集率统计
+    const clusterStats = calculateClusteringStats(result.completedFurnaces);
+    console.log(`[聚集率统计] 材质聚集率: ${clusterStats.materialClusterRate}% | 工艺聚集率: ${clusterStats.processClusterRate}%`);
 
     document.getElementById('btn-export-pdf').style.display = 'inline-block';
     document.getElementById('btn-animate').style.display = 'inline-block';
@@ -163,6 +178,21 @@ function executeAndRender() {
     }
     updateCenterStats(onCenterFurnaceClick);
     updateTopSummary();
+
+    // 显示聚集率统计（如果启用了聚集规则）
+    if (placementRules.sameMaterial || placementRules.sameProcess) {
+        const statsDiv = document.getElementById('csp-summary');
+        if (statsDiv) {
+            let statsText = statsDiv.textContent;
+            if (placementRules.sameMaterial) {
+                statsText += ` · 材质聚集率: ${clusterStats.materialClusterRate}%`;
+            }
+            if (placementRules.sameProcess) {
+                statsText += ` · 工艺聚集率: ${clusterStats.processClusterRate}%`;
+            }
+            statsDiv.textContent = statsText;
+        }
+    }
 
     // Capacity feedback
     if (globalUnpackedItems.length === 0) {

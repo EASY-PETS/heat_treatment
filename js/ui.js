@@ -65,12 +65,14 @@ export function getFurnaceDataFromCard(card) {
     const plannedHeats = parseInt(plannedText.replace(/[^0-9]/g, '')) || 0;
     const spacingText = card.getAttribute('data-spacing') || '';
     const actualSpacing = spacingText !== '' ? parseFloat(spacingText) : null;
+    const shelfThicknessText = card.getAttribute('data-shelf-thickness') || '';
+    const shelfThickness = shelfThicknessText !== '' ? parseFloat(shelfThicknessText) : null;
     return {
         fid, name,
         width: parseFloat(dims[0]) || 0,
         height: parseFloat(dims[1]) || 0,
         depth: parseFloat(dims[2]) || 0,
-        maxWeight, count, plannedHeats, actualSpacing
+        maxWeight, count, plannedHeats, actualSpacing, shelfThickness
     };
 }
 
@@ -187,6 +189,7 @@ export function showFurnaceDetail(cardId) {
     document.getElementById('fdp-placeholder').style.display = 'none';
     const body = document.getElementById('fdp-body');
     body.style.display = 'block';
+    const shelfThickness = card.getAttribute('data-shelf-thickness') || '';
     body.innerHTML = `
         <div class="fdp-row">
             <div class="fdp-field"><label>名称</label><input type="text" id="fdp-name" value="${d.name}"></div>
@@ -203,6 +206,9 @@ export function showFurnaceDetail(cardId) {
         <div class="fdp-row">
             <div class="fdp-field"><label>计划装载炉次</label><input type="number" id="fdp-planned" value="${d.plannedHeats}" min="0"></div>
             <div class="fdp-field"><label>实际安全间距 (mm) <span style="color:#666;font-size:9px;">留空=用默认</span></label><input type="number" id="fdp-spacing" value="${d.actualSpacing !== null && d.actualSpacing !== undefined ? d.actualSpacing : ''}" placeholder="默认${document.getElementById('global-spacing').value}mm"></div>
+        </div>
+        <div class="fdp-row">
+            <div class="fdp-field"><label>搁板厚度 (mm) <span style="color:#666;font-size:9px;">留空=默认20mm</span></label><input type="number" id="fdp-shelf-thickness" value="${shelfThickness}" placeholder="默认20mm" min="5" max="100"></div>
         </div>
         <button class="fdp-save-btn" id="fdp-save-btn">💾 保存炉膛参数</button>
     `;
@@ -231,6 +237,8 @@ export function saveFurnaceDetail(cardId) {
     const plannedHeats = parseInt(document.getElementById('fdp-planned').value) || 0;
     const spacingVal = document.getElementById('fdp-spacing').value;
     const actualSpacing = spacingVal !== '' ? parseFloat(spacingVal) : null;
+    const shelfThicknessVal = document.getElementById('fdp-shelf-thickness').value;
+    const shelfThickness = shelfThicknessVal !== '' ? parseFloat(shelfThicknessVal) : null;
 
     card.querySelector('.f-card-name').textContent = name;
     card.querySelector('.f-card-meta').innerHTML = `
@@ -243,6 +251,11 @@ export function saveFurnaceDetail(cardId) {
         card.setAttribute('data-spacing', actualSpacing);
     } else {
         card.removeAttribute('data-spacing');
+    }
+    if (shelfThickness !== null) {
+        card.setAttribute('data-shelf-thickness', shelfThickness);
+    } else {
+        card.removeAttribute('data-shelf-thickness');
     }
     document.getElementById('fdp-title').textContent = `📋 ${name}`;
     updateTopSummary();
