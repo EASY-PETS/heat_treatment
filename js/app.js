@@ -1,1139 +1,509 @@
-// ==================== 应用入口 ====================
+/**
+ * app.js - Application Startup and Module Coordination
+ *
+ * Purpose:
+ *   Initializes the system, binds event listeners, and coordinates all modules.
+ *   No business logic here — only wiring and orchestration.
+ *
+ * Dependencies:
+ *   - THREE.js (loaded via importmap)
+ *   - state.js
+ *   - three-scene.js
+ *   - ui.js
+ *   - furnace-engine.js
+ *   - pdf-export.js
+ *
+ * Future Extension:
+ *   - Route-based navigation (for future pages: furnace management, material management, etc.)
+ *   - Lazy-loading of modules
+ *   - Error boundary / global error handling
+ */
 
-import SceneManager from './three/scene.js';
-import { solveHeterogeneousPacking, calculateFurnaceUtilization, getPackingStats } from './packing/solver.js';
-import FormManager from './ui/forms.js';
-import dataStore from './data/store.js';
-import { DEFAULT_FURNACES, DEFAULT_ITEMS, DEFAULT_SPACING, ANIMATION_CONFIG, SCENE_CONFIG, PDF_CONFIG, VIEW_CONFIGS, BATCH_COLORS, ROUTING_STRATEGIES, VACUUM_LEVEL_OPTIONS, HEATING_PROGRAM_OPTIONS } from './utils/constants.js';
-import { formatNumber, sleep, generatePDFFilename, formatDateTime, calculateUtilization, calculateVolume } from './utils/helpers.js';
-import { parseExcelFile, generateExcelTemplate } from './utils/excel.js';
-import { exportPDF } from '../PDF/exportPDF.js';
+import {
+    // State readers
+    isAnimating, animPaused, animStopped,
+    globalFurnacesResult, globalUnpackedItems,
+    currentFurnaceIndex,
+    selectedFurnaceCardId,
+    masterRenderer,
+    itemsGroup,
+    usedColors,
+    // State setters
+    setAnimPaused, setAnimStopped,
+    setCurrentFurnaceIndex,
+    setFdpCollapsed, setMdpCollapsed,
+    setGlobalFurnacesResult, setGlobalUnpackedItems, setGlobalSpacingValue
+} from './state.js';
 
-// 全局变量
-let sceneManager = null;
-let formManager = null;
-let globalFurnacesResult = null;
-let globalUnpackedItems = [];
-let globalSpacingValue = DEFAULT_SPACING;
-let isAnimating = false;
-let animationPaused = false;
-let animationResolve = null;
-let animationActive = false;
-let animationItemSteps = [];
-let animationCurrentIndex = 0;
-let batchColorIndex = 0;
-// 规则8: 炉膛装载优先级排序状态
-let furnacePriorityOrder = [];
-// 当前高亮的物料批次名
-let highlightedBatchName = null;
+import {
+    // Three.js init
+    initThree,
+    initMasterThree,
+    // Rendering
+    renderSingleFurnace,
+    // Highlight / transparency
+    resetAllItemOpacityToOpaque,
+    getSelectedMaterialName,
+    // Animation
+    playLoadingAnimation,
+    // Master view
+    renderMasterPlan,
+    // Helper
+    findResultIndexByFid,
+    generateUniqueColor
+} from './three-scene.js';
+
+import {
+    // Furnace cards
+    createFurnaceCard,
+    selectFurnaceCard,
+    showFurnaceDetail,
+    deleteFurnaceCard,
+    sortFurnaceCards,
+    getFurnaceDataFromCard,
+    // Material cards
+    createMaterialCard,
+    selectMaterialCard,
+    showMaterialDetail,
+    deleteMaterialCard,
+    getMaterialDataFromCard,
+    // UI updates
+    updateTopSummary,
+    updateFurnaceNav,
+    updateLeftPanelActiveForIndex,
+    updateCenterStats,
+    showCapacityFeedback,
+    // Rules modal
+    openRulesModal,
+    saveRulesModal,
+    // Master view
+    initMasterView,
+    // Excel import
+    parseExcelData,
+    showImportPreview,
+    applyImportData,
+    // JSON import
+    openJsonImportModal,
+    parseJsonPlan,
+    renderJsonPreview,
+    importJsonPlanToMaster
+} from './ui.js';
+
+import { executePacking } from './furnace-engine.js';
+
+import {
+    showPdfSelectModal,
+    exportSingleFurnacePDF
+} from './pdf-export.js';
+
+// ==================== MAIN EXECUTE (Plan Generation) ====================
 
 /**
- * 生成炉膛显示/隐藏切换按钮（旧版多炉膛切换）
+ * Generate a loading plan and render to 3D scene + UI.
+ * Collects data from DOM cards, runs packing algorithm, updates state, renders scene.
+ *
+ * Future Extension:
+ *   - Progress bar for long-running algorithms
+ *   - Web Worker for AI optimization
  */
-function renderFurnaceToggles() {
-    const container = document.getElementById('furnace-toggles');
-    if (!container) return;
-    container.innerHTML = '';
-
-    // 如果只有1个炉膛，隐藏旧的切换按钮区域（现在使用新的单炉膛选择器）
-    if (!globalFurnacesResult || globalFurnacesResult.length <= 1) {
-        container.style.display = 'none';
-        return;
-    }
-    // 新模式下隐藏旧的 toggle 区域，使用 furnace-selector-area 替代
-    container.style.display = 'none';
-}
-
-/**
- * 生成单炉膛选择器下拉列表
- */
-function renderFurnaceSelector() {
-    const area = document.getElementById('furnace-selector-area');
-    const select = document.getElementById('furnace-selector');
-    if (!area || !select) return;
-
-    if (!globalFurnacesResult || globalFurnacesResult.length <= 1) {
-        area.style.display = 'none';
-        return;
-    }
-
-    area.style.display = 'block';
-    select.innerHTML = '';
-
-    // 添加"全部显示"选项
-    const allOpt = document.createElement('option');
-    allOpt.value = '-1';
-    allOpt.textContent = '🗂️ 全部炉膛（并排显示）';
-    select.appendChild(allOpt);
-
-    globalFurnacesResult.forEach((furnace, index) => {
-        const opt = document.createElement('option');
-        opt.value = index;
-        const totalVol = calculateVolume(furnace.w, furnace.h, furnace.d);
-        let packedVol = furnace.packedItems.reduce((acc, curr) => acc + (curr.w * curr.h * curr.d), 0);
-        const utilPct = ((packedVol / totalVol) * 100).toFixed(1);
-        opt.textContent = `${furnace.instanceId} (${Math.round(furnace.w)}×${Math.round(furnace.h)}×${Math.round(furnace.d)}) · ${furnace.packedItems.length}件 · ${utilPct}%`;
-        select.appendChild(opt);
-    });
-
-    // 当前如果是单炉膛模式，选中对应
-    if (sceneManager.isSingleFurnaceMode()) {
-        select.value = sceneManager.getSingleFurnaceIndex();
-    } else {
-        select.value = '-1';
-    }
-
-    // 绑定change事件（先移除旧的避免重复绑定）
-    select.removeEventListener('change', onFurnaceSelectorChange);
-    select.addEventListener('change', onFurnaceSelectorChange);
-}
-
-function onFurnaceSelectorChange(e) {
-    const idx = parseInt(e.target.value, 10);
-    if (idx === -1) {
-        sceneManager.showAllFurnaces();
-    } else {
-        sceneManager.showSingleFurnace(idx);
-    }
-    updateFurnaceInfoPanel();
-}
-
-/**
- * 更新底部炉膛装配信息面板
- */
-function updateFurnaceInfoPanel() {
-    const body = document.getElementById('furnace-info-body');
-    const hint = document.getElementById('furnace-info-hint');
-    if (!body) return;
-
-    if (!globalFurnacesResult || globalFurnacesResult.length === 0) {
-        body.innerHTML = '<div class="furnace-info-empty">暂无装炉方案，请先配置并点击「生成方案」</div>';
-        if (hint) hint.textContent = '生成方案后查看当前炉膛详情';
-        return;
-    }
-
-    // 确定当前显示的炉膛
-    let furnaceIndex = 0;
-    if (sceneManager.isSingleFurnaceMode()) {
-        furnaceIndex = sceneManager.getSingleFurnaceIndex();
-    }
-
-    if (furnaceIndex >= globalFurnacesResult.length) furnaceIndex = 0;
-    const furnace = globalFurnacesResult[furnaceIndex];
-
-    const totalVol = calculateVolume(furnace.w, furnace.h, furnace.d);
-    let packedVol = furnace.packedItems.reduce((acc, curr) => acc + (curr.w * curr.h * curr.d), 0);
-    const utilPct = ((packedVol / totalVol) * 100).toFixed(1);
-    const weightPct = ((furnace.totalWeight / furnace.maxWeight) * 100).toFixed(1);
-
-    if (hint) {
-        hint.textContent = `当前显示: 第 ${furnaceIndex + 1} / ${globalFurnacesResult.length} 台`;
-    }
-
-    // 按物料名称汇总
-    const itemSummary = {};
-    furnace.packedItems.forEach(item => {
-        const key = item.name;
-        if (!itemSummary[key]) {
-            itemSummary[key] = {
-                name: key,
-                color: item.color,
-                count: 0,
-                totalWeight: 0,
-                dimensions: item.shape === 'cylinder'
-                    ? `Φ${Math.round(item.w)}×H${Math.round(item.h)}`
-                    : `${Math.round(item.w)}×${Math.round(item.h)}×${Math.round(item.d)}`
-            };
-        }
-        itemSummary[key].count++;
-        itemSummary[key].totalWeight += (item.weight || 0);
-    });
-
-    let itemsRows = '';
-    const sortedKeys = Object.keys(itemSummary).sort();
-    sortedKeys.forEach(key => {
-        const s = itemSummary[key];
-        itemsRows += `<tr>
-            <td><span class="fi-item-color-dot" style="background:${s.color};box-shadow:0 0 4px ${s.color};"></span>${s.name}</td>
-            <td>${s.dimensions}</td>
-            <td>${s.count} 件</td>
-            <td>${s.totalWeight.toFixed(1)} kg</td>
-        </tr>`;
-    });
-
-    let html = '<div class="furnace-info-card">';
-    html += `<div class="fi-name">🔥 ${furnace.instanceId}</div>`;
-    html += `<div class="fi-spec">规格: ${Math.round(furnace.w)} × ${Math.round(furnace.h)} × ${Math.round(furnace.d)} mm · 容积: ${(totalVol / 1e6).toFixed(2)} m³</div>`;
-    html += '<div class="fi-stats">';
-    html += `<div class="fi-stat-item"><div class="fi-stat-value">${furnace.packedItems.length}</div><div class="fi-stat-label">装载工件总数/件</div></div>`;
-    html += `<div class="fi-stat-item"><div class="fi-stat-value">${utilPct}%</div><div class="fi-stat-label">空间利用率</div></div>`;
-    html += `<div class="fi-stat-item"><div class="fi-stat-value">${furnace.totalWeight.toFixed(1)}</div><div class="fi-stat-label">实际负载重 / kg</div></div>`;
-    html += `<div class="fi-stat-item"><div class="fi-stat-value">${weightPct}%</div><div class="fi-stat-label">重量负载率 (max ${furnace.maxWeight}kg)</div></div>`;
-    html += '</div>';
-
-    if (sortedKeys.length > 0) {
-        html += '<table class="fi-items-table">';
-        html += '<thead><tr><th>物料名称</th><th>规格尺寸</th><th>数量</th><th>总重</th></tr></thead>';
-        html += '<tbody>' + itemsRows + '</tbody>';
-        html += '</table>';
-    } else {
-        html += '<div class="fi-no-items">此炉膛暂无装载工件</div>';
-    }
-
-    html += '</div>';
-    body.innerHTML = html;
-}
-
-function updateStatsText() {
-    if (!globalFurnacesResult) return '';
-    
-    let htmlStats = '<strong>多规格混合装炉计算完成！</strong><br>已启用物理炉膛台数: <span style="color:#00ffff; font-size:15px; font-weight:bold;">' + globalFurnacesResult.length + '</span> 台<br><br>';
-    
-    globalFurnacesResult.forEach(f => {
-        const totalVol = calculateVolume(f.w, f.h, f.d);
-        let packedVol = f.packedItems.reduce((acc, curr) => acc + (curr.w * curr.h * curr.d), 0);
-        htmlStats += '<div style="background:#171722; padding:10px; border-radius:4px; margin-bottom:8px; border-left:4px solid #e67e22;">';
-        htmlStats += '<strong style="color:#fff;">' + f.instanceId + '</strong> <span style="font-size:10px;color:#aaa;">(' + Math.round(f.w) + 'x' + Math.round(f.h) + 'x' + Math.round(f.d) + ')</span><br>';
-        htmlStats += '实际负载重: ' + f.totalWeight.toFixed(1) + ' / ' + f.maxWeight + ' kg<br>';
-        htmlStats += '空间利用率: ' + ((packedVol / totalVol) * 100).toFixed(2) + ' %<br>';
-        htmlStats += '</div>';
-    });
-
-    if (globalUnpackedItems.length > 0) {
-        htmlStats += '<div style="background:rgba(179,36,36,0.2); padding:10px; border-radius:4px; border:1px solid #b32424; color:#ff6666; margin-top:10px;">';
-        htmlStats += '<strong>异常提示 (车间剩余炉膛总容量暴库)：</strong><br>以下共计 <strong style="color:#fff;">' + globalUnpackedItems.length + '</strong> 件工件无法塞入现有炉膛资产，请增加车间炉膛或拆分批次：<br>';
-        
-        let summaryUnpacked = {};
-        globalUnpackedItems.forEach(u => { summaryUnpacked[u.name] = (summaryUnpacked[u.name] || 0) + 1; });
-        for(let k in summaryUnpacked) {
-            htmlStats += k + ' x ' + summaryUnpacked[k] + ' 件<br>';
-        }
-        htmlStats += '</div>';
-    }
-    return htmlStats;
-}
-
-function getSelectedRoutingStrategy() {
-    const sel = document.getElementById('routing-strategy');
-    return sel ? sel.value : 'STRATEGY_A';
-}
-
 function executeAndRender() {
     if (isAnimating) return;
 
-    const furnacePoolInput = formManager.getFurnacesData();
-    const itemsInput = formManager.getItemsData();
-    const spacing = formManager.getSpacing();
-    const routingStrategy = getSelectedRoutingStrategy();
-    globalSpacingValue = spacing;
+    // Reset transparency before generating new plan
+    resetAllItemOpacityToOpaque();
 
-    const priorityOrder = getFurnacePriorityOrder();
-
-    const result = solveHeterogeneousPacking(furnacePoolInput, itemsInput, spacing, routingStrategy, priorityOrder);
-    globalFurnacesResult = result.completedFurnaces;
-    globalUnpackedItems = result.unpackedItems;
-
-    document.getElementById('btn-export-pdf').style.display = 'block';
-    document.getElementById('btn-animate').style.display = 'block';
-
-    sceneManager.renderPackingResult(globalFurnacesResult);
-    renderFurnaceToggles();
-    renderFurnaceSelector();
-    updateFurnaceInfoPanel();
-    document.getElementById('summary-stats').innerHTML = updateStatsText();
-
-    dataStore.saveResults({
-        furnaces: globalFurnacesResult,
-        unpacked: globalUnpackedItems
+    let furnacePoolInput = [];
+    document.querySelectorAll('.furnace-card').forEach(card => {
+        const d = getFurnaceDataFromCard(card);
+        furnacePoolInput.push({
+            name: d.name, count: d.count, width: d.width, height: d.height,
+            depth: d.depth, maxWeight: d.maxWeight, actualSpacing: d.actualSpacing
+        });
     });
 
-    // 刷新物料汇总速览（重新生成后可点击高亮）
-    refreshItemQuickSummary();
-}
-
-function getBatchColor(batchName) {
-    if (!batchName) return BATCH_COLORS[0];
-    let hash = 0;
-    for (let i = 0; i < batchName.length; i++) {
-        hash = ((hash << 5) - hash) + batchName.charCodeAt(i);
-        hash |= 0;
-    }
-    const idx = Math.abs(hash) % BATCH_COLORS.length;
-    return BATCH_COLORS[idx];
-}
-
-async function playLoadingAnimation() {
-    if (isAnimating || !globalFurnacesResult || globalFurnacesResult.length === 0) return;
-    isAnimating = true;
-    animationActive = true;
-    animationPaused = false;
-
-    const btnAnimate = document.getElementById('btn-animate');
-    btnAnimate.disabled = true;
-    btnAnimate.style.opacity = '0.5';
-
-    const btnPause = document.getElementById('btn-pause-animation');
-    const btnStop = document.getElementById('btn-stop-animation');
-    if (btnPause) { btnPause.style.display = 'inline-block'; btnPause.textContent = '暂停动画'; btnPause.style.background = '#f59e0b'; }
-    if (btnStop) btnStop.style.display = 'inline-block';
-
-    sceneManager.clearItems();
-    // 清除高亮状态
-    sceneManager.clearHighlight();
-    highlightedBatchName = null;
-    refreshItemQuickSummary();
-
-    const savedVisibility = [];
-    if (sceneManager.furnaceGroups.length > 0) {
-        sceneManager.furnaceGroups.forEach(g => savedVisibility.push(g.visible));
-    }
-
-    const spaceGap = ANIMATION_CONFIG.spaceGap;
-
-    // 计算总宽度，所有炉膛居中放置在原点附近
-    let totalWidth = 0;
-    globalFurnacesResult.forEach(f => { totalWidth += f.w + spaceGap; });
-    totalWidth -= spaceGap;
-    const startX = -totalWidth / 2;
-    let currentXOffset = startX;
-
-    animationItemSteps = [];
-    animationCurrentIndex = 0;
-
-    globalFurnacesResult.forEach((furnace, fi) => {
-        const xPos = currentXOffset + (furnace.w / 2);
-        const isVisible = savedVisibility.length > 0 ? (savedVisibility[fi] !== false) : true;
-        
-        const furnaceBox = sceneManager.createFurnaceBox(furnace.w, furnace.h, furnace.d, xPos, furnace.instanceId);
-        furnaceBox.visible = isVisible;
-        sceneManager.itemsGroup.add(furnaceBox);
-
-        if (isVisible) {
-            furnace.packedItems.forEach((item, idx) => {
-                const mesh = sceneManager.createItemMesh(item);
-                const targetX = xPos + item.x - (furnace.w / 2) + (item.w / 2);
-                const targetY = item.y + (item.h / 2) + SCENE_CONFIG.groundOffset;
-                const targetZ = item.z - (furnace.d / 2) + (item.d / 2);
-                mesh.position.set(targetX, targetY, targetZ);
-                mesh.visible = false;
-
-                animationItemSteps.push({
-                    mesh: mesh,
-                    infoHtml: '操作指引：请将 【' + item.name + '】 的第 ' + (idx + 1) + ' 件工件，吊装推入 <b>' + furnace.instanceId + '</b><br><span style="color:#aaa; font-size:11px;">内部绝对参考零点定位坐标 (X, Y, Z): (' + Math.round(item.x) + ', ' + Math.round(item.y) + ', ' + Math.round(item.z) + ')</span>',
-                    furnaceIndex: fi,
-                    itemIndex: idx
-                });
-                sceneManager.itemsGroup.add(mesh);
-            });
-        }
-
-        currentXOffset += furnace.w + spaceGap;
+    let itemsInput = [];
+    document.querySelectorAll('.material-card').forEach(card => {
+        const d = getMaterialDataFromCard(card);
+        itemsInput.push({
+            name: d.name, shape: d.shape, count: d.count,
+            dim1: d.dim1, dim2: d.dim2, dim3: d.dim3,
+            weight: d.totalWeight, color: d.color
+        });
     });
 
-    sceneManager.furnaceGroups = [];
-    sceneManager.itemsGroup.children.forEach(child => {
-        if (child.type === 'Group' && child.children.length > 0) {
-            sceneManager.furnaceGroups.push(child);
+    const spacing = parseFloat(document.getElementById('global-spacing').value || 0);
+    setGlobalSpacingValue(spacing);
+
+    const result = executePacking(furnacePoolInput, itemsInput, spacing);
+    setGlobalFurnacesResult(result.completedFurnaces);
+    setGlobalUnpackedItems(result.unpackedItems);
+
+    document.getElementById('btn-export-pdf').style.display = 'inline-block';
+    document.getElementById('btn-animate').style.display = 'inline-block';
+
+    // Start from currently selected furnace if possible
+    let startIndex = 0;
+    if (selectedFurnaceCardId) {
+        const card = document.getElementById(selectedFurnaceCardId);
+        if (card) {
+            const fid = parseInt(card.getAttribute('data-fid'));
+            const idx = findResultIndexByFid(fid);
+            if (idx >= 0) startIndex = idx;
         }
-    });
-
-    const statsPanel = document.getElementById('summary-stats');
-    const baseStatsText = updateStatsText();
-
-    for (let i = 0; i < animationItemSteps.length; i++) {
-        animationCurrentIndex = i;
-        const step = animationItemSteps[i];
-
-        if (animationPaused) {
-            await new Promise(resolve => { animationResolve = resolve; });
-        }
-
-        if (!animationActive) break;
-
-        step.mesh.visible = true;
-
-        statsPanel.innerHTML = '<div style="background:#4f46e5; padding:12px; border-radius:6px; margin-bottom:15px; border-left:4px solid #00ffff; box-shadow: 0 4px 12px rgba(0,0,0,0.4);"><strong style="color:#fff; display:block; margin-bottom:4px;">车间现场吊装动画引导 (' + (i + 1) + ' / ' + animationItemSteps.length + ')</strong>' + step.infoHtml + '</div>' + baseStatsText;
-
-        await sleep(ANIMATION_CONFIG.stepDelay);
     }
+    setCurrentFurnaceIndex(startIndex);
 
-    if (animationActive) {
-        statsPanel.innerHTML = '<div style="background:#16a34a; padding:12px; border-radius:6px; margin-bottom:15px; color:#fff;">装炉模拟动画播放完毕！ 共指引完成 ' + animationItemSteps.length + ' 件资产配位，工人可核对现场。</div>' + baseStatsText;
+    if (result.completedFurnaces.length > 0) {
+        renderSingleFurnace(startIndex);
+        updateFurnaceNav();
+        updateLeftPanelActiveForIndex(startIndex);
     } else {
-        statsPanel.innerHTML = '<div style="background:#f59e0b; padding:12px; border-radius:6px; margin-bottom:15px; color:#fff;">装炉动画已停止。</div>' + baseStatsText;
+        document.getElementById('empty-state').style.display = 'block';
+        document.getElementById('furnace-nav').style.display = 'none';
     }
+    updateCenterStats(onCenterFurnaceClick);
+    updateTopSummary();
 
-    btnAnimate.disabled = false;
-    btnAnimate.style.opacity = '1';
-    if (btnPause) btnPause.style.display = 'none';
-    if (btnStop) btnStop.style.display = 'none';
-    isAnimating = false;
-    animationActive = false;
-    animationPaused = false;
-    animationItemSteps = [];
-    animationCurrentIndex = 0;
-}
-
-function toggleAnimationPause() {
-    if (!isAnimating) return;
-    animationPaused = !animationPaused;
-
-    const btnPause = document.getElementById('btn-pause-animation');
-    if (animationPaused) {
-        if (btnPause) { btnPause.textContent = '继续动画'; btnPause.style.background = '#16a34a'; }
-    } else {
-        if (btnPause) { btnPause.textContent = '暂停动画'; btnPause.style.background = '#f59e0b'; }
-        if (animationResolve) {
-            animationResolve();
-            animationResolve = null;
-        }
-    }
-}
-
-function stopAnimation() {
-    if (!isAnimating) return;
-    animationActive = false;
-    animationPaused = false;
-    if (animationResolve) {
-        animationResolve();
-        animationResolve = null;
-    }
-}
-
-// ==================== 规则8: 炉膛装载优先级节点排序 ====================
-
-function refreshFurnacePriorityList() {
-    const container = document.getElementById('furnace-priority-list');
-    if (!container) return;
-
-    const furnaceData = formManager.getFurnacesData();
-    
-    if (furnaceData.length === 0) {
-        container.innerHTML = '<div style="color: #666; font-size: 11px; text-align: center; padding: 10px;">添加炉膛后自动生成排序节点</div>';
-        return;
-    }
-
-    const existingOrder = getFurnacePriorityOrder();
-    const currentNames = furnaceData.map(f => f.name);
-    const needsInit = existingOrder.length === 0 || 
-        !currentNames.every(n => existingOrder.includes(n)) ||
-        currentNames.length !== existingOrder.length;
-
-    if (needsInit) {
-        const seen = new Set(existingOrder);
-        const newOrder = [...existingOrder.filter(n => currentNames.includes(n))];
-        currentNames.forEach(n => {
-            if (!seen.has(n)) {
-                newOrder.push(n);
-            }
-        });
-        furnacePriorityOrder = newOrder;
-    } else {
-        furnacePriorityOrder = [...existingOrder];
-    }
-
-    // 计算每台炉膛的规格（用于排序节点缩进二次展开显示炉次明细）
-    const furnaceSpecMap = {};
-    furnaceData.forEach(f => {
-        if (!furnaceSpecMap[f.name]) {
-            furnaceSpecMap[f.name] = {
-                width: f.width,
-                height: f.height,
-                depth: f.depth,
-                count: 0,
-                instances: []
-            };
-        }
-        furnaceSpecMap[f.name].count++;
-    });
-
-    let html = '';
-    furnacePriorityOrder.forEach((fName, idx) => {
-        const fData = furnaceData.find(f => f.name === fName);
-        if (!fData) return;
-        
-        // 炉次总数（同一名称的 count）
-        const spec = furnaceSpecMap[fName];
-        const instanceCount = spec ? spec.count : 1;
-        
-        // 序号标记
-        const numberBadge = '<span class="priority-num-badge">' + (idx + 1) + '</span>';
-        
-        // 优先级文字标签
-        let priorityLabel = '';
-        if (idx === 0) {
-            priorityLabel = '<span class="priority-label high">第1优先级·最优满载</span>';
-        } else if (idx === 1) {
-            priorityLabel = '<span class="priority-label high">第2优先级·优先装满</span>';
-        } else if (idx >= furnacePriorityOrder.length - 2 && furnacePriorityOrder.length > 3) {
-            priorityLabel = '<span class="priority-label low">后续装满</span>';
-        }
-        
-        html += '<div class="furnace-priority-node" data-furnace-name="' + fName + '" draggable="true">';
-        html += '<span class="priority-drag-handle">≡</span>';
-        html += numberBadge;
-        html += '<div class="priority-info">';
-        html += '<span class="priority-name">' + fName + '</span>';
-        html += '<span class="priority-dims">' + Math.round(fData.width) + ' × ' + Math.round(fData.height) + ' × ' + Math.round(fData.depth) + ' · ' + instanceCount + '台</span>';
-        html += '</div>';
-        html += priorityLabel;
-        html += '</div>';
-    });
-
-    container.innerHTML = html;
-    bindPriorityDragEvents(container);
-}
-
-function getFurnacePriorityOrder() {
-    const container = document.getElementById('furnace-priority-list');
-    if (!container) return furnacePriorityOrder;
-
-    const nodes = container.querySelectorAll('.furnace-priority-node');
-    if (nodes.length === 0) return furnacePriorityOrder;
-
-    const order = [];
-    nodes.forEach(node => {
-        const name = node.getAttribute('data-furnace-name');
-        if (name) order.push(name);
-    });
-    furnacePriorityOrder = order;
-    return order;
-}
-
-function bindPriorityDragEvents(container) {
-    const nodes = container.querySelectorAll('.furnace-priority-node');
-    let dragSrcEl = null;
-    let dragSrcIndex = -1;
-
-    nodes.forEach(node => {
-        node.addEventListener('dragstart', function(e) {
-            dragSrcEl = this;
-            const allNodes = [...container.querySelectorAll('.furnace-priority-node')];
-            dragSrcIndex = allNodes.indexOf(this);
-            this.classList.add('dragging');
-            this.style.opacity = '0.5';
-            e.dataTransfer.effectAllowed = 'move';
-            e.dataTransfer.setData('text/plain', this.getAttribute('data-furnace-name'));
-        });
-
-        node.addEventListener('dragenter', function(e) {
-            e.preventDefault();
-            if (this !== dragSrcEl) {
-                this.classList.add('drag-over');
-            }
-        });
-
-        node.addEventListener('dragleave', function(e) {
-            this.classList.remove('drag-over');
-        });
-
-        node.addEventListener('dragover', function(e) {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'move';
-        });
-
-        node.addEventListener('drop', function(e) {
-            e.stopPropagation();
-            this.classList.remove('drag-over');
-
-            const allNodes = [...container.querySelectorAll('.furnace-priority-node')];
-            const dstIdx = allNodes.indexOf(this);
-
-            if (dragSrcEl !== this && dragSrcIndex >= 0 && dstIdx >= 0) {
-                if (dragSrcIndex < dstIdx) {
-                    container.insertBefore(dragSrcEl, this.nextSibling);
-                } else {
-                    container.insertBefore(dragSrcEl, this);
-                }
-
-                refreshPriorityNumbers();
-                getFurnacePriorityOrder();
-
-                dragSrcEl.style.transition = 'background 0.3s, box-shadow 0.3s';
-                dragSrcEl.style.background = '#2d2d1a';
-                dragSrcEl.style.boxShadow = '0 0 12px rgba(243,156,18,0.3)';
-                setTimeout(() => {
-                    dragSrcEl.style.background = '';
-                    dragSrcEl.style.boxShadow = '';
-                }, 400);
-            }
-
-            return false;
-        });
-
-        node.addEventListener('dragend', function(e) {
-            this.classList.remove('dragging');
-            this.style.opacity = '1';
-            nodes.forEach(n => n.classList.remove('drag-over'));
-        });
-    });
-}
-
-function refreshPriorityNumbers() {
-    const container = document.getElementById('furnace-priority-list');
-    if (!container) return;
-    const nodes = container.querySelectorAll('.furnace-priority-node');
-    const furnaceData = formManager.getFurnacesData();
-    
-    nodes.forEach((node, idx) => {
-        const numBadge = node.querySelector('.priority-num-badge');
-        if (numBadge) {
-            numBadge.textContent = idx + 1;
-        }
-        
-        const labelEl = node.querySelector('.priority-label');
-        if (labelEl) {
-            if (idx === 0) {
-                labelEl.textContent = '第1优先级·最优满载';
-                labelEl.className = 'priority-label high';
-            } else if (idx === 1) {
-                labelEl.textContent = '第2优先级·优先装满';
-                labelEl.className = 'priority-label high';
-            } else if (idx >= nodes.length - 2 && nodes.length > 3) {
-                labelEl.textContent = '后续装满';
-                labelEl.className = 'priority-label low';
-            } else {
-                labelEl.textContent = '';
-                labelEl.className = 'priority-label';
-            }
-        }
-    });
-}
-
-// ==================== 物料汇总速览 —— 点击高亮炉膛内对应物料 ====================
-
-/**
- * 刷新物料汇总速览（精简列表：名称、数量、颜色、是否包炉）
- */
-function refreshItemQuickSummary() {
-    const container = document.getElementById('item-quick-summary-container');
-    if (!container) return;
-
-    const itemsData = formManager.getItemsData();
-    
-    if (itemsData.length === 0) {
-        container.innerHTML = '<div class="quick-summary-empty">暂无物料，添加后可在此速览并点击高亮</div>';
-        return;
-    }
-
-    let html = '<div class="quick-summary-header"><span>⚡ 物料速览</span><span class="quick-summary-hint">点击高亮定位</span></div>';
-    html += '<div class="quick-summary-list">';
-    
-    itemsData.forEach((item, idx) => {
-        const colorHex = item.color || getBatchColor(item.name);
-        const isHighlighted = highlightedBatchName === item.name;
-        const highlightClass = isHighlighted ? ' qs-item-highlighted' : '';
-        
-        html += '<div class="quick-summary-item' + highlightClass + '" data-batch-name="' + item.name + '" data-item-idx="' + idx + '">';
-        // 颜色圆点
-        html += '<span class="qs-color-dot" style="background:' + colorHex + '; box-shadow: 0 0 6px ' + colorHex + ';"></span>';
-        // 名称
-        html += '<span class="qs-name" title="' + item.name + '">' + item.name + '</span>';
-        // 数量
-        html += '<span class="qs-count">×' + item.count + '</span>';
-        // 包炉标识
-        if (item.isDedicated) {
-            html += '<span class="qs-dedicated" title="专机包炉">🔒</span>';
-        }
-        html += '</div>';
-    });
-    
-    html += '</div>';
-    container.innerHTML = html;
-
-    // 绑定点击事件
-    container.querySelectorAll('.quick-summary-item').forEach(el => {
-        el.addEventListener('click', function() {
-            const batchName = this.getAttribute('data-batch-name');
-            highlightBatchInFurnace(batchName);
-        });
-    });
-}
-
-/**
- * 点击物料速览项，在3D炉膛中高亮定位该批次物料
- */
-function highlightBatchInFurnace(batchName) {
-    if (!sceneManager || !globalFurnacesResult) return;
-
-    // 切换高亮（再次点击同一批次取消高亮）
-    if (highlightedBatchName === batchName) {
-        sceneManager.clearHighlight();
-        highlightedBatchName = null;
-    } else {
-        sceneManager.highlightItemsByName(batchName);
-        highlightedBatchName = batchName;
-    }
-
-    // 刷新速览UI以更新高亮样式
-    refreshItemQuickSummary();
-
-    // 同时滚动到对应炉膛内第一个工件位置（可通过相机动画展示）
-    if (highlightedBatchName && globalFurnacesResult.length > 0) {
-        sceneManager.focusOnHighlightedItems(globalFurnacesResult);
-    }
-}
-
-// ==================== Excel 导入功能 ====================
-
-function handleExcelImport(file) {
-    if (!file) return;
-
-    const validTypes = ['.xlsx', '.xls', '.csv'];
-    const fileName = file.name.toLowerCase();
-    const isValid = validTypes.some(ext => fileName.endsWith(ext));
-    
-    if (!isValid) {
-        alert('请选择 Excel (.xlsx/.xls) 或 CSV 文件');
-        return;
-    }
-
-    parseExcelFile(file).then(result => {
-        if (result.errors && result.errors.length > 0) {
-            console.warn('Excel 解析警告:', result.errors);
-        }
-        showExcelPreviewModal(result);
-    }).catch(err => {
-        alert('Excel 导入失败: ' + err.message);
-        console.error(err);
-    });
-}
-
-function showExcelPreviewModal(parseResult) {
-    const overlay = document.getElementById('excel-preview-overlay');
-    const modal = document.getElementById('excel-preview-modal');
-    if (!overlay || !modal) return;
-
-    const { items, errors, sheetName, headers } = parseResult;
-
-    let itemsHtml = '';
-    items.forEach((item, idx) => {
-        const shapeLabel = item.shape === 'cylinder' ? '圆柱体' : '立方体';
-        const dimLabel = item.shape === 'cylinder' 
-            ? 'Φ' + item.dim1 + ' x H' + item.dim3
-            : item.dim1 + ' x ' + item.dim2 + ' x ' + item.dim3;
-        
-        itemsHtml += '<tr>';
-        itemsHtml += '<td style="padding:6px 8px; border-bottom:1px solid #333344; font-size:12px;">' + (idx + 1) + '</td>';
-        itemsHtml += '<td style="padding:6px 8px; border-bottom:1px solid #333344; font-size:12px; color:#fff;">' + item.name + '</td>';
-        itemsHtml += '<td style="padding:6px 8px; border-bottom:1px solid #333344; font-size:11px;">' + shapeLabel + '</td>';
-        itemsHtml += '<td style="padding:6px 8px; border-bottom:1px solid #333344; font-size:11px;">' + dimLabel + '</td>';
-        itemsHtml += '<td style="padding:6px 8px; border-bottom:1px solid #333344; font-size:11px;">' + item.count + ' 件</td>';
-        itemsHtml += '<td style="padding:6px 8px; border-bottom:1px solid #333344; font-size:11px;">' + item.weight.toFixed(1) + ' kg</td>';
-        itemsHtml += '<td style="padding:6px 8px; border-bottom:1px solid #333344; font-size:11px; color:#f39c12;">' + (item.materialType || '-') + '</td>';
-        itemsHtml += '<td style="padding:6px 8px; border-bottom:1px solid #333344; font-size:10px; color:#888;">' + (item.hardness || '-') + '</td>';
-        itemsHtml += '</tr>';
-    });
-
-    let errorsHtml = '';
-    if (errors && errors.length > 0) {
-        errorsHtml = '<div style="background: rgba(179,36,36,0.2); border: 1px solid #b32424; border-radius: 6px; padding: 10px; margin-bottom: 15px;">';
-        errorsHtml += '<strong style="color: #ff6666;">解析警告 (' + errors.length + '条):</strong>';
-        errorsHtml += '<ul style="margin: 5px 0 0 16px; padding: 0; font-size: 11px; color: #ff9999;">';
-        errors.forEach(e => { errorsHtml += '<li>' + e + '</li>'; });
-        errorsHtml += '</ul></div>';
-    }
-
-    modal.innerHTML = (
-        '<h3 style="margin: 0 0 4px 0; color: #fff; font-size: 18px;">Excel 数据预览</h3>' +
-        '<p style="font-size: 11px; color: #666; margin: 0 0 16px 0;">' +
-        '工作表: <span style="color: #2ecc71;">' + sheetName + '</span> . ' +
-        '识别到 <span style="color: #f39c12;">' + items.length + '</span> 个工件批次 . ' +
-        '表头列: ' + headers.join(', ') +
-        '</p>' +
-        errorsHtml +
-        '<div style="max-height: 350px; overflow-y: auto; margin-bottom: 16px; border: 1px solid #333344; border-radius: 6px;">' +
-        '<table style="width: 100%; border-collapse: collapse; color: #d1d1de;">' +
-        '<thead><tr style="background: #222230; position: sticky; top: 0;">' +
-        '<th style="padding:8px; font-size:11px; text-align:left; border-bottom:2px solid #0066cc;">#</th>' +
-        '<th style="padding:8px; font-size:11px; text-align:left; border-bottom:2px solid #0066cc;">名称</th>' +
-        '<th style="padding:8px; font-size:11px; text-align:left; border-bottom:2px solid #0066cc;">几何形态</th>' +
-        '<th style="padding:8px; font-size:11px; text-align:left; border-bottom:2px solid #0066cc;">尺寸</th>' +
-        '<th style="padding:8px; font-size:11px; text-align:left; border-bottom:2px solid #0066cc;">数量</th>' +
-        '<th style="padding:8px; font-size:11px; text-align:left; border-bottom:2px solid #0066cc;">总重</th>' +
-        '<th style="padding:8px; font-size:11px; text-align:left; border-bottom:2px solid #0066cc;">材质</th>' +
-        '<th style="padding:8px; font-size:11px; text-align:left; border-bottom:2px solid #0066cc;">硬度</th>' +
-        '</tr></thead>' +
-        '<tbody>' + itemsHtml + '</tbody>' +
-        '</table></div>' +
-        '<div style="display: flex; gap: 10px;">' +
-        '<button id="excel-preview-cancel" style="flex: 1; padding: 10px; background: #3e3e52; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold;">取消</button>' +
-        '<button id="excel-preview-append" style="flex: 1; padding: 10px; background: #217346; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold;">追加到待处理列表</button>' +
-        '<button id="excel-preview-replace" style="flex: 1; padding: 10px; background: #0066cc; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: bold;">替换当前列表</button>' +
-        '</div>' +
-        '<div style="margin-top: 10px;">' +
-        '<button id="excel-preview-download-template" style="width: 100%; padding: 8px; background: transparent; color: #666; border: 1px dashed #444; border-radius: 6px; cursor: pointer; font-size: 11px;">下载 Excel 导入模板</button>' +
-        '</div>'
-    );
-
-    overlay.style.display = 'flex';
-
-    document.getElementById('excel-preview-cancel').addEventListener('click', () => {
-        overlay.style.display = 'none';
-    });
-
-    document.getElementById('excel-preview-append').addEventListener('click', () => {
-        applyExcelItems(items, false);
-        overlay.style.display = 'none';
-    });
-
-    document.getElementById('excel-preview-replace').addEventListener('click', () => {
-        applyExcelItems(items, true);
-        overlay.style.display = 'none';
-    });
-
-    document.getElementById('excel-preview-download-template').addEventListener('click', () => {
-        const blob = generateExcelTemplate();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = '热处理工件导入模板.xlsx';
-        a.click();
-        URL.revokeObjectURL(url);
-    });
-
-    overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) {
-            overlay.style.display = 'none';
-        }
-    });
-}
-
-function applyExcelItems(items, replace) {
-    if (replace) {
-        const container = document.getElementById('items-container');
-        if (container) container.innerHTML = '';
-        formManager.itemCounter = 0;
-        batchColorIndex = 0;
-    }
-
-    items.forEach(item => {
-        batchColorIndex++;
-        const color = item.color || BATCH_COLORS[batchColorIndex % BATCH_COLORS.length];
-        formManager.addItemRow(
-            item.name,
-            item.shape,
-            item.count,
-            item.dim1,
-            item.dim2,
-            item.dim3,
-            item.weight,
-            color,
-            item.materialType || '',
-            !!item.isDedicated
+    // Capacity feedback
+    if (globalUnpackedItems.length === 0) {
+        const totalItemsIn = result.completedFurnaces.reduce((s, f) => s + f.packedItems.length, 0);
+        const totalFurnaces = result.completedFurnaces.length;
+        const totalFurnaceCapacity = document.querySelectorAll('.furnace-card').length;
+        showCapacityFeedback('success',
+            `✅ 炉膛容量充足：${totalItemsIn} 件物料已全部装炉，共使用 ${totalFurnaces} 个炉次（共计 ${totalFurnaceCapacity} 台炉膛可供使用）`
         );
-    });
+    } else {
+        let summary = {};
+        globalUnpackedItems.forEach(u => { summary[u.name] = (summary[u.name] || 0) + 1; });
+        const unpackedList = Object.entries(summary).map(([k, v]) => `${k}×${v}`).join('、');
+        const totalFurnaces = result.completedFurnaces.length;
+        const totalFurnaceCapacity = document.querySelectorAll('.furnace-card').length;
+        const reason = '因空间/承重限制，部分物料无法装入';
 
-    // 刷新物料速览
-    refreshItemQuickSummary();
+        let suggestion = '';
+        if (totalFurnaces < totalFurnaceCapacity) {
+            suggestion = '建议增加炉膛台数（当前仍有空闲炉膛未被使用，但算法判定剩余物料在当前炉膛内无法装入）。可尝试调整安全间距或搁板层高参数。';
+        } else if (totalFurnaces >= totalFurnaceCapacity) {
+            suggestion = '建议增加炉膛台数或更换更大尺寸的炉膛，也可尝试调整安全间距/搁板层高参数以提升利用率。';
+        }
+
+        showCapacityFeedback('danger',
+            `⚠️ 炉膛容量不足：${globalUnpackedItems.length} 件物料未能装炉（${unpackedList}）。`
+            + ` 共使用 ${totalFurnaces} 个炉次（${totalFurnaceCapacity} 台炉膛可供使用）。`
+            + ` ${reason}。${suggestion}`
+        );
+    }
 }
 
-// ==================== PDF 生成 ====================
+// ==================== FURNACE NAVIGATION ====================
 
-function exportToProfessionalPDF() {
-    if (!globalFurnacesResult) return;
-    showSOPVerificationModal((sopData) => {
-        exportPDF({
-            furnaces: globalFurnacesResult,
-            unpacked: globalUnpackedItems,
-            sopData: sopData
-        });
-    });
+/**
+ * Navigate furnace by direction (-1 for prev, +1 for next).
+ */
+function navigateFurnace(direction) {
+    if (!globalFurnacesResult || globalFurnacesResult.length === 0) return;
+
+    resetAllItemOpacityToOpaque();
+
+    const newIndex = (currentFurnaceIndex + direction + globalFurnacesResult.length) % globalFurnacesResult.length;
+    setCurrentFurnaceIndex(newIndex);
+
+    const filterName = getSelectedMaterialName();
+    renderSingleFurnace(newIndex, filterName);
+    updateFurnaceNav();
+    updateLeftPanelActiveForIndex(newIndex);
+    updateCenterStats(onCenterFurnaceClick);
 }
 
-function showSOPVerificationModal(callback) {
-    const oldOverlay = document.getElementById('sop-modal-overlay');
-    if (oldOverlay) oldOverlay.remove();
+/**
+ * Callback when a center stats furnace item is clicked.
+ */
+function onCenterFurnaceClick(idx) {
+    setCurrentFurnaceIndex(idx);
+    const filterName = getSelectedMaterialName();
+    renderSingleFurnace(idx, filterName);
+    updateFurnaceNav();
+    updateLeftPanelActiveForIndex(idx);
+    updateCenterStats(onCenterFurnaceClick);
+}
 
-    const overlay = document.createElement('div');
-    overlay.id = 'sop-modal-overlay';
-    overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 9999; display: flex; align-items: center; justify-content: center;';
+// ==================== MASTER VIEW ====================
 
-    let vacuumOptions = '';
-    VACUUM_LEVEL_OPTIONS.forEach(opt => {
-        vacuumOptions += '<option value="' + opt.value + '">' + opt.label + '</option>';
+function showMasterView() {
+    const masterView = document.getElementById('master-view');
+    masterView.classList.add('active');
+    document.getElementById('furnace-nav').style.display = 'none';
+    document.getElementById('canvas-container').style.display = 'none';
+    document.getElementById('center-stats-panel').style.display = 'none';
+    document.getElementById('anim-control-bar').classList.remove('visible');
+
+    if (!masterRenderer) {
+        setTimeout(() => {
+            initMasterThree();
+            initMasterView(renderMasterPlan);
+        }, 100);
+    } else {
+        initMasterView(renderMasterPlan);
+    }
+}
+
+function hideMasterView() {
+    document.getElementById('master-view').classList.remove('active');
+    document.getElementById('canvas-container').style.display = 'block';
+    if (globalFurnacesResult && globalFurnacesResult.length > 0) {
+        document.getElementById('furnace-nav').style.display = 'flex';
+        document.getElementById('center-stats-panel').style.display = 'block';
+    }
+}
+
+// ==================== INITIALIZATION ====================
+
+/**
+ * Initialize the entire application.
+ * Sets up Three.js, creates default cards, binds all event listeners.
+ */
+function init() {
+    // 1. Initialize Three.js scene
+    initThree();
+
+    // 2. Create default furnace cards
+    createFurnaceCard('标准炉膛 600×600×900', 900, 600, 600, 500, 1, 0, null);
+    createFurnaceCard('大型炉膛 900×900×1200', 1200, 900, 900, 1000, 1, 0, null);
+
+    updateTopSummary();
+
+    // 3. Bind event listeners
+
+    // === Top bar buttons ===
+    document.getElementById('btn-master').addEventListener('click', showMasterView);
+    document.getElementById('btn-master-back').addEventListener('click', hideMasterView);
+    document.getElementById('btn-master-import-json').addEventListener('click', openJsonImportModal);
+
+    document.getElementById('btn-rules').addEventListener('click', openRulesModal);
+    document.getElementById('btn-rules-cancel').addEventListener('click', () => {
+        document.getElementById('rules-modal-overlay').style.display = 'none';
     });
-    let heatingOptions = '';
-    HEATING_PROGRAM_OPTIONS.forEach(opt => {
-        heatingOptions += '<option value="' + opt.value + '">' + opt.label + '</option>';
+    document.getElementById('rules-modal-overlay').addEventListener('click', (e) => {
+        if (e.target === document.getElementById('rules-modal-overlay')) {
+            document.getElementById('rules-modal-overlay').style.display = 'none';
+        }
+    });
+    document.getElementById('btn-rules-save').addEventListener('click', saveRulesModal);
+
+    document.getElementById('btn-generate-plan').addEventListener('click', executeAndRender);
+    document.getElementById('btn-animate').addEventListener('click', playLoadingAnimation);
+    document.getElementById('btn-export-pdf').addEventListener('click', showPdfSelectModal);
+
+    // === Furnace panel ===
+    document.getElementById('btn-add-furnace').addEventListener('click', () => {
+        createFurnaceCard('自定义炉膛', 400, 200, 200, 15000, 1, 0, null);
+        updateTopSummary();
     });
 
-    overlay.innerHTML = (
-        '<div style="background: #1a1a24; border: 2px solid #0066cc; border-radius: 12px; padding: 28px 32px; width: 480px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.6); color: #d1d1de;">' +
-        '<h2 style="margin: 0 0 6px 0; color: #fff; font-size: 20px; border-bottom: 2px solid #0066cc; padding-bottom: 10px;">工艺校准单确认 (SOP Verification)</h2>' +
-        '<p style="font-size: 12px; color: #9999aa; margin: 0 0 20px 0;">在导出 PDF 报告前，请确认以下工艺参数（必填项）</p>' +
-        '<div style="margin-bottom: 18px;">' +
-        '<label style="display: block; font-size: 13px; color: #9999aa; margin-bottom: 6px;">目标真空度 (Vacuum Level) <span style="color: #ef4444;">*</span></label>' +
-        '<select id="sop-vacuum-level" style="width: 100%; padding: 10px 12px; background: #161620; border: 1px solid #333344; color: #fff; border-radius: 6px; font-size: 14px;">' + vacuumOptions + '</select>' +
-        '</div>' +
-        '<div style="margin-bottom: 18px;">' +
-        '<label style="display: block; font-size: 13px; color: #9999aa; margin-bottom: 6px;">执行加热曲线程序号 (Heating Program) <span style="color: #ef4444;">*</span></label>' +
-        '<select id="sop-heating-program" style="width: 100%; padding: 10px 12px; background: #161620; border: 1px solid #333344; color: #fff; border-radius: 6px; font-size: 14px;">' + heatingOptions + '</select>' +
-        '</div>' +
-        '<div style="margin-bottom: 18px;">' +
-        '<label style="display: block; font-size: 13px; color: #9999aa; margin-bottom: 6px;">操作员姓名 (Operator)</label>' +
-        '<input type="text" id="sop-operator" placeholder="输入主操手姓名" style="width: 100%; padding: 10px 12px; background: #161620; border: 1px solid #333344; color: #fff; border-radius: 6px; font-size: 14px; box-sizing: border-box;">' +
-        '</div>' +
-        '<div style="display: flex; gap: 12px; margin-top: 24px;">' +
-        '<button id="sop-btn-cancel" style="flex: 1; padding: 12px; background: #3e3e52; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold;">取 消</button>' +
-        '<button id="sop-btn-confirm" style="flex: 2; padding: 12px; background: #0066cc; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: bold;">确认校准并导出 PDF</button>' +
-        '</div></div>'
-    );
-
-    document.body.appendChild(overlay);
-
-    document.getElementById('sop-btn-cancel').addEventListener('click', () => {
-        overlay.remove();
+    // Sort buttons
+    document.querySelectorAll('.sort-btn').forEach(btn => {
+        btn.addEventListener('click', () => sortFurnaceCards(btn.getAttribute('data-field')));
     });
 
-    document.getElementById('sop-btn-confirm').addEventListener('click', () => {
-        const vacuumLevel = document.getElementById('sop-vacuum-level').value;
-        const heatingProgram = document.getElementById('sop-heating-program').value;
-        const operator = document.getElementById('sop-operator').value || '未填写';
+    // Detail panel toggle
+    document.getElementById('fdp-toggle-btn').addEventListener('click', () => {
+        const collapsed = !document.getElementById('furnace-detail-panel').classList.contains('collapsed');
+        setFdpCollapsed(collapsed);
+        document.getElementById('furnace-detail-panel').classList.toggle('collapsed', collapsed);
+        document.getElementById('fdp-toggle-icon').textContent = collapsed ? '▼' : '▲';
+    });
 
-        if (!vacuumLevel || !heatingProgram) {
-            alert('请填写必填项：目标真空度和加热曲线程序号');
+    document.getElementById('mdp-toggle-btn').addEventListener('click', () => {
+        const collapsed = !document.getElementById('material-detail-panel').classList.contains('collapsed');
+        setMdpCollapsed(collapsed);
+        document.getElementById('material-detail-panel').classList.toggle('collapsed', collapsed);
+        document.getElementById('mdp-toggle-icon').textContent = collapsed ? '▼' : '▲';
+    });
+
+    // === Delete handlers ===
+    document.getElementById('furnace-cards-container').addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-action="delete-furnace"]');
+        if (!btn) return;
+        e.stopPropagation();
+        deleteFurnaceCard(parseInt(btn.getAttribute('data-fid')));
+    });
+
+    document.getElementById('material-cards-container').addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-action="delete-material"]');
+        if (!btn) return;
+        e.stopPropagation();
+        deleteMaterialCard(parseInt(btn.getAttribute('data-mid')));
+    });
+
+    // === Double-click edit ===
+    document.getElementById('furnace-cards-container').addEventListener('dblclick', (e) => {
+        const card = e.target.closest('.furnace-card');
+        if (!card) return;
+        selectFurnaceCard(card.id);
+        showFurnaceDetail(card.id);
+    });
+
+    document.getElementById('material-cards-container').addEventListener('dblclick', (e) => {
+        const card = e.target.closest('.material-card');
+        if (!card) return;
+        selectMaterialCard(card.id);
+        showMaterialDetail(card.id);
+    });
+
+    // === Material panel ===
+    document.getElementById('btn-add-item').addEventListener('click', () => {
+        const color = generateUniqueColor(usedColors);
+        createMaterialCard('新工件批次', 'cuboid', 10, 50, 50, 60, 0, color);
+        updateTopSummary();
+    });
+
+    // === Furnace navigation (prev/next) ===
+    document.getElementById('nav-prev').addEventListener('click', () => navigateFurnace(-1));
+    document.getElementById('nav-next').addEventListener('click', () => navigateFurnace(1));
+
+    // === Spacing change ===
+    document.getElementById('global-spacing').addEventListener('change', () => {
+        setGlobalFurnacesResult(null);
+        setGlobalUnpackedItems([]);
+        setCurrentFurnaceIndex(0);
+        document.getElementById('btn-export-pdf').style.display = 'none';
+        document.getElementById('btn-animate').style.display = 'none';
+        document.getElementById('furnace-nav').style.display = 'none';
+        document.getElementById('empty-state').style.display = 'block';
+        document.getElementById('center-stats-panel').style.display = 'none';
+        if (itemsGroup) {
+            while (itemsGroup.children.length > 0) itemsGroup.remove(itemsGroup.children[0]);
+        }
+    });
+
+    // === Animation controls ===
+    document.getElementById('btn-anim-pause').addEventListener('click', () => {
+        if (!isAnimating) return;
+        const paused = !animPaused;
+        setAnimPaused(paused);
+        document.getElementById('btn-anim-pause').textContent = paused ? '▶ 继续' : '⏸ 暂停';
+        document.getElementById('btn-anim-pause').style.background = paused ? '#10b981' : '#f59e0b';
+        document.getElementById('btn-anim-pause').style.color = paused ? '#fff' : '#000';
+    });
+
+    document.getElementById('btn-anim-stop').addEventListener('click', () => {
+        if (!isAnimating) return;
+        setAnimStopped(true);
+        setAnimPaused(false);
+    });
+
+    // === Excel import ===
+    document.getElementById('btn-import-excel').addEventListener('click', () => {
+        document.getElementById('excel-file-input').click();
+    });
+
+    document.getElementById('excel-file-input').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            try {
+                const data = new Uint8Array(ev.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const parsed = parseExcelData(workbook);
+                if (parsed.length === 0) { alert('未找到有效数据，请检查文件格式'); return; }
+                showImportPreview(parsed);
+            } catch(err) { alert('文件解析失败：' + err.message); }
+        };
+        reader.readAsArrayBuffer(file);
+        e.target.value = '';
+    });
+
+    document.getElementById('btn-import-cancel').addEventListener('click', () => {
+        document.getElementById('import-preview-overlay').style.display = 'none';
+    });
+    document.getElementById('btn-import-replace').addEventListener('click', () => applyImportData(true));
+    document.getElementById('btn-import-append').addEventListener('click', () => applyImportData(false));
+
+    // === PDF export modal ===
+    document.getElementById('btn-pdf-cancel').addEventListener('click', () => {
+        document.getElementById('pdf-select-overlay').style.display = 'none';
+    });
+    document.getElementById('pdf-select-overlay').addEventListener('click', (e) => {
+        if (e.target === document.getElementById('pdf-select-overlay')) {
+            document.getElementById('pdf-select-overlay').style.display = 'none';
+        }
+    });
+    document.getElementById('btn-pdf-confirm').addEventListener('click', () => {
+        const selected = document.querySelector('input[name="pdf-furnace"]:checked');
+        if (!selected) return;
+        const options = {
+            exportJson: document.getElementById('pdf-opt-json').checked,
+            worklist: document.getElementById('pdf-opt-worklist').checked
+        };
+        document.getElementById('pdf-select-overlay').style.display = 'none';
+        exportSingleFurnacePDF(parseInt(selected.value), options);
+    });
+
+    // === JSON import modal ===
+    document.getElementById('btn-ji-parse').addEventListener('click', () => {
+        const jsonStr = document.getElementById('ji-json-textarea').value.trim();
+        if (!jsonStr) {
+            document.getElementById('ji-error-msg').textContent = '请先输入或粘贴 JSON 内容';
+            document.getElementById('ji-error-msg').classList.add('visible');
             return;
         }
-
-        overlay.remove();
-
-        callback({
-            vacuumLevel: vacuumLevel,
-            heatingProgram: heatingProgram,
-            operator: operator,
-            verifiedAt: formatDateTime()
-        });
+        const result = parseJsonPlan(jsonStr);
+        if (!result.ok) {
+            document.getElementById('ji-error-msg').textContent = '❌ 解析失败：' + result.error;
+            document.getElementById('ji-error-msg').classList.add('visible');
+            document.getElementById('btn-ji-import').disabled = true;
+            return;
+        }
+        document.getElementById('ji-error-msg').classList.remove('visible');
+        renderJsonPreview(result.data);
+        document.getElementById('btn-ji-import').disabled = false;
+        // Store parsed plan for import
+        window._jiParsedPlan = result.data;
     });
 
-    overlay.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') overlay.remove();
-    });
-}
-
-// ==================== 初始化 ====================
-
-function init() {
-    sceneManager = new SceneManager('canvas-container');
-    sceneManager.init();
-
-    formManager = new FormManager();
-
-    document.getElementById('btn-add-furnace').addEventListener('click', () => {
-        formManager.addFurnaceRow('自定义新增空闲炉膛', 400, 200, 200, 15000, 1);
-        refreshFurnacePriorityList();
-    });
-    document.getElementById('btn-add-item').addEventListener('click', () => {
-        batchColorIndex++;
-        const color = BATCH_COLORS[batchColorIndex % BATCH_COLORS.length];
-        const batchName = '工件批次_' + batchColorIndex;
-        formManager.addItemRow(batchName, 'cuboid', 10, 50, 50, 60, 1500, color);
-        refreshItemQuickSummary();
-    });
-    document.getElementById('btn-calculate').addEventListener('click', executeAndRender);
-    document.getElementById('btn-animate').addEventListener('click', playLoadingAnimation);
-    document.getElementById('btn-export-pdf').addEventListener('click', exportToProfessionalPDF);
-
-    document.getElementById('btn-pause-animation').addEventListener('click', toggleAnimationPause);
-    document.getElementById('btn-stop-animation').addEventListener('click', stopAnimation);
-
-    document.getElementById('btn-view-front').addEventListener('click', () => {
-        if (globalFurnacesResult) sceneManager.focusOnView('front', globalFurnacesResult);
-    });
-    document.getElementById('btn-view-top').addEventListener('click', () => {
-        if (globalFurnacesResult) sceneManager.focusOnView('top', globalFurnacesResult);
-    });
-    document.getElementById('btn-view-side').addEventListener('click', () => {
-        if (globalFurnacesResult) sceneManager.focusOnView('side', globalFurnacesResult);
-    });
-    document.getElementById('btn-view-default').addEventListener('click', () => {
-        if (globalFurnacesResult) sceneManager.focusOnView('default', globalFurnacesResult);
+    document.getElementById('btn-ji-import').addEventListener('click', () => {
+        if (!window._jiParsedPlan) return;
+        importJsonPlanToMaster(window._jiParsedPlan, () => initMasterView(renderMasterPlan));
+        document.getElementById('json-import-overlay').style.display = 'none';
     });
 
-    // 炉膛展开/折叠按钮
-    document.getElementById('btn-toggle-furnace-view').addEventListener('click', () => {
-        const btn = document.getElementById('btn-toggle-furnace-view');
-        const selector = document.getElementById('furnace-selector');
-        
-        if (sceneManager.isSingleFurnaceMode()) {
-            // 当前是收缩模式，展开显示全部
-            sceneManager.showAllFurnaces();
-            btn.textContent = '🔒 折叠';
-            selector.value = '-1';
-            updateFurnaceInfoPanel();
-        } else {
-            // 当前是展开模式，折叠显示第一个
-            if (globalFurnacesResult && globalFurnacesResult.length > 0) {
-                sceneManager.showSingleFurnace(0);
-                btn.textContent = '🔓 展开';
-                selector.value = '0';
-                updateFurnaceInfoPanel();
-            }
+    document.getElementById('btn-ji-cancel').addEventListener('click', () => {
+        document.getElementById('json-import-overlay').style.display = 'none';
+    });
+    document.getElementById('json-import-overlay').addEventListener('click', (e) => {
+        if (e.target === document.getElementById('json-import-overlay')) {
+            document.getElementById('json-import-overlay').style.display = 'none';
         }
     });
 
-    // Excel 导入按钮事件
-    const btnImportExcel = document.getElementById('btn-import-excel');
-    const excelFileInput = document.getElementById('excel-file-input');
-    
-    if (btnImportExcel && excelFileInput) {
-        btnImportExcel.addEventListener('click', () => {
-            excelFileInput.click();
-        });
-        
-        excelFileInput.addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (file) {
-                handleExcelImport(file);
-            }
-            excelFileInput.value = '';
-        });
+    // JSON drop zone
+    const jiDropZone = document.getElementById('ji-drop-zone');
+    jiDropZone.addEventListener('click', () => document.getElementById('json-file-input').click());
+    jiDropZone.addEventListener('dragover', (e) => { e.preventDefault(); jiDropZone.classList.add('drag-over'); });
+    jiDropZone.addEventListener('dragleave', () => jiDropZone.classList.remove('drag-over'));
+    jiDropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        jiDropZone.classList.remove('drag-over');
+        const file = e.dataTransfer.files[0];
+        if (file) readJsonFile(file);
+    });
+
+    document.getElementById('json-file-input').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) readJsonFile(file);
+        e.target.value = '';
+    });
+
+    function readJsonFile(file) {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            document.getElementById('ji-json-textarea').value = ev.target.result;
+            document.getElementById('btn-ji-parse').click();
+        };
+        reader.readAsText(file, 'utf-8');
     }
-
-    // 监听炉膛删除事件，刷新优先级排序
-    window.addEventListener('furnace-deleted', () => {
-        refreshFurnacePriorityList();
-    });
-
-    // 监听工件变更事件，刷新物料速览
-    window.addEventListener('item-changed', () => {
-        refreshItemQuickSummary();
-    });
-
-    // 加载默认数据
-    formManager.initDefaultData(DEFAULT_FURNACES, DEFAULT_ITEMS);
-
-    // 初始化炉膛优先级排序
-    refreshFurnacePriorityList();
-
-    // 初始化物料汇总速览
-    refreshItemQuickSummary();
-
-    // 面板折叠/展开切换（窄屏响应式功能）
-    initPanelToggle();
-
-    // 标签页切换
-    initTabSwitching();
-
-    // 计算结果折叠面板切换
-    initSummaryToggle();
-
-    // 标签页内详情区块折叠切换
-    initTabSectionCollapse();
-
-    // 延迟执行初始计算
-    setTimeout(executeAndRender, 350);
 }
 
-/**
- * 初始化计算结果折叠面板切换
- */
-function initSummaryToggle() {
-    const wrapper = document.getElementById('summary-wrapper');
-    const header = document.getElementById('summary-header');
-    if (!wrapper || !header) return;
-
-    header.addEventListener('click', () => {
-        if (wrapper.classList.contains('summary-expanded')) {
-            wrapper.classList.remove('summary-expanded');
-            wrapper.classList.add('summary-collapsed');
-            document.getElementById('summary-toggle-icon').textContent = '▶';
-        } else {
-            wrapper.classList.remove('summary-collapsed');
-            wrapper.classList.add('summary-expanded');
-            document.getElementById('summary-toggle-icon').textContent = '▼';
-        }
-    });
-}
-
-/**
- * 初始化标签页切换逻辑
- */
-function initTabSwitching() {
-    const tabBtns = document.querySelectorAll('.tab-btn');
-    const tabPanels = document.querySelectorAll('.tab-panel');
-
-    tabBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            const targetTab = btn.getAttribute('data-tab');
-
-            // 切换按钮激活状态
-            tabBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-
-            // 切换面板显示
-            tabPanels.forEach(panel => panel.classList.remove('active'));
-            const targetPanel = document.getElementById(targetTab);
-            if (targetPanel) {
-                targetPanel.classList.add('active');
-            }
-        });
-    });
-}
-
-/**
- * 初始化标签页内详情区块折叠切换
- */
-function initTabSectionCollapse() {
-    document.querySelectorAll('.tab-section-header').forEach(header => {
-        header.addEventListener('click', () => {
-            const collapse = header.closest('.tab-section-collapse');
-            if (!collapse) return;
-            collapse.classList.toggle('collapsed');
-        });
-    });
-}
-
-/**
- * 初始化窄屏面板折叠/展开切换逻辑
- */
-function initPanelToggle() {
-    const panel = document.getElementById('control-panel');
-    const toggleBtn = document.getElementById('panel-toggle-btn');
-    const overlay = document.getElementById('panel-overlay');
-
-    if (!panel || !toggleBtn || !overlay) return;
-
-    function openPanel() {
-        panel.classList.add('panel-open');
-        overlay.classList.add('active');
-        toggleBtn.textContent = '✕';
-        toggleBtn.title = '关闭配置面板';
-    }
-
-    function closePanel() {
-        panel.classList.remove('panel-open');
-        overlay.classList.remove('active');
-        toggleBtn.textContent = '☰';
-        toggleBtn.title = '打开配置面板';
-    }
-
-    toggleBtn.addEventListener('click', () => {
-        if (panel.classList.contains('panel-open')) {
-            closePanel();
-        } else {
-            openPanel();
-        }
-    });
-
-    // 点击遮罩层关闭面板
-    overlay.addEventListener('click', closePanel);
-
-    // 面板上的按钮点击后自动关闭（移动端体验优化）
-    panel.addEventListener('click', (e) => {
-        const tag = e.target.tagName.toLowerCase();
-        if (tag === 'button' && window.innerWidth <= 900) {
-            setTimeout(closePanel, 300);
-        }
-    });
-
-    // 窗口大小变化时自动重置面板状态
-    window.addEventListener('resize', () => {
-        if (window.innerWidth > 900 && panel.classList.contains('panel-open')) {
-            closePanel();
-        }
-    });
-}
-
-// 页面加载完成后初始化
-document.addEventListener('DOMContentLoaded', init);
+// ==================== LAUNCH ====================
+init();
