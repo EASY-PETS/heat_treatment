@@ -62,8 +62,25 @@
                     <div class="fdp-body" id="fdp-body" style="display:none;"></div>
                 </div>
             </div>
+            <!-- V2.3: 料框类型选择器（新建炉膛默认值，每炉膛可独立修改） -->
+            <div class="basket-type-line">
+                <label>默认料框：</label>
+                <select id="basket-type-select">
+                    <option value="grid">普通网格</option>
+                    <option value="honeycomb">蜂窝料框</option>
+                    <option value="tray">托盘式搁板</option>
+                    <option value="solid">实心料框</option>
+                </select>
+            </div>
             <div class="spacing-line">
                 默认安全间距 <input type="number" id="global-spacing" value="5" min="0"> mm
+            </div>
+            <!-- V2.2: 3D显示设置 -->
+            <div class="display-settings-line">
+                <span class="ds-label">3D 设置：</span>
+                <label class="ds-check"><input type="checkbox" id="ds-show-grid" checked> 显示地面网格</label>
+                <label class="ds-check"><input type="checkbox" id="ds-show-axes" checked> 显示坐标轴</label>
+                <label class="ds-check"><input type="checkbox" id="ds-show-rulers" checked> 显示尺寸刻度</label>
             </div>
         </div>
 

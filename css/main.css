@@ -214,6 +214,44 @@ body {
     border: 1px solid var(--border-color); color: #fff; border-radius: 3px; font-size: 10px;
 }
 
+/* ==================== BASKET TYPE LINE (V2.2) ==================== */
+.basket-type-line {
+    display: flex; align-items: center; gap: 8px; padding: 7px 12px;
+    font-size: 10px; color: #ccc; flex-shrink: 0;
+    border-top: 1px solid var(--border-color);
+    background: rgba(0,0,0,0.12);
+}
+.basket-type-line label {
+    font-weight: 600; color: #ff9800; text-transform: uppercase;
+    letter-spacing: 0.5px; font-size: 10px;
+}
+.basket-type-line select {
+    flex: 1; padding: 4px 8px; background: var(--input-bg);
+    border: 1px solid var(--border-color); color: #fff; border-radius: 4px;
+    font-size: 11px; cursor: pointer;
+}
+.basket-type-line select:focus { outline: none; border-color: #ff9800; }
+
+/* ==================== DISPLAY SETTINGS LINE (V2.2) ==================== */
+.display-settings-line {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 7px 12px; font-size: 10px; color: #888; flex-shrink: 0;
+    border-top: 1px solid var(--border-color);
+    background: rgba(0,0,0,0.1);
+}
+.display-settings-line .ds-label {
+    font-weight: 700; color: #00ffff; font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.5px;
+}
+.ds-check {
+    display: flex; align-items: center; gap: 3px;
+    font-size: 9px; color: #aaa; cursor: pointer;
+    white-space: nowrap;
+}
+.ds-check input[type="checkbox"] {
+    width: 12px; height: 12px; cursor: pointer; accent-color: #00ffff;
+}
+
 /* ==================== CENTER CANVAS ==================== */
 #canvas-area {
     flex: 1; display: flex; flex-direction: column;

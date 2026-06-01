@@ -1,10 +1,11 @@
 /**
- * ui.js - UI Rendering and Interactions (V2.0)
+ * ui.js - UI Rendering and Interactions (V2.3)
  *
  * Purpose:
  *   Contains all DOM-based UI rendering: furnace cards, material cards,
  *   detail panels, stats panels, modals, dialogs, notifications, and top summary.
  *
+ * V2.3: 炉膛独立料框类型配置, basketType 参数传递
  * V2.0: 增加了搁板厚度、姿态优化规则UI，聚集率统计入口
  *
  * Dependencies:
@@ -49,7 +50,12 @@ export function getFurnaceDataFromCard(card) {
     const plannedHeats = parseInt(plannedText.replace(/[^0-9]/g, '')) || 0;
     const spacingText = card.getAttribute('data-spacing') || '';
     const actualSpacing = spacingText !== '' ? parseFloat(spacingText) : null;
-    return { fid, name, width: parseFloat(dims[0]) || 0, height: parseFloat(dims[1]) || 0, depth: parseFloat(dims[2]) || 0, maxWeight, count, plannedHeats, actualSpacing };
+    /**
+     * V2.3: 每个炉膛独立存储 basketType
+     * 从 data-basket-type 属性读取，默认为 'grid'
+     */
+    const basketType = card.getAttribute('data-basket-type') || 'grid';
+    return { fid, name, width: parseFloat(dims[0]) || 0, height: parseFloat(dims[1]) || 0, depth: parseFloat(dims[2]) || 0, maxWeight, count, plannedHeats, actualSpacing, basketType };
 }
 
 export function getMaterialDataFromCard(card) {
@@ -74,19 +80,38 @@ export function getMaterialDataFromCard(card) {
 
 // ==================== FURNACE CARD CREATION ====================
 
-export function createFurnaceCard(name, depth, width, height, maxWeight, count, plannedHeats, actualSpacing) {
+/**
+ * V2.3: createFurnaceCard 新增 basketType 参数
+ * 每个炉膛独立存储自己的料框类型，互不影响
+ *
+ * @param {string} name - 炉膛名称
+ * @param {number} depth - 纵深 Z (mm)
+ * @param {number} width - 宽度 X (mm)
+ * @param {number} height - 高度 Y (mm)
+ * @param {number} maxWeight - 承重上限 (kg)
+ * @param {number} count - 台数
+ * @param {number} plannedHeats - 计划装载炉次
+ * @param {number|null} actualSpacing - 实际安全间距
+ * @param {string} basketType - 料框类型 ('grid'|'honeycomb'|'tray'|'solid')，默认 'grid'
+ */
+export function createFurnaceCard(name, depth, width, height, maxWeight, count, plannedHeats, actualSpacing, basketType) {
     const newFC = furnaceCounter + 1; setFurnaceCounter(newFC);
     const cardId = 'furnace-card-' + newFC;
     const card = document.createElement('div');
     card.className = 'furnace-card'; card.id = cardId;
     card.setAttribute('data-fid', newFC);
     if (actualSpacing !== undefined && actualSpacing !== null) card.setAttribute('data-spacing', actualSpacing);
+    /**
+     * V2.3: 存储料框类型到 data-basket-type 属性
+     * 默认为 'grid'（普通网格料框）
+     */
+    card.setAttribute('data-basket-type', basketType || 'grid');
     const ph = plannedHeats || 0;
     card.innerHTML = '<span class="f-drag-handle" draggable="true" title="拖拽排序">⠿</span><button class="f-card-delete" data-action="delete-furnace" data-fid="' + newFC + '">✕</button><div class="f-card-name">' + name + '</div><div class="f-card-meta"><span>📐 ' + width + '×' + height + '×' + depth + '</span><span>📦 ×' + count + '台</span><span>⚖ ' + maxWeight + 'kg</span><span>计划' + ph + '炉</span></div><div class="f-card-status">点击查看详情 · 双击编辑</div>';
     card.addEventListener('click', (e) => { if (e.target.closest('[data-action="delete-furnace"]')) return; if (e.target.closest('.f-drag-handle')) return; selectFurnaceCard(cardId); showFurnaceDetail(cardId); });
     setupFurnaceDrag(card);
     document.getElementById('furnace-cards-container').appendChild(card);
-    return { cardId, furnaceCounter: newFC, name, depth, width, height, maxWeight, count, plannedHeats: ph };
+    return { cardId, furnaceCounter: newFC, name, depth, width, height, maxWeight, count, plannedHeats: ph, basketType: basketType || 'grid' };
 }
 
 export function selectFurnaceCard(cardId) { document.querySelectorAll('.furnace-card').forEach(c => c.classList.remove('active')); const card = document.getElementById(cardId); if (card) { card.classList.add('active'); setSelectedFurnaceCardId(cardId); } }
@@ -97,7 +122,12 @@ export function showFurnaceDetail(cardId) {
     document.getElementById('fdp-title').textContent = '📋 ' + d.name;
     document.getElementById('fdp-placeholder').style.display = 'none';
     const body = document.getElementById('fdp-body'); body.style.display = 'block';
-    body.innerHTML = '<div class="fdp-row"><div class="fdp-field"><label>名称</label><input type="text" id="fdp-name" value="' + d.name + '"></div></div><div class="fdp-row"><div class="fdp-field"><label>宽度 X (mm)</label><input type="number" id="fdp-width" value="' + d.width + '"></div><div class="fdp-field"><label>高度 Y (mm)</label><input type="number" id="fdp-height" value="' + d.height + '"></div><div class="fdp-field"><label>纵深 Z (mm)</label><input type="number" id="fdp-depth" value="' + d.depth + '"></div></div><div class="fdp-row"><div class="fdp-field"><label>承重上限 (kg)</label><input type="number" id="fdp-weight" value="' + d.maxWeight + '"></div><div class="fdp-field"><label>台数</label><input type="number" id="fdp-count" value="' + d.count + '" min="1"></div></div><div class="fdp-row"><div class="fdp-field"><label>计划装载炉次</label><input type="number" id="fdp-planned" value="' + d.plannedHeats + '" min="0"></div><div class="fdp-field"><label>实际安全间距 (mm) <span style="color:#666;font-size:9px;">留空=用默认</span></label><input type="number" id="fdp-spacing" value="' + (d.actualSpacing != null ? d.actualSpacing : '') + '" placeholder="默认' + (document.getElementById('global-spacing') ? document.getElementById('global-spacing').value : '5') + 'mm"></div></div><button class="fdp-save-btn" id="fdp-save-btn">💾 保存炉膛参数</button>';
+    /**
+     * V2.3: 炉膛详情面板新增料框类型下拉框
+     * 每个炉膛独立选择料框类型，切换后保存到 data-basket-type 属性
+     */
+    const basketType = card.getAttribute('data-basket-type') || d.basketType || 'grid';
+    body.innerHTML = '<div class="fdp-row"><div class="fdp-field"><label>名称</label><input type="text" id="fdp-name" value="' + d.name + '"></div></div><div class="fdp-row"><div class="fdp-field"><label>宽度 X (mm)</label><input type="number" id="fdp-width" value="' + d.width + '"></div><div class="fdp-field"><label>高度 Y (mm)</label><input type="number" id="fdp-height" value="' + d.height + '"></div><div class="fdp-field"><label>纵深 Z (mm)</label><input type="number" id="fdp-depth" value="' + d.depth + '"></div></div><div class="fdp-row"><div class="fdp-field"><label>承重上限 (kg)</label><input type="number" id="fdp-weight" value="' + d.maxWeight + '"></div><div class="fdp-field"><label>台数</label><input type="number" id="fdp-count" value="' + d.count + '" min="1"></div></div><div class="fdp-row"><div class="fdp-field"><label>计划装载炉次</label><input type="number" id="fdp-planned" value="' + d.plannedHeats + '" min="0"></div><div class="fdp-field"><label>实际安全间距 (mm) <span style="color:#666;font-size:9px;">留空=用默认</span></label><input type="number" id="fdp-spacing" value="' + (d.actualSpacing != null ? d.actualSpacing : '') + '" placeholder="默认' + (document.getElementById('global-spacing') ? document.getElementById('global-spacing').value : '5') + 'mm"></div></div><div class="fdp-row"><div class="fdp-field"><label>📦 料框类型 <span style="color:#666;font-size:9px;">V2.3</span></label><select id="fdp-basket-type"><option value="grid"' + (basketType === 'grid' ? ' selected' : '') + '>普通网格料框</option><option value="honeycomb"' + (basketType === 'honeycomb' ? ' selected' : '') + '>蜂窝料框</option><option value="tray"' + (basketType === 'tray' ? ' selected' : '') + '>托盘式搁板</option><option value="solid"' + (basketType === 'solid' ? ' selected' : '') + '>实心料框</option></select></div></div><button class="fdp-save-btn" id="fdp-save-btn">💾 保存炉膛参数</button>';
     document.getElementById('fdp-save-btn').addEventListener('click', () => { saveFurnaceDetail(cardId); });
     if (fdpCollapsed) { setFdpCollapsed(false); document.getElementById('furnace-detail-panel').classList.remove('collapsed'); document.getElementById('fdp-toggle-icon').textContent = '▲'; }
 }
@@ -113,6 +143,13 @@ export function saveFurnaceDetail(cardId) {
     const plannedHeats = parseInt(document.getElementById('fdp-planned').value) || 0;
     const spacingVal = document.getElementById('fdp-spacing').value;
     const actualSpacing = spacingVal !== '' ? parseFloat(spacingVal) : null;
+    /**
+     * V2.3: 保存料框类型到 data-basket-type 属性
+     */
+    const basketSelect = document.getElementById('fdp-basket-type');
+    if (basketSelect) {
+        card.setAttribute('data-basket-type', basketSelect.value);
+    }
     card.querySelector('.f-card-name').textContent = name;
     card.querySelector('.f-card-meta').innerHTML = '<span>📐 ' + width + '×' + height + '×' + depth + '</span><span>📦 ×' + count + '台</span><span>⚖ ' + maxWeight + 'kg</span><span>计划' + plannedHeats + '炉</span>';
     if (actualSpacing !== null) card.setAttribute('data-spacing', actualSpacing); else card.removeAttribute('data-spacing');

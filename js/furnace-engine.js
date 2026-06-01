@@ -148,12 +148,15 @@ export function solveHeterogeneousPacking(furnacePoolInput, itemsInput, spacing)
                 w: f.width, h: f.height, d: f.depth, max_weight: f.maxWeight,
                 spacing: f.actualSpacing != null ? f.actualSpacing : spacing,
                 packedItems: [], totalWeight: 0,
-                emptySpaces: [{ x: 0, y: 0, z: 0, w: f.width, h: f.height, d: f.depth }]
+                emptySpaces: [{ x: 0, y: 0, z: 0, w: f.width, h: f.height, d: f.depth }],
+                /** V2.3: 每个炉膛独立存储 basketType */
+                basketType: f.basketType || 'grid'
             });
         }
     });
     /* Fix: 不再按体积排序，保持用户在左侧面板中选择的顺序（炉膛卡片顺序 = 装炉优先级） */
     // availableFurnaceInstances.sort((a, b) => (b.w * b.h * b.d) - (a.w * a.h * a.d));
+    /* V2.3: 禁止自动生成/复制/扩容炉膛 — 只能使用用户已配置的炉膛 */
 
     const itemMaterialMap = new Map();
     const itemProcessMap = new Map();
@@ -357,12 +360,15 @@ export function solveShelfLayeredMultiFurnace(furnacePoolInput, itemsInput, spac
                 typeName: f.name, instanceId: `${f.name} (炉次 #${i + 1})`,
                 w: f.width, h: f.height, d: f.depth, max_weight: f.maxWeight,
                 spacing: f.actualSpacing != null ? f.actualSpacing : spacing,
-                packedItems: [], totalWeight: 0
+                packedItems: [], totalWeight: 0,
+                /** V2.3: 每个炉膛独立存储 basketType */
+                basketType: f.basketType || 'grid'
             });
         }
     });
     /* Fix: 不再按体积排序，保持用户在左侧面板中选择的顺序（炉膛卡片顺序 = 装炉优先级） */
     // availableFurnaceInstances.sort((a, b) => (b.w * b.h * b.d) - (a.w * a.h * a.d));
+    /* V2.3: 禁止自动生成/复制/扩容炉膛 */
 
     const itemMaterialMap = new Map(), itemProcessMap = new Map();
     let flattenedItems = [];
@@ -519,12 +525,15 @@ export function solveCenterOfGravityMultiFurnace(furnacePoolInput, itemsInput, s
                 typeName: f.name, instanceId: `${f.name} (炉次 #${i + 1})`,
                 w: f.width, h: f.height, d: f.depth, max_weight: f.maxWeight,
                 spacing: f.actualSpacing != null ? f.actualSpacing : spacing,
-                packedItems: [], totalWeight: 0
+                packedItems: [], totalWeight: 0,
+                /** V2.3: 每个炉膛独立存储 basketType */
+                basketType: f.basketType || 'grid'
             });
         }
     });
     /* Fix: 不再按体积排序，保持用户在左侧面板中选择的顺序（炉膛卡片顺序 = 装炉优先级） */
     // availableFurnaceInstances.sort((a, b) => (b.w * b.h * b.d) - (a.w * a.h * a.d));
+    /* V2.3: 禁止自动生成/复制/扩容炉膛 */
 
     const itemMaterialMap = new Map(), itemProcessMap = new Map();
     let flattenedItems = [];

@@ -1,9 +1,7 @@
 /**
- * state.js - Central Application State
+ * state.js - Central Application State (V2.2)
  *
- * Purpose:
- *   Provides a single source of truth for all application-level state.
- *   All modules import from this file to read/write shared data.
+ * V2.2: Added basket type state, 3D visibility settings
  *
  * Future Extension:
  *   - Could be migrated to a reactive state manager (e.g., Vuex, Zustand) for AI Copilot
@@ -118,6 +116,34 @@ export let aggregationStats = {
 /** Set of colors already assigned to materials, to avoid duplicates */
 export const usedColors = new Set();
 
+// ==================== BASKET TYPE STATE (V2.2) ====================
+/**
+ * 料框类型配置 — 支持普通网格、蜂窝料框、托盘式搁板、实心料框四种
+ *
+ * V2.3: 新增 'tray'（托盘式搁板）— 无四周围栏，底部搁板 + 10个支撑梁
+ *       适用于齿轮、模具、法兰、圆环件、大尺寸工件
+ *
+ * 扩展点：未来可添加更多料框类型
+ */
+export const BASKET_TYPES = ['grid', 'honeycomb', 'tray', 'solid'];
+
+/**
+ * 默认料框类型（新建炉膛时使用）
+ * V2.3: 改为仅作为新建炉膛的默认值，每个炉膛独立存储自己的 basketType
+ */
+export let currentBasketType = 'grid';   // 'grid' | 'honeycomb' | 'tray' | 'solid'
+
+// ==================== 3D DISPLAY SETTINGS (V2.2) ====================
+/**
+ * 3D场景显示选项 — 控制标尺、网格、坐标轴的独立显示
+ * 在主场景和装料大师场景中共享此设置
+ */
+export let displaySettings = {
+    showGrid: true,       // 显示地面网格
+    showAxes: true,       // 显示坐标轴
+    showRulers: true      // 显示尺寸刻度
+};
+
 // ==================== MASTER PLANS ====================
 /** Historical furnace loading plans for "装料大师" view */
 export const masterPlans = [
@@ -212,3 +238,5 @@ export function setOriginalOpacityStore(v) { originalOpacityStore = v; }
 export function setOpacityResetTimerId(v) { opacityResetTimerId = v; }
 export function setPlacementRules(v) { placementRules = v; }
 export function setAggregationStats(v) { aggregationStats = v; }
+export function setCurrentBasketType(v) { currentBasketType = v; }
+export function setDisplaySettings(v) { displaySettings = v; }
