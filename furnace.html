@@ -69,6 +69,8 @@
 
         <!-- CENTER: 3D View -->
         <div id="canvas-area">
+            <!-- Fix: 3D场景右下角统计悬浮面板，展示当前炉膛物料统计信息 -->
+            <div id="stats-3d-panel" class="stats-3d-panel"></div>
             <div id="center-stats-panel">
                 <div class="csp-header">
                     <span>📊 方案统计</span>
@@ -229,6 +231,19 @@
                     <label for="rule-shelf-height">搁板层高 (mm) <span style="color:#666;font-size:9px;">第二层起使用</span></label>
                     <input type="number" id="rule-shelf-height" value="100" min="10" max="3000">
                     <span class="rule-desc">从第二层搁板起使用固定高度，非0时覆盖炉膛自定义值</span>
+                </div>
+                <div class="rule-item">
+                    <label for="rule-shelf-thickness">搁板实体厚度 (mm) <span style="color:#666;font-size:9px;">V2.0 新增</span></label>
+                    <input type="number" id="rule-shelf-thickness" value="20" min="0" max="200">
+                    <span class="rule-desc">搁板真实占用炉膛高度空间（例如4层×20mm=扣除80mm有效高度）</span>
+                </div>
+            </div>
+            <div class="rule-group">
+                <div class="rule-group-title">🔄 工件摆放姿态优化 (V2.0 新增)</div>
+                <div class="rule-item">
+                    <input type="checkbox" id="rule-posture-optimization" checked>
+                    <label for="rule-posture-optimization">最小面积面朝下（长方体自动旋转）</label>
+                    <span class="rule-desc">自动旋转长方体使最小面积面朝下，提高单层堆叠密度。圆柱体/轴类不受影响。</span>
                 </div>
             </div>
             <div class="rule-group">

@@ -100,8 +100,18 @@ export let placementRules = {
     useShelfLayered: false,
     /** Fixed shelf height for layers 2+ (mm). 0 = auto-detect from item heights */
     shelfHeight: 100,
+    /** 搁板实体厚度 (mm) - 真实占用炉膛高度空间 */
+    shelfThickness: 20,
     /** Center-of-gravity packing algorithm toggle (mutually exclusive with shelf-layered) */
-    centerOfGravity: false
+    centerOfGravity: false,
+    /** 允许旋转90°寻找最佳摆放姿态（最小面积面朝下） */
+    allowPostureOptimization: true
+};
+
+/** 装炉计算结果中的聚集率统计 */
+export let aggregationStats = {
+    materialRate: null,   // 材质聚集率 (0-100)
+    processRate: null     // 工艺聚集率 (0-100)
 };
 
 // ==================== COLOR GENERATOR STATE ====================
@@ -201,3 +211,4 @@ export function setJiParsedData(v) { jiParsedData = v; }
 export function setOriginalOpacityStore(v) { originalOpacityStore = v; }
 export function setOpacityResetTimerId(v) { opacityResetTimerId = v; }
 export function setPlacementRules(v) { placementRules = v; }
+export function setAggregationStats(v) { aggregationStats = v; }
