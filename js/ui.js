@@ -30,7 +30,7 @@ import {
     setGlobalFurnacesResult, setGlobalUnpackedItems, setGlobalSpacingValue
 } from './state.js';
 import {
-    generateUniqueColor, highlightItemsInScene,
+    generateUniqueColor,
     findResultIndexByFid, getSelectedMaterialName
 } from './three-scene.js';
 
@@ -201,7 +201,7 @@ export function createMaterialCard(name, shape, count, dim1, dim2, dim3, totalWe
     card.className = 'material-card'; card.id = cardId; card.setAttribute('data-mid', newMC); card.style.borderLeftColor = color;
     if (extraData) { if (extraData.material) card.setAttribute('data-material', extraData.material); if (extraData.process) card.setAttribute('data-process', extraData.process); if (extraData.orderDate) card.setAttribute('data-order-date', extraData.orderDate); if (extraData.deliveryDate) card.setAttribute('data-delivery-date', extraData.deliveryDate); if (extraData.remark) card.setAttribute('data-remark', extraData.remark); if (extraData.hardness) card.setAttribute('data-hardness', extraData.hardness); if (extraData.cadImage) card.setAttribute('data-cad-image', extraData.cadImage); }
     card.innerHTML = '<button class="m-delete" data-action="delete-material" data-mid="' + newMC + '">✕</button><div class="m-color-swatch" style="background-color:' + color + ';" title="' + name + '"></div><div class="m-info"><div class="m-name">' + name + '</div><div class="m-meta">' + shapeLabel + ' · ' + dimLabel + 'mm · ×' + count + '件 · ' + totalWeight + 'kg</div></div>';
-    card.addEventListener('click', (e) => { if (e.target.closest('[data-action="delete-material"]')) return; const wasSelected = card.classList.contains('active'); selectMaterialCard(cardId); if (!wasSelected) { showMaterialDetail(cardId); if (globalFurnacesResult && globalFurnacesResult.length > 0) highlightItemsInScene(cardId); } else { document.getElementById('mdp-placeholder').style.display = 'block'; document.getElementById('mdp-body').style.display = 'none'; document.getElementById('mdp-title').textContent = '📋 工件详情'; if (globalFurnacesResult && globalFurnacesResult.length > 0) highlightItemsInScene(null); } });
+    card.addEventListener('click', (e) => { if (e.target.closest('[data-action="delete-material"]')) return; const wasSelected = card.classList.contains('active'); selectMaterialCard(cardId); if (!wasSelected) { showMaterialDetail(cardId); } else { document.getElementById('mdp-placeholder').style.display = 'block'; document.getElementById('mdp-body').style.display = 'none'; document.getElementById('mdp-title').textContent = '📋 工件详情'; } });
     document.getElementById('material-cards-container').appendChild(card);
     return { cardId, materialCounter: newMC, name, shape, count, dim1, dim2, dim3, totalWeight, color };
 }

@@ -26,7 +26,7 @@ import {
 } from './state.js';
 import {
     initThree, initMasterThree, renderSingleFurnace,
-    resetAllItemOpacityToOpaque, getSelectedMaterialName,
+    getSelectedMaterialName,
     playLoadingAnimation, renderMasterPlan,
     findResultIndexByFid, generateUniqueColor,
     refreshAllDisplayVisibility
@@ -57,7 +57,6 @@ import { showPdfSelectModal, exportSingleFurnacePDF } from './pdf-export.js';
  */
 function executeAndRender() {
     if (isAnimating) return;
-    resetAllItemOpacityToOpaque();
 
     let furnacePoolInput = [];
     document.querySelectorAll('.furnace-card').forEach(card => {
@@ -174,7 +173,6 @@ function executeAndRender() {
 
 function navigateFurnace(direction) {
     if (!globalFurnacesResult || globalFurnacesResult.length === 0) return;
-    resetAllItemOpacityToOpaque();
     const newIndex = (currentFurnaceIndex + direction + globalFurnacesResult.length) %
         globalFurnacesResult.length;
     setCurrentFurnaceIndex(newIndex);

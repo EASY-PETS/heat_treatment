@@ -27,15 +27,13 @@ import {
     globalFurnacesResult, shelfMeshes, globalUnpackedItems,
     isAnimating, animPaused, animStopped,
     currentFurnaceIndex, selectedFurnaceCardId, selectedMaterialCardId,
-    originalOpacityStore, opacityResetTimerId,
     placementRules,
     currentBasketType, displaySettings,
     setScene, setCamera, setRenderer, setControls,
     setMasterScene, setMasterCamera, setMasterRenderer, setMasterControls,
     setItemsGroup, setShelfMeshes,
     setIsAnimating, setAnimPaused, setAnimStopped,
-    setCurrentFurnaceIndex, setSelectedFurnaceCardId,
-    setOriginalOpacityStore, setOpacityResetTimerId
+    setCurrentFurnaceIndex, setSelectedFurnaceCardId
 } from './state.js';
 
 const COLOR_PALETTE = [
@@ -1051,7 +1049,7 @@ export function renderSingleFurnace(index, filterMaterialName) {
 
     // 渲染工件
     furnace.packedItems.forEach(item => {
-        const isFiltered = filterMaterialName && item.name !== filterMaterialName;
+        const isFiltered = filterMaterialName && item.material !== filterMaterialName;
         let geometry;
         if (item.shape === 'cylinder') {
             geometry = new THREE.CylinderGeometry(item.w / 2, item.w / 2, item.h, 32);
@@ -1179,199 +1177,12 @@ function update3DStatsPanel(furnace) {
 
 // ==================== SCENE NAVIGATION ====================
 
-export function navigateFurnace(direction) {
-    if (!globalFurnacesResult || globalFurnacesResult.length === 0) return;
-    resetAllItemOpacityToOpaque();
-    setCurrentFurnaceIndex(
-        (currentFurnaceIndex + direction + globalFurnacesResult.length) % globalFurnacesResult.length
-    );
-    const filterName = getSelectedMaterialName();
-    return { filterName, newIndex: currentFurnaceIndex };
-}
-
 export function getSelectedMaterialName() {
     if (!selectedMaterialCardId) return null;
     const card = document.getElementById(selectedMaterialCardId);
     if (!card) return null;
-    return card.querySelector('.m-name').textContent;
-}
-
-// ==================== OPACITY / HIGHLIGHT MANAGEMENT ====================
-
-let currentHighlightGroup = null;
-const originalColorStore = new Map();
-
-export function resetAllItemOpacityToOpaque() {
-    if (!itemsGroup) return;
-
-    if (currentHighlightGroup) {
-        itemsGroup.remove(currentHighlightGroup);
-        disposeHighlightGroup(currentHighlightGroup);
-        currentHighlightGroup = null;
-    }
-
-    itemsGroup.children.forEach(child => {
-        if (!child.isMesh) return;
-        if (!child.material) return;
-        if (child.material.isLineBasicMaterial) return;
-
-        child.material.transparent = true;
-        child.material.opacity = 0.85;
-        child.material.needsUpdate = true;
-
-        if (originalColorStore.has(child)) {
-            const stored = originalColorStore.get(child);
-            if (stored.originalColorHex) {
-                child.material.color.set(stored.originalColorHex);
-            }
-            originalColorStore.delete(child);
-        } else if (child.userData && child.userData.originalColor) {
-            child.material.color.set(child.userData.originalColor);
-        }
-
-        child.children.forEach(subChild => {
-            if (subChild.isLineSegments && subChild.material && subChild.material.isLineBasicMaterial) {
-                subChild.material.color = new THREE.Color(0x444444);
-                subChild.material.linewidth = 1;
-            }
-        });
-
-        if (child.material.emissive !== undefined) {
-            child.material.emissive = new THREE.Color(0x000000);
-            child.material.emissiveIntensity = 0;
-        }
-    });
-
-    originalOpacityStore.clear();
-}
-
-export function highlightItemsInScene(cardId) {
-    if (opacityResetTimerId) { clearTimeout(opacityResetTimerId); setOpacityResetTimerId(null); }
-
-    if (currentHighlightGroup) {
-        itemsGroup.remove(currentHighlightGroup);
-        disposeHighlightGroup(currentHighlightGroup);
-        currentHighlightGroup = null;
-    }
-
-    if (!cardId) {
-        resetAllItemOpacityToOpaque();
-        return;
-    }
-
-    if (!globalFurnacesResult || currentFurnaceIndex >= globalFurnacesResult.length) return;
-    const card = document.getElementById(cardId);
-    if (!card) return;
-    const selectedName = card.querySelector('.m-name').textContent;
-
-    let firstSelectedMesh = null;
-
-    itemsGroup.children.forEach(child => {
-        if (!child.isMesh) return;
-        if (!child.material || child.material.isLineBasicMaterial) return;
-
-        const isSelected = (child.userData && child.userData.itemName === selectedName);
-
-        if (isSelected) {
-            if (!firstSelectedMesh) firstSelectedMesh = child;
-
-            if (!originalColorStore.has(child) && child.userData && child.userData.originalColor) {
-                originalColorStore.set(child, { originalColorHex: child.userData.originalColor });
-            }
-            const origColor = (child.userData && child.userData.originalColor) ? child.userData.originalColor : '#' + child.material.color.getHexString();
-            child.material.color.set(origColor);
-
-            if (child.material.emissive !== undefined) {
-                child.material.emissive = new THREE.Color(0xffffff);
-                child.material.emissiveIntensity = 0.6;
-            }
-            child.material.transparent = true;
-            child.material.opacity = 1.0;
-            child.material.needsUpdate = true;
-
-            child.children.forEach(subChild => {
-                if (subChild.isLineSegments && subChild.material && subChild.material.isLineBasicMaterial) {
-                    subChild.material.color = new THREE.Color(0xffffff);
-                    subChild.material.linewidth = 3;
-                }
-            });
-
-            let outlineGeo;
-            if (child.geometry.type === 'CylinderGeometry') {
-                outlineGeo = new THREE.CylinderGeometry(
-                    child.geometry.parameters.radiusTop * 1.08,
-                    child.geometry.parameters.radiusBottom * 1.08,
-                    child.geometry.parameters.height * 1.05,
-                    32
-                );
-            } else {
-                const b = child.geometry.parameters;
-                outlineGeo = new THREE.BoxGeometry(
-                    (b.width || 1) * 1.08, (b.height || 1) * 1.05, (b.depth || 1) * 1.08
-                );
-            }
-            const outlineEdges = new THREE.EdgesGeometry(outlineGeo);
-            const outlineLine = new THREE.LineSegments(outlineEdges,
-                new THREE.LineBasicMaterial({
-                    color: 0xffaa00,
-                    linewidth: 2,
-                    transparent: true,
-                    opacity: 0.85
-                }));
-            outlineLine.userData = { isHighlightOutline: true, parentItemId: child.userData.itemId };
-            outlineLine.position.copy(child.position);
-            outlineLine.rotation.copy(child.rotation);
-            outlineLine.scale.copy(child.scale);
-            if (!currentHighlightGroup) {
-                currentHighlightGroup = new THREE.Group();
-                currentHighlightGroup.userData = { isHighlightGroup: true };
-                itemsGroup.add(currentHighlightGroup);
-            }
-            currentHighlightGroup.add(outlineLine);
-        } else {
-            if (!originalColorStore.has(child) && child.userData && child.userData.originalColor) {
-                originalColorStore.set(child, { originalColorHex: child.userData.originalColor });
-            }
-
-            const origTransparent = child.material.transparent;
-            const origOpacity = child.material.opacity;
-            originalOpacityStore.set(child, { transparent: origTransparent, opacity: origOpacity });
-
-            child.material.transparent = true;
-            child.material.opacity = 0.15;
-            child.material.needsUpdate = true;
-
-            child.children.forEach(subChild => {
-                if (subChild.isLineSegments && subChild.material && subChild.material.isLineBasicMaterial) {
-                    subChild.material.color = new THREE.Color(0xcccccc);
-                }
-            });
-
-            if (child.material.emissive !== undefined) {
-                child.material.emissive = new THREE.Color(0x000000);
-                child.material.emissiveIntensity = 0;
-            }
-        }
-    });
-
-    if (firstSelectedMesh) {
-        const targetPos = firstSelectedMesh.position.clone();
-        controls.target.copy(targetPos);
-        controls.update();
-    }
-}
-
-function disposeHighlightGroup(group) {
-    group.traverse(child => {
-        if (child.geometry) child.geometry.dispose();
-        if (child.material) {
-            if (Array.isArray(child.material)) {
-                child.material.forEach(m => m.dispose());
-            } else {
-                child.material.dispose();
-            }
-        }
-    });
+    const material = card.getAttribute('data-material');
+    return material || null;
 }
 
 // ==================== IMPROVED ANIMATION (V2.2) ====================
@@ -1404,7 +1215,6 @@ export async function playLoadingAnimation() {
     const controlBar = document.getElementById('anim-control-bar');
     controlBar.classList.add('visible');
 
-    resetAllItemOpacityToOpaque();
     disposeShelfMeshes();
     while (itemsGroup.children.length > 0) itemsGroup.remove(itemsGroup.children[0]);
 
@@ -1435,7 +1245,7 @@ export async function playLoadingAnimation() {
         const furnace = globalFurnacesResult[fIdx];
         const xOffset = furnace.xOffset || 0;
         furnace.packedItems.forEach((item) => {
-            if (filterMaterialName && item.name !== filterMaterialName) return;
+            if (filterMaterialName && item.material !== filterMaterialName) return;
             let geometry;
             if (item.shape === 'cylinder') geometry = new THREE.CylinderGeometry(item.w / 2, item.w / 2, item.h, 32);
             else geometry = new THREE.BoxGeometry(item.w, item.h, item.d);

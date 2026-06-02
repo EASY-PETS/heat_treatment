@@ -68,16 +68,6 @@ export let sortState = { field: null, dir: 'asc' };
 export let importPreviewData = [];
 export let jiParsedData = null;
 
-// ==================== TRANSPARENCY / HIGHLIGHT STATE ====================
-/**
- * Stores original opacity attributes of material meshes for restoration on deselect.
- * Structure: Map<THREE.Mesh, { transparent: boolean, opacity: number }>
- */
-export let originalOpacityStore = new Map();
-
-/** setTimeout ID for opacity reset, used to cancel pending restore operations */
-export let opacityResetTimerId = null;
-
 // ==================== PLACEMENT RULES ====================
 /**
  * Active placement rule configuration.
@@ -234,8 +224,6 @@ export function setMdpCollapsed(v) { mdpCollapsed = v; }
 export function setSortState(v) { sortState = v; }
 export function setImportPreviewData(v) { importPreviewData = v; }
 export function setJiParsedData(v) { jiParsedData = v; }
-export function setOriginalOpacityStore(v) { originalOpacityStore = v; }
-export function setOpacityResetTimerId(v) { opacityResetTimerId = v; }
 export function setPlacementRules(v) { placementRules = v; }
 export function setAggregationStats(v) { aggregationStats = v; }
 export function setCurrentBasketType(v) { currentBasketType = v; }
