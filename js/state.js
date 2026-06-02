@@ -74,24 +74,25 @@ export let jiParsedData = null;
  * Controls which packing algorithm is used and with what parameters.
  */
 export let placementRules = {
+    /** 🔧 V2.6: 以下字段固化为 true，仅保留用于兼容旧代码引用 */
     gravity: true,
     dense: true,
+    balance: true,
+    centerOfGravity: true,
+    sortStrategy: 'weight-desc',
     sameMaterial: false,
     sameProcess: false,
+    /** --- 以下为面板中的有效参数 --- */
     minSpacing: 5,
     wallSpacing: 30,
     rotate: true,
     weightMargin: 10,
-    balance: true,
-    sortStrategy: 'volume-desc',
-    /** Shelf-layered packing algorithm toggle */
+    /** 搁板分层平铺算法主开关 */
     useShelfLayered: false,
-    /** Fixed shelf height for layers 2+ (mm). 0 = auto-detect from item heights */
+    /** 固定搁板层高 (mm)，0 = 动态计算 */
     shelfHeight: 100,
     /** 搁板实体厚度 (mm) - 真实占用炉膛高度空间 */
     shelfThickness: 20,
-    /** Center-of-gravity packing algorithm toggle (mutually exclusive with shelf-layered) */
-    centerOfGravity: false,
     /** 允许旋转90°寻找最佳摆放姿态（最小面积面朝下） */
     allowPostureOptimization: true
 };

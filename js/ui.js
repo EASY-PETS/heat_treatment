@@ -272,40 +272,39 @@ export function showCapacityFeedback(type, message) { const existing = document.
 
 export function openRulesModal() {
     document.getElementById('rules-modal-overlay').style.display = 'flex';
-    document.getElementById('rule-gravity').checked = placementRules.gravity;
-    document.getElementById('rule-dense').checked = placementRules.dense;
-    document.getElementById('rule-same-material').checked = placementRules.sameMaterial;
-    document.getElementById('rule-same-process').checked = placementRules.sameProcess;
+    // 🔧 V2.6 清理：只保留对核心逻辑有数值影响的参数
+    // 基础/尺寸规则：最小安全间距、炉壁间距、允许旋转90°
     document.getElementById('rule-min-spacing').value = placementRules.minSpacing;
     document.getElementById('rule-wall-spacing').value = placementRules.wallSpacing;
     document.getElementById('rule-rotate').checked = placementRules.rotate;
+    // 重量与安全规则：承重安全余量
     document.getElementById('rule-weight-margin').value = placementRules.weightMargin;
-    document.getElementById('rule-balance').checked = placementRules.balance;
-    document.getElementById('rule-sort-strategy').value = placementRules.sortStrategy;
+    // 搁板参数：主开关、层高、实体厚度
     document.getElementById('rule-shelf-layered').checked = placementRules.useShelfLayered;
     document.getElementById('rule-shelf-height').value = placementRules.shelfHeight || 100;
     document.getElementById('rule-shelf-thickness').value = placementRules.shelfThickness || 20;
+    // 姿态优化
     document.getElementById('rule-posture-optimization').checked = placementRules.allowPostureOptimization !== false;
-    document.getElementById('rule-center-of-gravity').checked = placementRules.centerOfGravity || false;
 }
 
 export function saveRulesModal() {
+    // 🔧 V2.6 清理：只保存核心有效参数，重心居中已固化于算法内部
     setPlacementRules({
-        gravity: document.getElementById('rule-gravity').checked,
-        dense: document.getElementById('rule-dense').checked,
-        sameMaterial: document.getElementById('rule-same-material').checked,
-        sameProcess: document.getElementById('rule-same-process').checked,
+        gravity: true,                          // 重力优先已固化
+        dense: true,                            // 密集排布已固化
+        sameMaterial: false,                    // 同材质聚集保持关闭（待后续启用）
+        sameProcess: false,                     // 同工艺聚集保持关闭（待后续启用）
         minSpacing: parseFloat(document.getElementById('rule-min-spacing').value) || 5,
         wallSpacing: parseFloat(document.getElementById('rule-wall-spacing').value) || 30,
         rotate: document.getElementById('rule-rotate').checked,
         weightMargin: parseFloat(document.getElementById('rule-weight-margin').value) || 10,
-        balance: document.getElementById('rule-balance').checked,
-        sortStrategy: document.getElementById('rule-sort-strategy').value,
+        balance: true,                          // 重心平衡已固化（搁板分层内嵌重心居中）
+        sortStrategy: 'weight-desc',            // 排序策略固化为重量降序
         useShelfLayered: document.getElementById('rule-shelf-layered').checked,
         shelfHeight: parseFloat(document.getElementById('rule-shelf-height').value) || 100,
         shelfThickness: parseFloat(document.getElementById('rule-shelf-thickness').value) || 20,
         allowPostureOptimization: document.getElementById('rule-posture-optimization').checked,
-        centerOfGravity: document.getElementById('rule-center-of-gravity').checked
+        centerOfGravity: true                   // 重心居中已固化，勾选搁板时无条件执行
     });
     document.getElementById('global-spacing').value = placementRules.minSpacing;
     document.getElementById('rules-modal-overlay').style.display = 'none';

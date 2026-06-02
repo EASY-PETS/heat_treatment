@@ -550,89 +550,50 @@ function createBasketFrame(w, h, d, gridSize, basketType) {
     }
 }
 
-// ==================== SHELF GRID MESH ====================
+// ==================== SHELF MESH (V2.6 重构) ====================
 
-function createShelfGridMesh(w, d, thickness, gridSize) {
-    gridSize = gridSize || 100;
-    const group = new THREE.Group();
+/**
+ * 🔧 V2.6 重构：创建搁板实体 3D 模型
+ *
+ * 重构要点：
+ *   1. 使用 BoxGeometry(width, thickness, depth) — 真正的实体厚度，不再是纸片 Plane
+ *   2. 独立材质 — 浅灰色金属 MeshStandardMaterial，绝不复用料框的蜂窝/网格纹理
+ *   3. 搁板作为 furnaceGroup（料框 Group）的子对象，继承炉膛局部坐标系
+ *
+ * @param {number} w - 搁板宽度 (mm)，等于料框内部有效宽度
+ * @param {number} d - 搁板深度 (mm)，等于料框内部有效深度
+ * @param {number} thickness - 搁板实体厚度 (mm)，来自 placementRules.shelfThickness
+ * @returns {THREE.Mesh} 搁板 BoxGeometry mesh
+ */
+function createShelfMesh(w, d, thickness) {
+    // 🔧 V2.6: BoxGeometry 锚点在正中心 — 实体厚度，绝不使用 Plane
+    const geo = new THREE.BoxGeometry(w, thickness, d);
 
-    const frameRadius = 3.5;
-    const gridRadius = 1.8;
-
-    const frameMaterial = new THREE.MeshStandardMaterial({
-        color: 0x556677,
+    // 🔧 V2.6: 独立材质 — 浅灰色实体金属，与料框材质完全隔离
+    const mat = new THREE.MeshStandardMaterial({
+        color: 0xcccccc,
         roughness: 0.5,
-        metalness: 0.85,
-        transparent: true,
-        opacity: 0.55,
-        depthWrite: false
-    });
-    const gridMaterial = new THREE.MeshStandardMaterial({
-        color: 0x445566,
-        roughness: 0.55,
         metalness: 0.8,
         transparent: true,
-        opacity: 0.45,
-        depthWrite: false
+        opacity: 0.65,
+        side: THREE.DoubleSide,
+        depthWrite: true       // 实体遮挡，避免穿透视觉混乱
     });
 
-    function createGridFace(width_, depth_, originX, originY, originZ) {
-        const faceGroup = new THREE.Group();
-        const origin = new THREE.Vector3(originX, originY, originZ);
-        const dirU = new THREE.Vector3(1, 0, 0);
-        const dirV = new THREE.Vector3(0, 0, 1);
-        const lenU = width_, lenV = depth_;
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
 
-        const corners = [origin.clone(),
-            origin.clone().add(dirU.clone().multiplyScalar(lenU)),
-            origin.clone().add(dirU.clone().multiplyScalar(lenU)).add(dirV.clone().multiplyScalar(lenV)),
-            origin.clone().add(dirV.clone().multiplyScalar(lenV))];
-        for (let i = 0; i < 4; i++) {
-            faceGroup.add(createBar(corners[i], corners[(i + 1) % 4], frameRadius, frameMaterial));
-        }
+    // 🔧 V2.6: 添加细边框线，便于在 3D 视图中辨识搁板边界
+    const edgesGeo = new THREE.EdgesGeometry(geo);
+    const edgesLine = new THREE.LineSegments(
+        edgesGeo,
+        new THREE.LineBasicMaterial({ color: 0x888888, linewidth: 1, transparent: true, opacity: 0.5 })
+    );
+    mesh.add(edgesLine);
 
-        let uSteps = Math.floor(lenU / gridSize);
-        if (uSteps < 1) uSteps = 1;
-        for (let ui = 1; ui < uSteps; ui++) {
-            const u = ui * gridSize;
-            if (u >= lenU) break;
-            const p1 = origin.clone().add(dirU.clone().multiplyScalar(u));
-            const p2 = p1.clone().add(dirV.clone().multiplyScalar(lenV));
-            faceGroup.add(createBar(p1, p2, gridRadius, gridMaterial));
-        }
-        let vSteps = Math.floor(lenV / gridSize);
-        if (vSteps < 1) vSteps = 1;
-        for (let vi = 1; vi < vSteps; vi++) {
-            const v = vi * gridSize;
-            if (v >= lenV) break;
-            const p1 = origin.clone().add(dirV.clone().multiplyScalar(v));
-            const p2 = p1.clone().add(dirU.clone().multiplyScalar(lenU));
-            faceGroup.add(createBar(p1, p2, gridRadius, gridMaterial));
-        }
-
-        return faceGroup;
-    }
-
-    group.add(createGridFace(w, d, 0, 0, 0));
-    group.add(createGridFace(w, d, 0, thickness, 0));
-
-    const mat = frameMaterial;
-    const edgeDefs = [
-        [new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, thickness, 0)],
-        [new THREE.Vector3(w, 0, 0), new THREE.Vector3(w, thickness, 0)],
-        [new THREE.Vector3(w, 0, d), new THREE.Vector3(w, thickness, d)],
-        [new THREE.Vector3(0, 0, d), new THREE.Vector3(0, thickness, d)],
-        [new THREE.Vector3(0, 0, 0), new THREE.Vector3(w, 0, 0)],
-        [new THREE.Vector3(w, 0, 0), new THREE.Vector3(w, 0, d)],
-        [new THREE.Vector3(w, 0, d), new THREE.Vector3(0, 0, d)],
-        [new THREE.Vector3(0, 0, d), new THREE.Vector3(0, 0, 0)]
-    ];
-    edgeDefs.forEach(([s, e]) => {
-        if (s.distanceTo(e) > 0.01) group.add(createBar(s, e, frameRadius, mat));
-    });
-
-    group.userData = { isShelfMesh: true };
-    return group;
+    mesh.userData = { isShelfMesh: true };
+    return mesh;
 }
 
 // ==================== SHELF MESH MANAGEMENT ====================
@@ -654,9 +615,35 @@ export function disposeShelfMeshes() {
     setShelfMeshes([]);
 }
 
-export function renderShelvesForFurnace(furnace, baseY) {
+/**
+ * V2.5 Bug Fix: 搁板渲染坐标修正
+ *
+ * 搁板作为 furnaceGroup（basketGroup）的子对象添加，
+ * 使用炉膛局部坐标系，不再手动计算世界偏移。
+ *
+ * @param {Object} furnace - 炉膛配置
+ * @param {THREE.Group} furnaceGroup - 炉膛根Group（料框+所有工件+搁板的父节点）
+ */
+/**
+ * 🔧 V2.6 重构：搁板渲染函数
+ *
+ * 重构要点：
+ *   1. 使用 createShelfMesh 生成实体 BoxGeometry，不再使用旧版 createShelfGridMesh
+ *   2. 搁板直接 add 到 furnaceGroup（料框 Group），作为子对象继承炉膛局部坐标系
+ *   3. BoxGeometry 锚点在中心 → position 计算：
+ *      - X = fw/2（炉膛局部坐标系的 X 中心）
+ *      - Z = fd/2（炉膛局部坐标系的 Z 中心）
+ *      - Y = shelfY + shelfThickness/2（搁板底面在 shelfY，中心偏移厚度一半）
+ *   4. 搁板宽度/深度等于炉膛内部有效长宽（此处直接用 furnace.w / furnace.d，
+ *      暂未扣除炉壁间距，未来可接入 wallSpacing 参数细化）
+ *
+ * @param {Object} furnace - 炉膛配置
+ * @param {THREE.Group} furnaceGroup - 炉膛根Group（料框+所有工件+搁板的父节点）
+ */
+export function renderShelvesForFurnace(furnace, furnaceGroup) {
     const shelfThickness = placementRules.shelfThickness || 20;
 
+    // 收集所有需要渲染搁板的 Y 坐标
     const shelfYs = new Set();
     if (furnace.shelvesUsed && furnace.shelvesUsed.length > 0) {
         furnace.shelvesUsed.forEach(s => shelfYs.add(s.y));
@@ -680,13 +667,26 @@ export function renderShelvesForFurnace(furnace, baseY) {
             return;
         }
 
-        const shelfGroup = createShelfGridMesh(fw, fd, shelfThickness, 100);
-        const shelfCenterY = shelfY + shelfThickness / 2 + baseY;
-        shelfGroup.position.set(0, shelfCenterY, 0);
-        shelfGroup.userData = { isShelfMesh: true, shelfY: shelfY, thickness: shelfThickness };
+        // 🔧 V2.6: 创建实体搁板 — BoxGeometry，独立浅灰金属材质
+        const shelfMesh = createShelfMesh(fw, fd, shelfThickness);
 
-        itemsGroup.add(shelfGroup);
-        shelfMeshes.push(shelfGroup);
+        /**
+         * 🔧 V2.6: 搁板在炉膛局部坐标系中的位置
+         *
+         * 炉膛局部坐标原点在底面左下后角 (0, 0, 0)。
+         * createShelfMesh 生成 BoxGeometry(fw, thickness, fd)，锚点在正中心。
+         *
+         * 位置计算：
+         *   X = fw / 2          → 搁板在炉膛 X 方向居中
+         *   Y = shelfY + shelfThickness / 2  → 搁板底面在 shelfY，BoxGeometry 中心偏移厚度/2
+         *   Z = fd / 2          → 搁板在炉膛 Z 方向居中
+         */
+        shelfMesh.position.set(fw / 2, shelfY + shelfThickness / 2, fd / 2);
+        shelfMesh.userData = { isShelfMesh: true, shelfY: shelfY, thickness: shelfThickness };
+
+        // 🔧 V2.6: 搁板作为 furnaceGroup 的子对象，继承炉膛世界变换，绝不直接添加到 Scene
+        furnaceGroup.add(shelfMesh);
+        shelfMeshes.push(shelfMesh);
     });
 }
 
@@ -1087,8 +1087,8 @@ export function renderSingleFurnace(index, filterMaterialName) {
     camera.position.set(xOffset + furnace.w * 1.5, furnace.h * 1.8 + baseY, furnace.d * 2.5);
     controls.update();
 
-    if (placementRules.useShelfLayered && furnace.packedItems.length > 0) {
-        renderShelvesForFurnace(furnace, baseY);
+    if ((placementRules.useShelfLayered || placementRules.centerOfGravity) && furnace.packedItems.length > 0) {
+        renderShelvesForFurnace(furnace, basketGroup);
     }
 
     update3DStatsPanel(furnace);

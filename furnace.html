@@ -178,29 +178,6 @@
             <h3>📐 摆放规则配置</h3>
             <div class="rules-subtitle">配置装炉排布算法的规则参数（未来将独立为专属页面）</div>
             <div class="rule-group">
-                <div class="rule-group-title">🔧 基础排布规则</div>
-                <div class="rule-item">
-                    <input type="checkbox" id="rule-gravity" checked>
-                    <label for="rule-gravity">重力优先（重件置底）</label>
-                    <span class="rule-desc">重量大的工件优先放置在炉底</span>
-                </div>
-                <div class="rule-item">
-                    <input type="checkbox" id="rule-dense" checked>
-                    <label for="rule-dense">密集排布（最小化空隙）</label>
-                    <span class="rule-desc">尽量减少炉内空间浪费</span>
-                </div>
-                <div class="rule-item">
-                    <input type="checkbox" id="rule-same-material">
-                    <label for="rule-same-material">同材质聚集</label>
-                    <span class="rule-desc">相同材质工件尽量放在同一炉</span>
-                </div>
-                <div class="rule-item">
-                    <input type="checkbox" id="rule-same-process">
-                    <label for="rule-same-process">同工艺聚集</label>
-                    <span class="rule-desc">相同热处理工艺工件优先同炉</span>
-                </div>
-            </div>
-            <div class="rule-group">
                 <div class="rule-group-title">📏 尺寸与间距规则</div>
                 <div class="rule-item">
                     <label for="rule-min-spacing">最小安全间距 (mm)</label>
@@ -221,20 +198,6 @@
                 <div class="rule-item">
                     <label for="rule-weight-margin">承重安全余量 (%)</label>
                     <input type="number" id="rule-weight-margin" value="10" min="0" max="50">
-                </div>
-                <div class="rule-item">
-                    <input type="checkbox" id="rule-balance" checked>
-                    <label for="rule-balance">重心平衡检查</label>
-                    <span class="rule-desc">确保装载重心在炉膛中心区域</span>
-                </div>
-                <div class="rule-item">
-                    <label for="rule-sort-strategy">排布优先策略</label>
-                    <select id="rule-sort-strategy">
-                        <option value="volume-desc">体积从大到小</option>
-                        <option value="weight-desc">重量从大到小</option>
-                        <option value="height-desc">高度从大到小</option>
-                        <option value="delivery-asc">交付日期优先</option>
-                    </select>
                 </div>
             </div>
             <div class="rule-group">
@@ -261,14 +224,6 @@
                     <input type="checkbox" id="rule-posture-optimization" checked>
                     <label for="rule-posture-optimization">最小面积面朝下（长方体自动旋转）</label>
                     <span class="rule-desc">自动旋转长方体使最小面积面朝下，提高单层堆叠密度。圆柱体/轴类不受影响。</span>
-                </div>
-            </div>
-            <div class="rule-group">
-                <div class="rule-group-title">🎯 重心居中算法 (Center of Gravity Strategy)</div>
-                <div class="rule-item">
-                    <input type="checkbox" id="rule-center-of-gravity">
-                    <label for="rule-center-of-gravity">启用重心居中算法</label>
-                    <span class="rule-desc">贪心选择让整体重心最接近炉膛几何中心的位置，优先将最重物料置于底部中央</span>
                 </div>
             </div>
             <div style="display:flex;gap:10px;margin-top:20px;">
