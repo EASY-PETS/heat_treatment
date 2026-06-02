@@ -15,11 +15,11 @@ export class FurnaceManagement {
      * 初始化炉膛管理 UI 事件
      */
     init() {
-        // 绑定"增加炉膛资产"按钮
+        // 绑定"增加料框资产"按钮
         const btnAddFurnace = document.getElementById('btn-add-furnace');
         if (btnAddFurnace) {
             btnAddFurnace.addEventListener('click', () => {
-                this.formManager.addFurnaceRow('自定义新增空闲炉膛', 400, 200, 200, 15000, 1);
+                this.formManager.addFurnaceRow('新增自定义料框', 1200, 900, 900, 1500, 1);
                 this.refreshFurnacePriorityList();
             });
         }

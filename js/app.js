@@ -149,7 +149,7 @@ function executeAndRender() {
     if (globalUnpackedItems.length === 0) {
         const totalItemsIn = result.completedFurnaces.reduce((s, f) => s + f.packedItems.length, 0);
         showCapacityFeedback('success',
-            '✅ 炉膛容量充足：' + totalItemsIn + ' 件物料已全部装炉，共使用 ' +
+            '✅ 料框容量充足：' + totalItemsIn + ' 件物料已全部装框，共使用 ' +
             result.completedFurnaces.length + ' 个炉次' + aggInfo);
     } else {
         let summary = {};
@@ -233,7 +233,8 @@ function init() {
      * createFurnaceCard(name, depth, width, height, maxWeight, count, plannedHeats, actualSpacing, basketType)
      * 参数顺序: name, depth(Z), width(X), height(Y), maxWeight, count, plannedHeats, actualSpacing, basketType
      */
-    createFurnaceCard('标准台车炉（小型）', 600, 600, 900, 500, 1, 0, null, 'grid');
+    createFurnaceCard('标准料框（小型）', 900, 600, 600, 500, 1, 0, null, 'grid');
+    createFurnaceCard('标准料框（大型）', 1200, 900, 900, 1000, 1, 0, null, 'grid');
     updateTopSummary();
 
     // ==================== EVENT LISTENERS ====================
@@ -259,7 +260,7 @@ function init() {
      * 用户可在炉膛详情面板中修改料框类型
      */
     document.getElementById('btn-add-furnace').addEventListener('click', () => {
-        createFurnaceCard('自定义炉膛', 400, 200, 200, 15000, 1, 0, null, 'grid');
+        createFurnaceCard('自定义料框', 1200, 900, 900, 1000, 1, 0, null, 'grid');
         updateTopSummary();
     });
     document.querySelectorAll('.sort-btn').forEach(btn => {
