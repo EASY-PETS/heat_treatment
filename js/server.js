@@ -122,12 +122,13 @@ app.get('/api/furnaces', ensureFeishuToken, async (req, res) => {
 });
 
 // 5. 静态文件托管：让 Azure 直接代理你的前端解耦目录
-// 假设你现在的 HTML、js、css 都在项目根目录或者 public 目录下
-app.use(express.static(path.join(__dirname, './')));
+// 项目根目录在上层（因为此文件位于 js/ 目录内）
+const ROOT_DIR = path.resolve(__dirname, '..');
+app.use(express.static(ROOT_DIR));
 
 // 兜底路由，指向主页
 app.get('*', (req, res) => {
-    res.sendFile(path.resolve(__dirname, 'index.html'));
+    res.sendFile(path.resolve(ROOT_DIR, 'furnace.html'));
 });
 
 app.listen(PORT, () => {

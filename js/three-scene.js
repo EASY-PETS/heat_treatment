@@ -2021,6 +2021,85 @@ export function renderMasterPlan(plan) {
     `;
 }
 
+// ==================== SCREENSHOT CAMERA HELPER (V3.2) ====================
+
+/**
+ * 设置紧凑透视相机 — PDF 截图专用
+ * 基于包围盒精确计算距离，仅留小比例边距，确保料框/工件占满截图画面
+ *
+ * @param {THREE.Vector3} direction - 相机方向向量（归一化后使用），如 (1, 1, 1) 或 (0, 0.6, 1.5)
+ * @param {number} marginRatio - 边距比例，默认 0.02 (2%)
+ */
+export function setTightFitCamera(direction, marginRatio = 0.02) {
+    const group = furnaceGroups.get(currentFurnaceIndex);
+    if (!group) return;
+
+    const box = new THREE.Box3().setFromObject(group);
+    const center = new THREE.Vector3();
+    box.getCenter(center);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const fovRad = (camera.fov * Math.PI) / 180;
+    const distance = (maxDim * (1 + marginRatio)) / (2 * Math.tan(fovRad / 2));
+
+    const dir = direction.clone().normalize();
+    camera.position.copy(center.clone().add(dir.clone().multiplyScalar(distance)));
+    controls.target.copy(center);
+    controls.update();
+}
+
+// ==================== ORTHOGRAPHIC TOP-VIEW FOR STEP SCREENSHOTS (V3.4) ====================
+
+/**
+ * 创建正交俯视相机并设置位置 — 用于装炉步骤图截图
+ *
+ * 此函数不修改全局 PerspectiveCamera，而是返回一个新的 OrthographicCamera。
+ * 截图引擎通过 forceRender(orthoCamera) 使用它进行渲染，截图后丢弃。
+ *
+ * 基于当前炉膛 Group 的包围盒自动计算 frustumSize，确保所有物料、搁板完整在画面内。
+ *
+ * @param {number} [marginRatio=0.02] - 边距比例
+ * @returns {THREE.OrthographicCamera|null}
+ */
+export function setOrthographicTopView(marginRatio = 0.02) {
+    const group = furnaceGroups.get(currentFurnaceIndex);
+    if (!group || !renderer) return null;
+
+    // 计算包围盒
+    const box = new THREE.Box3().setFromObject(group);
+    const center = new THREE.Vector3();
+    box.getCenter(center);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+
+    // frustumSize 取 XZ 平面最大尺寸 + 边距
+    const maxDim = Math.max(size.x, size.z);
+    const frustumSize = maxDim * (1 + marginRatio);
+
+    // 基于 canvas 实际尺寸计算宽高比
+    const canvas = renderer.domElement;
+    const aspect = canvas.clientWidth / canvas.clientHeight;
+
+    const orthoCamera = new THREE.OrthographicCamera(
+        -frustumSize * aspect / 2,
+        frustumSize * aspect / 2,
+        frustumSize / 2,
+        -frustumSize / 2,
+        0.1,
+        20000
+    );
+
+    // 相机放在包围盒正上方
+    orthoCamera.position.set(center.x, center.y + 10000, center.z);
+    orthoCamera.lookAt(center);
+    // 设置 up 方向为 -Z，使屏幕上方对应场景后方（俯视标准方向）
+    orthoCamera.up.set(0, 0, -1);
+
+    return orthoCamera;
+}
+
 // ==================== HELPERS ====================
 
 export function findResultIndexByFid(fid) {
@@ -2032,4 +2111,55 @@ export function findResultIndexByFid(fid) {
         if (globalFurnacesResult[i].typeName === name) return i;
     }
     return -1;
+}
+
+// ==================== PDF 截图辅助函数 (V3.1) ====================
+
+/**
+ * 强制执行一次渲染 — 供截图引擎调用
+ *
+ * 在修改相机/场景状态后，调用此函数确保 WebGL framebuffer 已更新，
+ * 然后立即使用 renderer.domElement.toDataURL() 获取截图。
+ *
+ * 注意：此函数不会阻塞动画循环，动画循环在后台继续运行也不会产生副作用。
+ *
+ * @param {THREE.Camera} [customCamera] - 可选自定义相机（如 OrthographicCamera 截图时传入）
+ */
+export function forceRender(customCamera) {
+    const activeCamera = customCamera || camera;
+    if (renderer && scene && activeCamera) {
+        renderer.render(scene, activeCamera);
+    }
+}
+
+/**
+ * 截图前临时覆盖网格/坐标轴/标尺的显示状态
+ *
+ * 不修改 displaySettings 全局状态，仅直接操作 Helper 对象的 visible 属性。
+ * 返回原始状态快照，供 restoreDisplay() 恢复。
+ *
+ * @param {{ showGrid?: boolean, showAxes?: boolean, showRulers?: boolean }} overrides
+ * @returns {Object} 原始状态快照
+ */
+export function saveAndOverrideDisplay({ showGrid, showAxes, showRulers }) {
+    const snapshot = {
+        showGrid: mainSceneGridHelper ? mainSceneGridHelper.visible : true,
+        showAxes: mainSceneAxesHelper ? mainSceneAxesHelper.visible : true,
+        showRulers: mainSceneRulerGroup ? mainSceneRulerGroup.visible : true
+    };
+    if (mainSceneGridHelper && showGrid !== undefined) mainSceneGridHelper.visible = showGrid;
+    if (mainSceneAxesHelper && showAxes !== undefined) mainSceneAxesHelper.visible = showAxes;
+    if (mainSceneRulerGroup && showRulers !== undefined) mainSceneRulerGroup.visible = showRulers;
+    return snapshot;
+}
+
+/**
+ * 恢复截图前的显示状态
+ * @param {Object} snapshot - saveAndOverrideDisplay() 返回的快照
+ */
+export function restoreDisplay(snapshot) {
+    if (!snapshot) return;
+    if (mainSceneGridHelper) mainSceneGridHelper.visible = snapshot.showGrid;
+    if (mainSceneAxesHelper) mainSceneAxesHelper.visible = snapshot.showAxes;
+    if (mainSceneRulerGroup) mainSceneRulerGroup.visible = snapshot.showRulers;
 }

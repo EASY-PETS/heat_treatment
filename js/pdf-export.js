@@ -718,20 +718,36 @@ export function showPdfSelectModal() {
         const div = document.createElement('div');
         div.className = 'pdf-furnace-option' + (idx === currentFurnaceIndex ? ' selected' : '');
         div.innerHTML = `
-            <input type="radio" name="pdf-furnace" value="${idx}" ${idx===currentFurnaceIndex?'checked':''}>
+            <input type="checkbox" name="pdf-furnace" value="${idx}" ${idx===currentFurnaceIndex?'checked':''}>
             <div>
                 <div class="pfo-name">${f.instanceId}</div>
                 <div class="pfo-meta">${f.packedItems.length}件 · ${f.totalWeight.toFixed(1)}kg · 利用率${((packedVol/totalVol)*100).toFixed(1)}%</div>
             </div>
         `;
-        div.addEventListener('click', () => {
-            document.querySelectorAll('.pdf-furnace-option').forEach(o => o.classList.remove('selected'));
-            div.classList.add('selected');
-            div.querySelector('input[type="radio"]').checked = true;
+        div.addEventListener('click', (e) => {
+            if (e.target.tagName === 'INPUT') return;
+            const cb = div.querySelector('input[type="checkbox"]');
+            cb.checked = !cb.checked;
+            div.classList.toggle('selected', cb.checked);
         });
         list.appendChild(div);
     });
     document.getElementById('pdf-select-overlay').style.display = 'flex';
+}
+
+/**
+ * V3.1: 获取用户在 PDF 选择弹窗中选中的所有炉膛索引。
+ * 用于支持多炉膛批量导出六页式 PDF。
+ * @returns {number[]} 选中的炉膛索引数组
+ */
+export function getSelectedPdfFurnaceIds() {
+    const checkboxes = document.querySelectorAll('input[name="pdf-furnace"]:checked');
+    const ids = [];
+    checkboxes.forEach(cb => {
+        const val = parseInt(cb.value);
+        if (!isNaN(val)) ids.push(val);
+    });
+    return ids;
 }
 
 /**

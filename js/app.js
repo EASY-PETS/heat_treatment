@@ -42,7 +42,8 @@ import {
     openJsonImportModal, parseJsonPlan, renderJsonPreview, importJsonPlanToMaster
 } from './ui.js';
 import { executePacking } from './furnace-engine.js';
-import { showPdfSelectModal, exportSingleFurnacePDF } from './pdf-export.js';
+import { showPdfSelectModal, exportSingleFurnacePDF, getSelectedPdfFurnaceIds } from './pdf-export.js';
+import { generateSixPagePDF } from './pdf-six-page.js';
 
 /**
  * V2.7: executeAndRender — 核心入口函数
@@ -298,7 +299,7 @@ function init() {
     });
     document.getElementById('btn-add-item').addEventListener('click', () => {
         const color = generateUniqueColor(usedColors);
-        createMaterialCard('新工件批次', 'cuboid', 10, 50, 50, 60, 0, color);
+        createMaterialCard('新工件批次', 'cuboid', 50, 150, 150, 60, 10, color);
         updateTopSummary();
     });
     document.getElementById('nav-prev').addEventListener('click', () => navigateFurnace(-1));
@@ -368,13 +369,15 @@ function init() {
             document.getElementById('pdf-select-overlay').style.display = 'none';
     });
     document.getElementById('btn-pdf-confirm').addEventListener('click', () => {
-        const selected = document.querySelector('input[name="pdf-furnace"]:checked');
-        if (!selected) return;
+        const selectedIds = getSelectedPdfFurnaceIds();
+        if (selectedIds.length === 0) {
+            alert('请至少选择一个炉膛方案');
+            return;
+        }
         document.getElementById('pdf-select-overlay').style.display = 'none';
-        exportSingleFurnacePDF(parseInt(selected.value), {
-            exportJson: document.getElementById('pdf-opt-json').checked,
-            worklist: document.getElementById('pdf-opt-worklist').checked
-        });
+
+        // 🔧 V3.1: 使用六页式 PDF 生成器
+        generateSixPagePDF(selectedIds);
     });
     document.getElementById('btn-ji-parse').addEventListener('click', () => {
         const jsonStr = document.getElementById('ji-json-textarea').value.trim();
