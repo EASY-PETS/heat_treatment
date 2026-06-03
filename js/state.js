@@ -143,14 +143,14 @@ export const usedColors = new Set();
 
 // ==================== BASKET TYPE STATE (V2.2) ====================
 /**
- * 料框类型配置 — 支持普通网格、蜂窝料框、托盘式搁板、实心料框四种
+ * 料框类型配置 — 支持普通网格、蜂窝料框、托盘式搁板、节点料框四种
  *
  * V2.3: 新增 'tray'（托盘式搁板）— 无四周围栏，底部搁板 + 10个支撑梁
  *       适用于齿轮、模具、法兰、圆环件、大尺寸工件
  *
  * 扩展点：未来可添加更多料框类型
  */
-export const BASKET_TYPES = ['grid', 'honeycomb', 'tray', 'solid'];
+export const BASKET_TYPES = ['grid', 'honeycomb', 'tray', 'ringnode'];
 
 /**
  * 默认料框类型（新建炉膛时使用）

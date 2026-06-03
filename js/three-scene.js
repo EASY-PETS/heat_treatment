@@ -144,8 +144,173 @@ function getHollowHexagonGeometry() {
     return cachedHexGeometry;
 }
 
+// ==================== RING NODE GEOMETRY (V3.5) ====================
+
+/** 圆环节点几何参数 */
+const RING_OUTER_RADIUS = 18;     // 圆环外径 mm（直径 36mm）
+const RING_TUBE_RADIUS = 3;       // 圆环管径 mm（管壁粗细）
+const ARM_RADIUS = 2.5;           // 连接臂半径 mm
+const ARM_LENGTH = 35;            // 连接臂半长（从环心到臂端点）mm
+const RING_NODE_SPACING = (RING_OUTER_RADIUS + ARM_LENGTH) * 2; // 单元间距 ≈ 106mm
+const RING_NODE_HALF_SPACE = RING_OUTER_RADIUS + ARM_LENGTH;    // 半间距 ≈ 53mm
+
+/** 缓存圆环几何体（Torus — 8 段径向 × 16 段周向，面数极低） */
+let cachedRingGeometry = null;
+function getRingGeometry() {
+    if (!cachedRingGeometry) {
+        cachedRingGeometry = new THREE.TorusGeometry(RING_OUTER_RADIUS, RING_TUBE_RADIUS, 8, 16);
+    }
+    return cachedRingGeometry;
+}
+
+/** 缓存连接臂几何体（Cylinder — 6 段，长度 = 2×ARM_LENGTH） */
+let cachedArmGeometry = null;
+function getArmGeometry() {
+    if (!cachedArmGeometry) {
+        cachedArmGeometry = new THREE.CylinderGeometry(ARM_RADIUS, ARM_RADIUS, ARM_LENGTH * 2, 6);
+    }
+    return cachedArmGeometry;
+}
+
 /**
- * 在指定面上创建蜂窝六边形 InstancedMesh 面板
+ * 在指定面上创建圆环节点 InstancedMesh 阵列（V3.5）
+ *
+ * 每个单元 = 1 个中空圆环（Torus） + 4 个连接臂（±X, ±Z 方向）。
+ * 分为两层 InstancedMesh：ringsInstanced（所有圆环） + armsInstanced（所有连接臂）。
+ * 相邻单元的连接臂端点重合，自然形成 ◯—🞎—◯ 的视觉结构。
+ *
+ * @param {string} faceType - 'bottom'|'front'|'back'|'left'|'right'
+ * @param {number} w - 料框宽度
+ * @param {number} h - 料框高度
+ * @param {number} d - 料框深度
+ * @param {THREE.Material} ringMaterial - 圆环材质
+ * @param {THREE.Material} armMaterial - 连接臂材质
+ * @returns {THREE.Group} 包含两个 InstancedMesh 的 Group
+ */
+function createRingNodePanel(face, w, h, d, ringMaterial, armMaterial) {
+    const panelGroup = new THREE.Group();
+    
+    // =================【核心参数控制】=================
+    const spacing = 100;               // 网格间距
+    const ringRadius = spacing * 0.25; // 圆环半径
+    const ringTube = spacing * 0.05;   // 圆环管粗
+    const armRadius = spacing * 0.05;  // 连杆粗细
+    // =================================================
+
+    // 1. 确定当前面的物理总尺寸
+    let gridW = 0, gridH = 0;
+    if (face === 'bottom') { gridW = w; gridH = d; }
+    else if (face === 'front' || face === 'back') { gridW = w; gridH = h; }
+    else if (face === 'left' || face === 'right') { gridW = d; gridH = h; }
+
+    // 【核心修复点】：计算安全内缩边距（圆环半径 + 管径 + 5mm 额外留白）
+    // 确保圆环的任何一个边缘都不会触碰到或超出外框钢筋
+    const safetyMargin = ringRadius + ringTube + 5; 
+
+    // 2. 在安全区域内，计算能塞下多少列和多少行
+    let cols = Math.floor((gridW - 2 * safetyMargin) / spacing) + 1;
+    let rows = Math.floor((gridH - 2 * safetyMargin) / spacing) + 1;
+    
+    // 容错机制：如果料框太小，至少保留 1 行 1 列，避免报错
+    if (cols < 1) cols = 1;
+    if (rows < 1) rows = 1;
+
+    // 3. 计算这一堆网格组合起来之后的“实际总宽高”
+    const totalGridW = (cols - 1) * spacing;
+    const totalGridH = (rows - 1) * spacing;
+
+    // 4. 【关键】：动态计算起始点偏移量，让网格在面板上完美居中，绝不越界
+    const startU = (gridW - totalGridW) / 2;
+    const startV = (gridH - totalGridH) / 2;
+
+    // --- 创建几何体 ---
+    const ringGeo = new THREE.TorusGeometry(ringRadius, ringTube, 8, 24);
+    const armGeo = new THREE.CylinderGeometry(armRadius, armRadius, spacing, 8);
+
+    const ringCount = cols * rows;
+    const armCount = (cols - 1) * rows + cols * (rows - 1);
+
+    const ringMesh = new THREE.InstancedMesh(ringGeo, ringMaterial, ringCount);
+    const armMesh = new THREE.InstancedMesh(armGeo, armMaterial, armCount);
+
+    let ringIdx = 0;
+    let armIdx = 0;
+    const dummy = new THREE.Object3D();
+
+    // 内部映射函数（保持原有的空间旋转逻辑不变）
+    function applyTransform(u, v, type) {
+        let x = 0, y = 0, z = 0;
+        let rx = 0, ry = 0, rz = 0;
+
+        switch (face) {
+            case 'bottom':
+                if (type === 'ring') { x = u; y = 0; z = v; rx = Math.PI / 2; } 
+                else if (type === 'hArm') { x = u + spacing / 2; y = 0; z = v; rz = Math.PI / 2; } 
+                else if (type === 'vArm') { x = u; y = 0; z = v + spacing / 2; rx = Math.PI / 2; }
+                break;
+            case 'front':
+                if (type === 'ring') { x = u; y = v; z = d; rx = 0; } 
+                else if (type === 'hArm') { x = u + spacing / 2; y = v; z = d; rz = Math.PI / 2; } 
+                else if (type === 'vArm') { x = u; y = v + spacing / 2; z = d; rz = 0; }
+                break;
+            case 'back':
+                if (type === 'ring') { x = u; y = v; z = 0; rx = 0; } 
+                else if (type === 'hArm') { x = u + spacing / 2; y = v; z = 0; rz = Math.PI / 2; } 
+                else if (type === 'vArm') { x = u; y = v + spacing / 2; z = 0; rz = 0; }
+                break;
+            case 'left':
+                if (type === 'ring') { x = 0; y = v; z = u; ry = Math.PI / 2; } 
+                else if (type === 'hArm') { x = 0; y = v; z = u + spacing / 2; rx = Math.PI / 2; } 
+                else if (type === 'vArm') { x = 0; y = v + spacing / 2; z = u; rz = 0; }
+                break;
+            case 'right':
+                if (type === 'ring') { x = w; y = v; z = u; ry = Math.PI / 2; } 
+                else if (type === 'hArm') { x = w; y = v; z = u + spacing / 2; rx = Math.PI / 2; } 
+                else if (type === 'vArm') { x = w; y = v + spacing / 2; z = u; rz = 0; }
+                break;
+        }
+
+        dummy.position.set(x, y, z);
+        dummy.rotation.set(rx, ry, rz);
+        dummy.updateMatrix();
+    }
+
+    // --- 渲染循环（应用居中后的起始坐标） ---
+    for (let i = 0; i < cols; i++) {
+        for (let j = 0; j < rows; j++) {
+            // 从算好的居中位置 startU 和 startV 开始累加
+            const u = startU + i * spacing;
+            const v = startV + j * spacing;
+
+            // 1. 放置圆环
+            applyTransform(u, v, 'ring');
+            ringMesh.setMatrixAt(ringIdx++, dummy.matrix);
+
+            // 2. 放置横向臂
+            if (i < cols - 1) {
+                applyTransform(u, v, 'hArm');
+                armMesh.setMatrixAt(armIdx++, dummy.matrix);
+            }
+
+            // 3. 放置纵向臂
+            if (j < rows - 1) {
+                applyTransform(u, v, 'vArm');
+                armMesh.setMatrixAt(armIdx++, dummy.matrix);
+            }
+        }
+    }
+
+    ringMesh.instanceMatrix.needsUpdate = true;
+    armMesh.instanceMatrix.needsUpdate = true;
+
+    panelGroup.add(ringMesh);
+    panelGroup.add(armMesh);
+
+    return panelGroup;
+}
+
+/**
+ * 在指定面上创建蜂窝六边形 InstancedMesh 面板（修复图案溢出版）
  * @param {string} faceType - 'bottom'|'front'|'back'|'left'|'right'
  * @param {number} w - 料框宽度
  * @param {number} h - 料框高度
@@ -155,14 +320,15 @@ function getHollowHexagonGeometry() {
  */
 function createHoneycombPanel(faceType, w, h, d, material) {
     const hexGeo = getHollowHexagonGeometry();
-    const outerR = HEX_OUTER_RADIUS;
-    const hexW = outerR * 2;
-    const hexH = outerR * Math.sqrt(3);
-    const colSpacing = hexW * 0.75;
-    const rowSpacing = hexH;
+    const outerR = HEX_OUTER_RADIUS; // 外径 25mm
+    const hexW = outerR * 2;         // 50mm
+    const hexH = outerR * Math.sqrt(3); // 43.3mm
+    const colSpacing = hexW * 0.75;  // 列间距 37.5mm
+    const rowSpacing = hexH;         // 行间距 43.3mm
 
     let panelU, panelV, ox, oy, oz, ux, uy, uz, vx, vy, vz, rotX, rotY, rotZ;
 
+    // 保持你原有的 5 面空间映射逻辑不变
     switch (faceType) {
         case 'bottom':
             panelU = w; panelV = d;
@@ -202,8 +368,36 @@ function createHoneycombPanel(faceType, w, h, d, material) {
         default: return null;
     }
 
-    const cols = Math.ceil(panelU / colSpacing) + 2;
-    const rows = Math.ceil(panelV / rowSpacing) + 2;
+    // ====================【核心修复算法：安全内缩与精密居中】====================
+    
+    // 1. 定义安全内缩边距（六边形外径 outerR + 5mm 额外留白，避开粗铁框）
+    const safetyMargin = outerR + 5; 
+
+    // 计算内部可用的安全宽高
+    const availU = panelU - 2 * safetyMargin;
+    const availV = panelV - 2 * safetyMargin;
+
+    // 2. 计算在安全区域内，最多能排下多少列和多少行
+    // 列宽计算：(cols - 1) * colSpacing <= availU
+    let cols = Math.floor(availU / colSpacing) + 1;
+    // 行高计算：由于错位排布，总高度需要加上最后半个交错行的高度差
+    let rows = Math.floor((availV - (cols > 1 ? rowSpacing / 2 : 0)) / rowSpacing) + 1;
+
+    // 容错：防止料框极小时算出来的行列数为 0
+    if (cols < 1) cols = 1;
+    if (rows < 1) rows = 1;
+
+    // 3. 逆向精确计算这一整组蜂窝网格中心点组合起来之后的“实际物理总宽高”
+    const totalGridW = (cols - 1) * colSpacing;
+    const totalGridH = (rows - 1) * rowSpacing + (cols > 1 ? rowSpacing / 2 : 0);
+
+    // 4. 计算网格在当前面板上的“起始偏移量”，使其完美对称居中
+    const startU = (panelU - totalGridW) / 2;
+    const startV = (panelV - totalGridH) / 2;
+
+    // =========================================================================
+
+    // 准确初始化 InstancedMesh 的实例数量，不浪费内存
     const mesh = new THREE.InstancedMesh(hexGeo.clone(), material, cols * rows);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -211,13 +405,16 @@ function createHoneycombPanel(faceType, w, h, d, material) {
     const dummy = new THREE.Object3D();
     let idx = 0;
 
-    for (let row = -1; row < rows; row++) {
-        for (let col = -1; col < cols; col++) {
-            const u = col * colSpacing;
-            const v = row * rowSpacing + (col % 2) * rowSpacing / 2;
+    // 从 0 开始严格循环，不再用 -1，杜绝越界生成
+    for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+            
+            // 基于算好的居中起始点 startU 和 startV 进行网格衍生
+            const u = startU + col * colSpacing;
+            // 奇偶列交错下移半行（保持蜂窝无缝拼接结构）
+            const v = startV + row * rowSpacing + (col % 2) * rowSpacing / 2;
 
-            if (u < -hexW / 2 || u > panelU + hexW / 2) continue;
-            if (v < -hexH / 2 || v > panelV + hexH / 2) continue;
+            // 此时 u 和 v 的中心点已被限制在绝对安全区，无需再做任何坐标剪裁判断 (continue)
 
             dummy.position.set(
                 ox + u * ux + v * vx,
@@ -515,6 +712,95 @@ function createSolidBasketFrame(w, h, d) {
 }
 
 /**
+ * V3.5: 圆环节点网格料框 — 使用 InstancedMesh 阵列，高效模拟工业铸造料筐视觉效果
+ *
+ * 结构：
+ *   - 五面（底 + 前后左右）圆环节点面板
+ *   - 每个面板 = 圆环 InstancedMesh + 连接臂 InstancedMesh 阵列
+ *   - 粗钢筋边框框架
+ *
+ * 圆环为 TorusGeometry（8×16 段），连接臂为 CylinderGeometry（6 段），
+ * 总面数极低，无需布尔运算，完全避免 CAD 级复杂几何体。
+ */
+export function createRingNodeBasketFrame(w, h, d) {
+    const group = new THREE.Group();
+
+    // 面板材质 — 圆环
+    const ringMaterial = new THREE.MeshStandardMaterial({
+        color: 0x667788,
+        roughness: 0.5,
+        metalness: 0.75,
+        transparent: true,
+        opacity: 0.85,    // 调高一点透明度使视觉更清晰
+        depthWrite: true  // 开启 depthWrite 避免半透明乱序闪烁
+    });
+
+    // 面板材质 — 连接臂
+    const armMaterial = new THREE.MeshStandardMaterial({
+        color: 0x556677,
+        roughness: 0.55,
+        metalness: 0.7,
+        transparent: true,
+        opacity: 0.8,
+        depthWrite: true
+    });
+
+    // 叠加五面网格面板
+    group.add(createRingNodePanel('bottom', w, h, d, ringMaterial, armMaterial));
+    group.add(createRingNodePanel('front', w, h, d, ringMaterial, armMaterial));
+    group.add(createRingNodePanel('back', w, h, d, ringMaterial, armMaterial));
+    group.add(createRingNodePanel('left', w, h, d, ringMaterial, armMaterial));
+    group.add(createRingNodePanel('right', w, h, d, ringMaterial, armMaterial));
+
+    // 边框钢筋材质与线条生成
+    const frameRadius = 2.0; // 略微调细主框架，配合内部网格
+    const frameMaterial = new THREE.MeshStandardMaterial({
+        color: 0x334455,
+        roughness: 0.4,
+        metalness: 0.9,
+    });
+
+    function createEdgeBar(x1, y1, z1, x2, y2, z2) {
+        const p1 = new THREE.Vector3(x1, y1, z1);
+        const p2 = new THREE.Vector3(x2, y2, z2);
+        
+        // 简易 createBar 实现（计算长度、中心点及朝向）
+        const direction = new THREE.Vector3().subVectors(p2, p1);
+        const length = direction.length();
+        
+        const barGeo = new THREE.CylinderGeometry(frameRadius, frameRadius, length, 8);
+        const bar = new THREE.Mesh(barGeo, frameMaterial);
+        
+        // 设置位置到两点中点
+        bar.position.copy(p1).add(direction.multiplyScalar(0.5));
+        
+        // 让圆柱体朝向 p2 点
+        const up = new THREE.Vector3(0, 1, 0);
+        bar.quaternion.setFromUnitVectors(up, direction.normalize());
+        
+        return bar;
+    }
+
+    // 绘制外部主框架（12条边筋）
+    group.add(createEdgeBar(0, 0, 0, w, 0, 0));
+    group.add(createEdgeBar(w, 0, 0, w, 0, d));
+    group.add(createEdgeBar(w, 0, d, 0, 0, d));
+    group.add(createEdgeBar(0, 0, d, 0, 0, 0));
+
+    group.add(createEdgeBar(0, h, 0, w, h, 0));
+    group.add(createEdgeBar(w, h, 0, w, h, d));
+    group.add(createEdgeBar(w, h, d, 0, h, d));
+    group.add(createEdgeBar(0, h, d, 0, h, 0));
+
+    group.add(createEdgeBar(0, 0, 0, 0, h, 0));
+    group.add(createEdgeBar(w, 0, 0, w, h, 0));
+    group.add(createEdgeBar(w, 0, d, w, h, d));
+    group.add(createEdgeBar(0, 0, d, 0, h, d));
+
+    group.userData = { isBasketFrame: true, basketType: 'ringnode' };
+    return group;
+}
+/**
  * 统一料框创建入口 — 根据 basketType 参数选择对应类型
  */
 function createBasketFrame(w, h, d, gridSize, basketType) {
@@ -525,7 +811,10 @@ function createBasketFrame(w, h, d, gridSize, basketType) {
         case 'tray':
             return createTrayBasketFrame(w, h, d);
         case 'solid':
-            return createSolidBasketFrame(w, h, d);
+            // return createSolidBasketFrame(w, h, d);
+            return createRingNodeBasketFrame(w, h, d); // 固体框改为密集网格，视觉上更清晰
+        case 'ringnode':
+            return createRingNodeBasketFrame(w, h, d);
         case 'grid':
         default:
             return createGridBasketFrame(w, h, d, gridSize || 100);
@@ -535,50 +824,112 @@ function createBasketFrame(w, h, d, gridSize, basketType) {
 // ==================== SHELF MESH (V2.6 重构) ====================
 
 /**
- * 创建搁板实体 3D 模型 — BoxGeometry 实体厚度
+ * 创建搁板 InstancedMesh（重构版：修复边缘溢出 + 垂直拉伸厚度可配置）
+ * @param {number} w - 搁板宽度
+ * @param {number} d - 搁板深度
+ * @param {number} thickness - 搁板配置厚度 (由外部渲染循环动态传入)
+ * @returns {THREE.InstancedMesh}
  */
 function createShelfMesh(w, d, thickness) {
-    // 蜂窝搁板 — InstancedMesh 中空六边形阵列
-    const hexGeo = getHollowHexagonGeometry().clone();
-    const outerR = HEX_OUTER_RADIUS;
-    const hexW = outerR * 2;
-    const hexH = outerR * Math.sqrt(3);
-    const colSpacing = hexW * 0.75;
-    const rowSpacing = hexH;
+    const outerR = HEX_OUTER_RADIUS;    // 外径 25mm
+    const hexW = outerR * 2;            // 50mm
+    const hexH = outerR * Math.sqrt(3);    // 43.3mm
+    const colSpacing = hexW * 0.75;     // 列间距 37.5mm
+    const rowSpacing = hexH;            // 行间距 43.3mm
 
-    const shelfMat = new THREE.MeshStandardMaterial({
-        color: 0xb4b4c8,
-        roughness: 0.5,
-        metalness: 0.5,
+    // ====================【1. 垂直方向拉伸几何体构建】====================
+    // 创建二维六边形 Shape 路径
+    const shape = new THREE.Shape();
+    for (let i = 0; i < 6; i++) {
+        const angle = Math.PI / 6 + i * Math.PI / 3;
+        const x = outerR * Math.cos(angle);
+        const y = outerR * Math.sin(angle);
+        if (i === 0) shape.moveTo(x, y);
+        else shape.lineTo(x, y);
+    }
+    shape.closePath();
+
+    // 添加内挖孔路径，形成中空的蜂窝金属网格效果
+    const innerR = outerR - HEX_BORDER_WIDTH;
+    if (innerR > 0) {
+        const hole = new THREE.Path();
+        for (let i = 0; i < 6; i++) {
+            const angle = Math.PI / 6 + i * Math.PI / 3;
+            const x = innerR * Math.cos(angle);
+            const y = innerR * Math.sin(angle);
+            if (i === 0) hole.moveTo(x, y);
+            else hole.lineTo(x, y);
+        }
+        hole.closePath();
+        shape.holes.push(hole);
+    }
+
+    // 核心改动：使用 ExtrudeGeometry 代替 ShapeGeometry，使图案具备真实物理厚度
+    const extrudeSettings = {
+        depth: thickness || 5, // 动态使用传入的厚度参数，若未定义则防呆默认为 5mm
+        bevelEnabled: false    // 关闭斜角(Bevel)，保持工业钢板网平整切面的真实感
+    };
+    const hexExtrudeGeo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+
+    // ====================【2. 安全内缩与精密对称居中算法】====================
+    // 定义安全内缩边距（六边形外径 + 5mm 额外留白，避开粗铁框与边缘筋条）
+    const safetyMargin = outerR + 5; 
+
+    // 计算内部可用的安全排布宽高
+    const availW = w - 2 * safetyMargin;
+    const availD = d - 2 * safetyMargin;
+
+    // 在安全区域内，计算最多能完整塞下多少列和多少行
+    let cols = Math.floor(availW / colSpacing) + 1;
+    // 考虑奇偶列交错导致的垂直偏移量，对行数进行安全收缩
+    let rows = Math.floor((availD - (cols > 1 ? rowSpacing / 2 : 0)) / rowSpacing) + 1;
+
+    // 容错机制：防止数据极小时算出来的行列数为 0 导致后续报错
+    if (cols < 1) cols = 1;
+    if (rows < 1) rows = 1;
+
+    // 逆向精密计算出这一整组蜂窝网格中心点组合起来之后的“实际物理总宽高”
+    const totalGridW = (cols - 1) * colSpacing;
+    const totalGridD = (rows - 1) * rowSpacing + (cols > 1 ? rowSpacing / 2 : 0);
+
+    // ====================【3. 材质与实例化渲染】====================
+    const material = new THREE.MeshStandardMaterial({
+        color: 0x556677,
+        roughness: 0.55,
+        metalness: 0.7,
         transparent: true,
-        opacity: 0.7,
-        side: THREE.DoubleSide,
-        depthWrite: true
+        opacity: 0.6,
+        // 关键视觉优化：有了 3D 实体拉伸后，必须开启深度写入(depthWrite: true)，
+        // 否则拉伸出来的侧面和前后孔洞会出现严重的透视层级错乱，开启后才具有立体质感。
+        depthWrite: true 
     });
 
-    const cols = Math.ceil(w / colSpacing) + 2;
-    const rows = Math.ceil(d / rowSpacing) + 2;
-    const mesh = new THREE.InstancedMesh(hexGeo, shelfMat, cols * rows);
+    // 严格按照计算好的精确行列数初始化 InstancedMesh
+    const mesh = new THREE.InstancedMesh(hexExtrudeGeo, material, cols * rows);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
 
     const dummy = new THREE.Object3D();
-    const halfW = w / 2;
-    const halfD = d / 2;
     let idx = 0;
 
-    for (let row = -1; row < rows; row++) {
-        for (let col = -1; col < cols; col++) {
-            const cx = col * colSpacing - halfW;
-            const cz = row * rowSpacing + (col % 2) * rowSpacing / 2 - halfD;
+    // 严格从 0 开始渲染，杜绝边界外额外生成
+    for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+            
+            // 基于 totalGridW 和 totalGridD 的正负对称平移，直接让整个网格阵列的中心点落在 (0, 0)
+            const cx = -totalGridW / 2 + col * colSpacing;
+            // 奇偶列交错下移半行（无缝拼接结构）
+            const cz = -totalGridD / 2 + row * rowSpacing + (col % 2) * rowSpacing / 2;
 
-            if (cx < -halfW - outerR || cx > halfW + outerR) continue;
-            if (cz < -halfD - outerR || cz > halfD + outerR) continue;
-
+            // 设置实例坐标
             dummy.position.set(cx, 0, cz);
+            
+            // 关键：ExtrudeGeometry 默认是在二维平面平铺然后向 Z 轴拉伸
+            // 旋转 -Math.PI / 2 后，本地 Z 轴精确变为场景的垂直 Y 轴，达成完美的垂直方向拉伸！
             dummy.rotation.set(-Math.PI / 2, 0, 0);
             dummy.scale.set(1, 1, 1);
             dummy.updateMatrix();
+            
             mesh.setMatrixAt(idx, dummy.matrix);
             idx++;
         }
@@ -589,7 +940,6 @@ function createShelfMesh(w, d, thickness) {
     mesh.userData = { isShelfMesh: true };
     return mesh;
 }
-
 // ==================== SHELF MESH MANAGEMENT ====================
 
 export function disposeShelfMeshes() {
@@ -664,8 +1014,8 @@ export function renderShelvesForFurnace(furnace, furnaceGroup, baseY, layerGroup
         const shelfMesh = createShelfMesh(fw, fd, shelfThickness);
 
         // 🔧 搁板 XZ 必须对齐料框几何中心（furnaceGroup 原点）
-        // 搁板在 LayerGroup 内部，其 position 保持为全局坐标值
-        const shelfYSpace = baseY + shelfY + shelfThickness / 2;
+        // 【修复】：直接贴合起始面，让 ExtrudeGeometry 自身向上自然拉伸出厚度
+        const shelfYSpace = baseY + shelfY;
         shelfMesh.position.set(0, shelfYSpace, 0);
 
         // 计算搁板所属 layer — 用于爆炸图展开
@@ -1931,9 +2281,6 @@ export async function playLoadingAnimation() {
         check();
     });
 
-    const entryDelayMs = 100;
-    const dropDurationMs = 500;
-
     if (itemDrawSteps.length > 0) {
         const firstStep = itemDrawSteps[0];
         if (firstStep.furnaceIndex !== currentFurnaceIndex) {
@@ -1951,6 +2298,14 @@ export async function playLoadingAnimation() {
         await waitIfPaused();
         if (animStopped) break;
 
+        // 不再硬编码，每次动画开始前直接读取当前 UI 的速度值
+        // （假设 select 里的 value 代表完成一个物体的总时长，比如 200, 400, 1000 等）
+        const speedMs = parseInt(document.getElementById('anim-speed-select').value) || 400;
+        
+        // 把总时长的 80% 用来做下落动画，20% 用作物体之间的短暂间隔缓冲
+        const dropDurationMs = speedMs * 0.8; 
+        const entryDelayMs = speedMs * 0.2; // 如果你需要并排掉落效果，这个值可以保留原逻辑
+
         const step = itemDrawSteps[i];
 
         if (step.furnaceIndex !== currentFurnaceIndex && i > 0) {
@@ -1962,7 +2317,7 @@ export async function playLoadingAnimation() {
             itemsGroup.add(step.mesh);
         }
 
-        const entryDelay = i * entryDelayMs;
+        const entryDelay = 0;
         const startTime = performance.now();
 
         const animateDrop = new Promise(resolve => {
@@ -1998,8 +2353,9 @@ export async function playLoadingAnimation() {
 
         await animateDrop;
 
-        const speedMs = parseInt(document.getElementById('anim-speed-select').value) || 400;
-        await sleep(Math.max(50, speedMs - dropDurationMs));
+        const currentSpeedMs = parseInt(document.getElementById('anim-speed-select').value) || 400;
+        // 只留一段极短的基础睡眠，保证浏览器的渲染线程能喘口气，避免极端卡死
+        await sleep(currentSpeedMs * 0.2);
     }
 
     document.getElementById('anim-progress-text').textContent = '';
