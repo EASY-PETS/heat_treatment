@@ -1,11 +1,16 @@
 /**
- * three-scene.js - All Three.js Related Code (V2.3)
+ * three-scene.js - All Three.js Related Code (V2.7)
+ *
+ * V2.7 Updates:
+ *   - Task 1: 多炉膛原点居中 — 所有炉膛 Group 在原点 (0,0,0) 创建，visible 切换
+ *   - Task 2: 爆炸图模式 — 按 layer 在 Y 轴展开 + 分层施工清单 BOM
+ *   - Task 3: 性能优化 — 关闭工件透明度、动画阴影降级
  *
  * V2.3 Updates:
  *   - Task: 托盘式搁板料框（Tray Basket）3D模型
  *   - Task: 每个炉膛独立 basketType 参数
  *   - Task: 标尺系统修复 — 原点(0,0,0)为基础，向正方向延伸
- *   - Task: 炉膛沿X轴排列，第1台 X=0，后续依次偏移
+ *   - Task: 炉膛沿X轴排列（V2.7 已移除）
  * V2.2:
  *   - Task: 蜂窝料框（Honeycomb Basket）3D模型 — texture-based hexagonal pattern
  *   - Task: 装料动画优化 — 工件从上方缓慢落入目标位置
@@ -23,17 +28,20 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
     scene, camera, renderer, controls,
     masterScene, masterCamera, masterRenderer, masterControls,
-    itemsGroup,
+    itemsGroup, furnaceGroups, mainDirectionalLight,
     globalFurnacesResult, shelfMeshes, globalUnpackedItems,
     isAnimating, animPaused, animStopped,
     currentFurnaceIndex, selectedFurnaceCardId, selectedMaterialCardId,
     placementRules,
     currentBasketType, displaySettings,
+    explodedView, EXPLODE_GAP, EXPLODE_ANIM_DURATION,
     setScene, setCamera, setRenderer, setControls,
     setMasterScene, setMasterCamera, setMasterRenderer, setMasterControls,
     setItemsGroup, setShelfMeshes,
     setIsAnimating, setAnimPaused, setAnimStopped,
-    setCurrentFurnaceIndex, setSelectedFurnaceCardId
+    setCurrentFurnaceIndex, setSelectedFurnaceCardId,
+    setExplodedView, setMainDirectionalLight,
+    clearFurnaceGroups, setFurnaceGroup
 } from './state.js';
 
 const COLOR_PALETTE = [
@@ -88,11 +96,6 @@ function createBar(start, end, radius, material) {
 
 /**
  * 生成六边形蜂窝纹理Canvas — 用于料框侧面的Alpha Map / Texture
- *
- * 生成纯色蜂窝图案,每条六边形边长约 100mm（按100px/pixel的虚拟比例）。
- * Canvas 尺寸 256×256，供一个料框侧面使用。
- *
- * @returns {HTMLCanvasElement} 蜂窝纹理canvas
  */
 function createHoneycombTexture() {
     const size = 256;
@@ -101,16 +104,13 @@ function createHoneycombTexture() {
     canvas.height = size;
     const ctx = canvas.getContext('2d');
 
-    // 浅灰背景（模拟镂空部分 — 透明/空心）
     ctx.fillStyle = 'rgba(200, 200, 210, 0.15)';
     ctx.fillRect(0, 0, size, size);
 
-    // 蜂窝参数
     const hexRadius = 30;
     const hexHeight = hexRadius * Math.sqrt(3);
     const hexWidth = hexRadius * 2;
 
-    // 深灰色六边形线条绘制（代表金属框架）
     ctx.strokeStyle = 'rgba(68, 85, 102, 0.85)';
     ctx.lineWidth = 3;
     ctx.lineCap = 'round';
@@ -160,12 +160,6 @@ function getHoneycombTexture() {
 
 // ==================== BASKET FRAME MODELING ====================
 
-/**
- * 创建普通网格料框 — 钢筋网格焊接结构
- * 五面封闭（底部+四周），顶部开口
- *
- * V2.3: 保持不变，仍为默认料框类型
- */
 function createGridBasketFrame(w, h, d, gridSize) {
     gridSize = gridSize || 100;
     const group = new THREE.Group();
@@ -227,7 +221,6 @@ function createGridBasketFrame(w, h, d, gridSize) {
 
         const origin = new THREE.Vector3(originX, originY, originZ);
 
-        // 边框
         const corners = [
             origin.clone(),
             origin.clone().add(dirU.clone().multiplyScalar(lenU)),
@@ -238,7 +231,6 @@ function createGridBasketFrame(w, h, d, gridSize) {
             faceGroup.add(createBar(corners[i], corners[(i + 1) % 4], frameRadius, frameMaterial));
         }
 
-        // 网格线
         let uSteps = Math.floor(lenU / gridSize);
         if (uSteps < 1) uSteps = 1;
         for (let ui = 1; ui < uSteps; ui++) {
@@ -267,7 +259,6 @@ function createGridBasketFrame(w, h, d, gridSize) {
     group.add(createGridFace('left', w, h, d));
     group.add(createGridFace('right', w, h, d));
 
-    // 顶部边框
     const topCorners = [
         new THREE.Vector3(0, h, 0), new THREE.Vector3(w, h, 0),
         new THREE.Vector3(w, h, d), new THREE.Vector3(0, h, d)
@@ -276,7 +267,6 @@ function createGridBasketFrame(w, h, d, gridSize) {
         group.add(createBar(topCorners[i], topCorners[(i + 1) % 4], frameRadius, frameMaterial));
     }
 
-    // 四角立柱
     const verticalCorners = [
         [new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, h, 0)],
         [new THREE.Vector3(w, 0, 0), new THREE.Vector3(w, h, 0)],
@@ -291,19 +281,6 @@ function createGridBasketFrame(w, h, d, gridSize) {
     return group;
 }
 
-/**
- * 创建蜂窝料框（Honeycomb Basket）— V2.2
- *
- * 使用纹理 + 半透明面板实现蜂窝镂空视觉效果，避免大量几何体导致性能问题。
- *
- * 结构特点：
- *   - 底部 + 四个侧面 = 5个面（顶部开口）
- *   - 每个面由纹理alpha map + 粗钢筋边框组成
- *   - 侧面为半透明面板贴六边形蜂窝纹理
- *   - 底部保留钢筋网格（承重）
- *
- * V2.3: 保持不变
- */
 function createHoneycombBasketFrame(w, h, d) {
     const group = new THREE.Group();
     const frameRadius = 4.5;
@@ -344,7 +321,6 @@ function createHoneycombBasketFrame(w, h, d) {
         return panel;
     }
 
-    // 5个蜂窝面板：底 + 前 + 后 + 左 + 右
     group.add(createHoneycombPanel(w, d, w / 2, 1, d / 2, 'xz'));
     group.add(createHoneycombPanel(w, h, w / 2, h / 2, d, 'xy'));
     group.add(createHoneycombPanel(w, h, w / 2, h / 2, 0, 'xy'));
@@ -359,19 +335,16 @@ function createHoneycombBasketFrame(w, h, d) {
         );
     }
 
-    // 底部边框
     group.add(createEdgeBar(0, 0, 0, w, 0, 0));
     group.add(createEdgeBar(w, 0, 0, w, 0, d));
     group.add(createEdgeBar(w, 0, d, 0, 0, d));
     group.add(createEdgeBar(0, 0, d, 0, 0, 0));
 
-    // 顶部边框
     group.add(createEdgeBar(0, h, 0, w, h, 0));
     group.add(createEdgeBar(w, h, 0, w, h, d));
     group.add(createEdgeBar(w, h, d, 0, h, d));
     group.add(createEdgeBar(0, h, d, 0, h, 0));
 
-    // 四角立柱
     group.add(createEdgeBar(0, 0, 0, 0, h, 0));
     group.add(createEdgeBar(w, 0, 0, w, h, 0));
     group.add(createEdgeBar(w, 0, d, w, h, d));
@@ -381,37 +354,14 @@ function createHoneycombBasketFrame(w, h, d) {
     return group;
 }
 
-/**
- * V2.3: 创建托盘式搁板料框（Tray Basket）— 新增
- *
- * 实际热处理现场常用于齿轮、模具、法兰、圆环件、大尺寸工件的摆放。
- *
- * 结构特点：
- *   - 无四周围栏（与网格料框的区别）
- *   - 底部实心搁板（钢板面板）
- *   - 底部下方 10 个支撑梁均匀排列
- *   - 支撑块高度 50mm，宽度=炉宽，深度=炉深/10
- *
- * 3D表现：
- *   底板（半透明面板）
- *   +
- *   10个支撑梁（圆柱形钢筋）
- *   形成托盘结构
- *
- * @param {number} w - 料框宽度 (mm)
- * @param {number} h - 料框高度 (mm)
- * @param {number} d - 料框深度 (mm)
- * @returns {THREE.Group} 托盘式料框模型组
- */
 function createTrayBasketFrame(w, h, d) {
     const group = new THREE.Group();
 
-    const supportHeight = 50;        // 支撑块高度 50mm
-    const supportCount = 10;        // 10个支撑梁
-    const supportSpacing = d / supportCount;  // 均匀排列间距
-    const frameRadius = 4;          // 钢筋半径
+    const supportHeight = 50;
+    const supportCount = 10;
+    const supportSpacing = d / supportCount;
+    const frameRadius = 4;
 
-    // 底部搁板材质 — 半透明钢板
     const trayMaterial = new THREE.MeshStandardMaterial({
         color: 0x667788,
         roughness: 0.45,
@@ -422,7 +372,6 @@ function createTrayBasketFrame(w, h, d) {
         depthWrite: false
     });
 
-    // 支撑梁材质
     const supportMaterial = new THREE.MeshStandardMaterial({
         color: 0x445566,
         roughness: 0.5,
@@ -432,7 +381,6 @@ function createTrayBasketFrame(w, h, d) {
         depthWrite: false
     });
 
-    // 边框材质（仅底部四周框架，无围栏）
     const frameMaterial = new THREE.MeshStandardMaterial({
         color: 0x556677,
         roughness: 0.5,
@@ -442,34 +390,19 @@ function createTrayBasketFrame(w, h, d) {
         depthWrite: false
     });
 
-    /**
-     * 1. 底部实心搁板面板
-     *   位置在支撑块上方 supportHeight 处
-     */
     const bottomPanelGeo = new THREE.PlaneGeometry(w, d);
     const bottomPanel = new THREE.Mesh(bottomPanelGeo, trayMaterial.clone());
     bottomPanel.rotation.x = -Math.PI / 2;
     bottomPanel.position.set(w / 2, supportHeight, d / 2);
     group.add(bottomPanel);
 
-    /**
-     * 2. 10个支撑梁均匀排列
-     *   每个支撑梁从 Y=0 到 Y=supportHeight
-     *   沿 Z 方向均匀分布
-     */
     for (let i = 0; i < supportCount; i++) {
-        const zCenter = supportSpacing * (i + 0.5);  // 支撑梁中心 Z 坐标
-        const start = new THREE.Vector3(0, 0, zCenter);
-        const end = new THREE.Vector3(0, supportHeight, zCenter);
-        // 沿X方向延伸到炉膛宽度 — 用 createBar 从(0, 0, zCenter)到(w, 0, zCenter)表示水平支撑梁
+        const zCenter = supportSpacing * (i + 0.5);
         const startH = new THREE.Vector3(0, supportHeight * 0.3, zCenter);
         const endH = new THREE.Vector3(w, supportHeight * 0.3, zCenter);
         group.add(createBar(startH, endH, frameRadius, supportMaterial));
     }
 
-    /**
-     * 3. 底部四周边框（无围栏，仅底部框架）
-     */
     function createEdgeBar(x1, y1, z1, x2, y2, z2) {
         return createBar(
             new THREE.Vector3(x1, y1, z1),
@@ -478,24 +411,16 @@ function createTrayBasketFrame(w, h, d) {
         );
     }
 
-    // 底部框架（Y = 0 高度位置作为地面）
     const baseY = 0;
     group.add(createEdgeBar(0, baseY, 0, w, baseY, 0));
     group.add(createEdgeBar(w, baseY, 0, w, baseY, d));
     group.add(createEdgeBar(w, baseY, d, 0, baseY, d));
     group.add(createEdgeBar(0, baseY, d, 0, baseY, 0));
 
-    /**
-     * 4. 标记料框类型元数据
-     */
     group.userData = { isBasketFrame: true, basketType: 'tray' };
     return group;
 }
 
-/**
- * 创建实心料框 — 简单Box线框表示
- * V2.3: 保持不变
- */
 function createSolidBasketFrame(w, h, d) {
     const group = new THREE.Group();
     const geo = new THREE.BoxGeometry(w, h, d);
@@ -523,17 +448,7 @@ function createSolidBasketFrame(w, h, d) {
 }
 
 /**
- * V2.3: 统一料框创建入口 — 根据 basketType 参数选择对应类型
- *
- * 不再读取全局 currentBasketType，而是接收每个炉膛独立的 basketType。
- * 这实现了"每个炉膛独立配置料框类型"的需求。
- *
- * @param {number} w - 宽度 (mm)
- * @param {number} h - 高度 (mm)
- * @param {number} d - 深度 (mm)
- * @param {number} gridSize - 网格尺寸（仅 grid 类型使用）
- * @param {string} basketType - 料框类型 ('grid'|'honeycomb'|'tray'|'solid')
- * @returns {THREE.Group}
+ * 统一料框创建入口 — 根据 basketType 参数选择对应类型
  */
 function createBasketFrame(w, h, d, gridSize, basketType) {
     const type = basketType || 'grid';
@@ -553,38 +468,25 @@ function createBasketFrame(w, h, d, gridSize, basketType) {
 // ==================== SHELF MESH (V2.6 重构) ====================
 
 /**
- * 🔧 V2.6 重构：创建搁板实体 3D 模型
- *
- * 重构要点：
- *   1. 使用 BoxGeometry(width, thickness, depth) — 真正的实体厚度，不再是纸片 Plane
- *   2. 独立材质 — 浅灰色金属 MeshStandardMaterial，绝不复用料框的蜂窝/网格纹理
- *   3. 搁板作为 furnaceGroup（料框 Group）的子对象，继承炉膛局部坐标系
- *
- * @param {number} w - 搁板宽度 (mm)，等于料框内部有效宽度
- * @param {number} d - 搁板深度 (mm)，等于料框内部有效深度
- * @param {number} thickness - 搁板实体厚度 (mm)，来自 placementRules.shelfThickness
- * @returns {THREE.Mesh} 搁板 BoxGeometry mesh
+ * 创建搁板实体 3D 模型 — BoxGeometry 实体厚度
  */
 function createShelfMesh(w, d, thickness) {
-    // 🔧 V2.6: BoxGeometry 锚点在正中心 — 实体厚度，绝不使用 Plane
     const geo = new THREE.BoxGeometry(w, thickness, d);
 
-    // 🔧 V2.6: 独立材质 — 浅灰色实体金属，与料框材质完全隔离
     const mat = new THREE.MeshStandardMaterial({
         color: 0xcccccc,
         roughness: 0.5,
         metalness: 0.8,
         transparent: true,
-        opacity: 0.65,
+        opacity: 0.45,
         side: THREE.DoubleSide,
-        depthWrite: true       // 实体遮挡，避免穿透视觉混乱
+        depthWrite: true
     });
 
     const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
 
-    // 🔧 V2.6: 添加细边框线，便于在 3D 视图中辨识搁板边界
     const edgesGeo = new THREE.EdgesGeometry(geo);
     const edgesLine = new THREE.LineSegments(
         edgesGeo,
@@ -616,34 +518,20 @@ export function disposeShelfMeshes() {
 }
 
 /**
- * V2.5 Bug Fix: 搁板渲染坐标修正
+ * V2.8: 搁板渲染函数（原点居中版本 — 修复坐标回归）
  *
- * 搁板作为 furnaceGroup（basketGroup）的子对象添加，
- * 使用炉膛局部坐标系，不再手动计算世界偏移。
+ * 搁板 Mesh 作为 furnaceGroup 的子对象，严格继承炉膛局部坐标系。
+ * 炉膛 Group 原点在 (0,0,0)，料框在 furnaceGroup 中从 (-fw/2, baseY, -fd/2) 到 (fw/2, baseY+fh, fd/2)。
+ * 搁板的 XZ 中心必须对齐炉膛/料框的几何中心，即 furnaceGroup 原点 (0, *, 0)。
  *
- * @param {Object} furnace - 炉膛配置
- * @param {THREE.Group} furnaceGroup - 炉膛根Group（料框+所有工件+搁板的父节点）
+ * @param {Object} furnace - 炉膛配置 { w, h, d, packedItems, shelvesUsed }
+ * @param {THREE.Group} furnaceGroup - 炉膛根 Group
+ * @param {number} baseY - 炉膛基础 Y 偏移（料框底部在场景中的 Y 坐标，如 -120）
  */
-/**
- * 🔧 V2.6 重构：搁板渲染函数
- *
- * 重构要点：
- *   1. 使用 createShelfMesh 生成实体 BoxGeometry，不再使用旧版 createShelfGridMesh
- *   2. 搁板直接 add 到 furnaceGroup（料框 Group），作为子对象继承炉膛局部坐标系
- *   3. BoxGeometry 锚点在中心 → position 计算：
- *      - X = fw/2（炉膛局部坐标系的 X 中心）
- *      - Z = fd/2（炉膛局部坐标系的 Z 中心）
- *      - Y = shelfY + shelfThickness/2（搁板底面在 shelfY，中心偏移厚度一半）
- *   4. 搁板宽度/深度等于炉膛内部有效长宽（此处直接用 furnace.w / furnace.d，
- *      暂未扣除炉壁间距，未来可接入 wallSpacing 参数细化）
- *
- * @param {Object} furnace - 炉膛配置
- * @param {THREE.Group} furnaceGroup - 炉膛根Group（料框+所有工件+搁板的父节点）
- */
-export function renderShelvesForFurnace(furnace, furnaceGroup) {
+export function renderShelvesForFurnace(furnace, furnaceGroup, baseY) {
+    if (baseY === undefined) baseY = -120;
     const shelfThickness = placementRules.shelfThickness || 20;
 
-    // 收集所有需要渲染搁板的 Y 坐标
     const shelfYs = new Set();
     if (furnace.shelvesUsed && furnace.shelvesUsed.length > 0) {
         furnace.shelvesUsed.forEach(s => shelfYs.add(s.y));
@@ -661,30 +549,42 @@ export function renderShelvesForFurnace(furnace, furnaceGroup) {
     const fd = furnace.d;
     const fh = furnace.h;
 
+    // 构建搁板 layer 映射：按 shelvesUsed.y 排序后映射 layer 编号
+    const sortedShelves = furnace.shelvesUsed && furnace.shelvesUsed.length > 0
+        ? [...furnace.shelvesUsed].sort((a, b) => a.y - b.y)
+        : [];
+
     shelfYs.forEach(shelfY => {
         if (shelfY + shelfThickness > fh) {
             console.warn('[搁板渲染] 搁板高度 ' + shelfY + 'mm 超出炉膛总高度 ' + fh + 'mm，已跳过');
             return;
         }
 
-        // 🔧 V2.6: 创建实体搁板 — BoxGeometry，独立浅灰金属材质
         const shelfMesh = createShelfMesh(fw, fd, shelfThickness);
 
-        /**
-         * 🔧 V2.6: 搁板在炉膛局部坐标系中的位置
-         *
-         * 炉膛局部坐标原点在底面左下后角 (0, 0, 0)。
-         * createShelfMesh 生成 BoxGeometry(fw, thickness, fd)，锚点在正中心。
-         *
-         * 位置计算：
-         *   X = fw / 2          → 搁板在炉膛 X 方向居中
-         *   Y = shelfY + shelfThickness / 2  → 搁板底面在 shelfY，BoxGeometry 中心偏移厚度/2
-         *   Z = fd / 2          → 搁板在炉膛 Z 方向居中
-         */
-        shelfMesh.position.set(fw / 2, shelfY + shelfThickness / 2, fd / 2);
-        shelfMesh.userData = { isShelfMesh: true, shelfY: shelfY, thickness: shelfThickness };
+        // 🔧 TASK 1 修复：搁板 XZ 必须对齐料框几何中心（furnaceGroup 原点）
+        // 料框在 furnaceGroup 中占据 X:[-fw/2, fw/2], Z:[-fd/2, fd/2]
+        // BoxGeometry(fw, thickness, fd) 居中时自然占据该区间，所以 position.x=0, position.z=0
+        const shelfYSpace = baseY + shelfY + shelfThickness / 2;
+        shelfMesh.position.set(0, shelfYSpace, 0);
 
-        // 🔧 V2.6: 搁板作为 furnaceGroup 的子对象，继承炉膛世界变换，绝不直接添加到 Scene
+        // 计算搁板所属 layer — 用于爆炸图展开
+        let shelfLayer = 1;
+        for (let li = 0; li < sortedShelves.length; li++) {
+            if (Math.abs(sortedShelves[li].y - shelfY) < 0.5) {
+                shelfLayer = li + 2; // 底层=layer1, 第一块搁板上方=layer2, ...
+                break;
+            }
+        }
+
+        shelfMesh.userData = {
+            isShelfMesh: true,
+            shelfY: shelfY,
+            thickness: shelfThickness,
+            layer: shelfLayer,
+            _originalY: shelfYSpace
+        };
+
         furnaceGroup.add(shelfMesh);
         shelfMeshes.push(shelfMesh);
     });
@@ -692,9 +592,6 @@ export function renderShelvesForFurnace(furnace, furnaceGroup) {
 
 // ==================== RULER / AXES SYSTEM (V2.3) ====================
 
-/**
- * AxesGroup 引用 — 用于动态更新标尺/网格/坐标轴显示
- */
 let mainSceneGridHelper = null;
 let mainSceneAxesHelper = null;
 let mainSceneRulerGroup = null;
@@ -705,30 +602,12 @@ function updateMainSceneDisplayVisibility() {
     if (mainSceneRulerGroup) mainSceneRulerGroup.visible = displaySettings.showRulers;
 }
 
-/**
- * V2.3: 修复标尺系统 — 从原点(0,0,0)开始，向正方向延伸
- *
- * 标尺规则：
- *   - 0mm 刻度从原点开始
- *   - 每 100mm 一个主刻度
- *   - 向 X/Y/Z 正方向延伸
- *
- * @param {number} maxRange - 标尺最大范围 (mm)
- */
 function createRulerGroup(maxRange) {
     const group = new THREE.Group();
-    const step = 100; // 每 100mm 一个刻度
+    const step = 100;
     const range = maxRange || 4000;
-
-    /**
-     * V2.3: 原点定义
-     * X=0, Y=-120(地面), Z=0 为场景参考原点
-     * 标尺从该原点向正方向展开
-     */
     const originY = -120;
 
-    // X轴标尺（沿 X 轴，Z=0 平面，Y=originY）
-    // 刻度值: 0, 100, 200, 300, ...
     for (let x = 0; x <= range; x += step) {
         const canvas = document.createElement('canvas');
         canvas.width = 64;
@@ -743,13 +622,11 @@ function createRulerGroup(maxRange) {
         texture.minFilter = THREE.LinearFilter;
         const spriteMaterial = new THREE.SpriteMaterial({ map: texture, depthTest: false, depthWrite: false });
         const sprite = new THREE.Sprite(spriteMaterial);
-        // 标尺文字放在地面 Y 位置 + 偏移
         sprite.position.set(x, originY + 5, 20);
         sprite.scale.set(80, 40, 1);
         group.add(sprite);
     }
 
-    // Z轴标尺（沿 Z 轴，X=0 平面，Y=originY）
     for (let z = 0; z <= range; z += step) {
         const canvas = document.createElement('canvas');
         canvas.width = 64;
@@ -769,7 +646,6 @@ function createRulerGroup(maxRange) {
         group.add(sprite);
     }
 
-    // Y轴标尺（向上，从 originY 开始）
     for (let y = 100; y <= 3000; y += step) {
         const canvas = document.createElement('canvas');
         canvas.width = 64;
@@ -800,7 +676,7 @@ function setMainSceneDisplayRefs(gridHelper, axesHelper, rulerGroup) {
     updateMainSceneDisplayVisibility();
 }
 
-// ==================== THREE.JS INITIALIZATION (V2.3) ====================
+// ==================== THREE.JS INITIALIZATION (V2.7) ====================
 
 export function initThree() {
     const container = document.getElementById('canvas-container');
@@ -813,7 +689,7 @@ export function initThree() {
 
     const newRenderer = new THREE.WebGLRenderer({ antialias: true });
     newRenderer.setSize(container.clientWidth, container.clientHeight);
-    newRenderer.setPixelRatio(window.devicePixelRatio);
+    newRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // V2.7: 限制像素比以优化性能
     newRenderer.shadowMap.enabled = true;
     newRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(newRenderer.domElement);
@@ -832,33 +708,31 @@ export function initThree() {
     mainLight.shadow.mapSize.width = 1024;
     mainLight.shadow.mapSize.height = 1024;
     newScene.add(mainLight);
+    setMainDirectionalLight(mainLight);
     const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
     fillLight.position.set(-400, -200, -300);
     newScene.add(fillLight);
 
-    /* V2.3: 地面网格 — 原点(0,-120,0)为中心，深色线条在白色背景上可见 */
+    /* 地面网格 */
     const gridHelper = new THREE.GridHelper(4000, 80, 0x333333, 0x555555);
     gridHelper.position.y = -120;
     newScene.add(gridHelper);
 
-    /* V2.3: 坐标轴 — 从原点开始的深色坐标轴 */
+    /* 坐标轴 */
     const customAxesGroup = new THREE.Group();
     const axesLen = 2000;
     const originY = -120;
 
-    // X轴 - 深红
     const xLineGeo = new THREE.BufferGeometry().setFromPoints([
         new THREE.Vector3(0, originY, 0), new THREE.Vector3(axesLen, originY, 0)
     ]);
     customAxesGroup.add(new THREE.Line(xLineGeo, new THREE.LineBasicMaterial({ color: 0xcc0000, linewidth: 1 })));
 
-    // Y轴 - 深绿 (从地面向上)
     const yLineGeo = new THREE.BufferGeometry().setFromPoints([
         new THREE.Vector3(0, originY, 0), new THREE.Vector3(0, axesLen + originY, 0)
     ]);
     customAxesGroup.add(new THREE.Line(yLineGeo, new THREE.LineBasicMaterial({ color: 0x006600, linewidth: 1 })));
 
-    // Z轴 - 深蓝
     const zLineGeo = new THREE.BufferGeometry().setFromPoints([
         new THREE.Vector3(0, originY, 0), new THREE.Vector3(0, originY, axesLen)
     ]);
@@ -866,7 +740,7 @@ export function initThree() {
 
     newScene.add(customAxesGroup);
 
-    /* V2.3: 标尺刻度组 — 从原点开始 */
+    /* 标尺刻度组 */
     const rulerGroup = createRulerGroup(4000);
     newScene.add(rulerGroup);
 
@@ -919,7 +793,7 @@ export function initMasterThree() {
 
     const msRenderer = new THREE.WebGLRenderer({ antialias: true });
     msRenderer.setSize(container.clientWidth, container.clientHeight);
-    msRenderer.setPixelRatio(window.devicePixelRatio);
+    msRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     container.appendChild(msRenderer.domElement);
     setMasterRenderer(msRenderer);
 
@@ -974,78 +848,304 @@ export function initMasterThree() {
     animateMaster();
 }
 
-// ==================== SCENE RENDERING (V2.3) ====================
+// ==================== TASK 2: 爆炸图模式 ====================
 
 /**
- * V2.3: 炉膛排列规则
- *
- * 基于原点(0,0,0)的 X 正向偏移排列多台炉膛：
- *   第1台炉 X=0
- *   第2台炉 X=炉宽1 + 200 (间距)
- *   第3台炉 X=炉宽1 + 炉宽2 + 400
- *
- * 每台炉膛在 Z 轴上居中对齐，Y 轴从地面(baseY)开始
+ * V2.7: 获取工件所在的 layer 编号
+ * 从 item.y 或 item.layer 属性读取。
+ * layer 1 = 底层 (Y≈0), layer 2 = 第一层搁板上方, etc.
  */
-
-/**
- * 计算多个炉膛在 X 方向的累积偏移
- * @param {Array} furnaces - 炉膛结果数组
- * @param {number} index - 当前炉膛索引
- * @param {number} spacing - 炉膛间距 (mm)
- * @returns {number} X偏移量
- */
-function computeFurnaceXOffset(furnaces, index, spacing) {
-    const gap = spacing || 200;
-    let offset = 0;
-    for (let i = 0; i < index; i++) {
-        offset += furnaces[i].w + gap;
+function getItemLayer(item, furnace) {
+    if (typeof item.layer === 'number' && item.layer >= 1) return item.layer;
+    // 从 item.y 推算：y=0 附近是 layer 1
+    if (furnace.shelvesUsed && furnace.shelvesUsed.length > 0) {
+        const sortedShelves = [...furnace.shelvesUsed].sort((a, b) => a.y - b.y);
+        for (let i = sortedShelves.length - 1; i >= 0; i--) {
+            if (item.y >= sortedShelves[i].y) return i + 2;
+        }
     }
-    return offset;
+    return 1;
 }
 
 /**
- * V2.3: 渲染单个炉膛 — 支持独立 basketType
+ * V2.8: 切换爆炸图模式（修复物料遗漏）
  *
- * 每台炉膛根据其 basketType 渲染不同样式的料框。
- * 料框类型从 furnace.basketType 读取，默认为 'grid'。
+ * 🔧 TASK 2 修复：遍历 furnaceGroup 下所有子对象（工件 Mesh + 搁板 Mesh），
+ * 统一使用 userData.layer 执行 Y 轴爆炸位移。
+ * 不再区分 isShelfMesh / itemId，不再依赖 packedItems 查找。
  */
-export function renderSingleFurnace(index, filterMaterialName) {
-    disposeShelfMeshes();
-    while (itemsGroup.children.length > 0) itemsGroup.remove(itemsGroup.children[0]);
+export async function toggleExplodedView() {
+    const toggled = !explodedView;
+    setExplodedView(toggled);
 
-    if (!globalFurnacesResult || index >= globalFurnacesResult.length || index < 0) {
-        document.getElementById('empty-state').style.display = 'block';
-        return;
+    const btn = document.getElementById('btn-explode');
+    if (btn) {
+        btn.textContent = toggled ? '🔍 关闭爆炸图' : '🔍 开启爆炸图';
+        btn.classList.toggle('active', toggled);
     }
-    document.getElementById('empty-state').style.display = 'none';
 
-    const furnace = globalFurnacesResult[index];
+    if (!globalFurnacesResult || globalFurnacesResult.length === 0) return;
+    const furnace = globalFurnacesResult[currentFurnaceIndex];
+    if (!furnace) return;
+
+    const group = furnaceGroups.get(currentFurnaceIndex);
+    if (!group) return;
+
+    const duration = EXPLODE_ANIM_DURATION;
+    const startTime = performance.now();
+
+    // 🔧 TASK 2 修复：收集所有具备 userData.layer 的对象（工件 + 搁板）
+    const animations = [];
+    group.traverse(child => {
+        if (!child.userData) return;
+        // 跳过料框框架（不参与爆炸移动）
+        if (child.userData.isBasketFrame) return;
+
+        // 🔧 核心修复：直接读取 userData.layer，不再从 packedItems 推算
+        const layer = typeof child.userData.layer === 'number' ? child.userData.layer : 1;
+
+        const originalY = parseFloat(child.userData._originalY);
+        const currentY = child.position.y;
+
+        let targetY;
+        if (toggled) {
+            // 爆炸展开：原始Y + (layer-1) * EXPLODE_GAP
+            if (isNaN(originalY)) {
+                child.userData._originalY = currentY;
+                targetY = currentY + (layer - 1) * EXPLODE_GAP;
+            } else {
+                targetY = originalY + (layer - 1) * EXPLODE_GAP;
+            }
+        } else {
+            // 收缩回原始位置
+            targetY = !isNaN(originalY) ? originalY : currentY;
+        }
+
+        if (Math.abs(child.position.y - targetY) > 0.01) {
+            animations.push({ obj: child, startY: child.position.y, targetY, layer });
+        }
+    });
+
+    // 使用 requestAnimationFrame 实现缓动动画
+    if (animations.length === 0) return;
+
+    return new Promise(resolve => {
+        function animate(currentTime) {
+            const elapsed = currentTime - startTime;
+            const progress = Math.min(elapsed / duration, 1.0);
+            // easeInOutCubic
+            const eased = progress < 0.5
+                ? 4 * progress * progress * progress
+                : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+
+            animations.forEach(a => {
+                a.obj.position.y = a.startY + (a.targetY - a.startY) * eased;
+            });
+
+            if (progress < 1.0) {
+                requestAnimationFrame(animate);
+            } else {
+                // 动画结束，清理临时状态
+                if (!toggled) {
+                    animations.forEach(a => {
+                        delete a.obj.userData._originalY;
+                    });
+                }
+                resolve();
+            }
+        }
+        requestAnimationFrame(animate);
+    });
+}
+
+// ==================== TASK 2: 分层施工清单 (Layered BOM) ====================
+
+/**
+ * V2.8: 生成并显示分层施工清单（Layered BOM）— 完整业务字段版
+ *
+ * 🔧 TASK 3 修复：按 layer → (物料名称 + 材质 + 工艺) 两级分组聚合，
+ * 展示完整的 name、material、process、weight、dimensions 信息。
+ *
+ * 展示格式示例：
+ *   第 2 层 (共 150 件)
+ *     [搁板] 1000×800mm × 1
+ *     [工件] 齿轮轴 | 20CrMnTi | 渗碳淬火 | 5kg × 100件
+ *     [工件] 法兰盘 | 42CrMo | 调质 | 2kg × 50件
+ */
+export function showLayeredBOM() {
+    if (!globalFurnacesResult || globalFurnacesResult.length === 0) return;
+    const furnace = globalFurnacesResult[currentFurnaceIndex];
+    if (!furnace) return;
+
+    // ===== 第1级分组：按 layer =====
+    const layerMap = new Map();
+
+    furnace.packedItems.forEach(item => {
+        const layer = getItemLayer(item, furnace);
+        if (!layerMap.has(layer)) {
+            layerMap.set(layer, { shelfCount: 0, items: new Map(), totalItems: 0, totalWeight: 0 });
+        }
+        const entry = layerMap.get(layer);
+
+        // 🔧 TASK 3: 第2级分组 key = 物料名称 + 材质 + 工艺（三维精确归类）
+        const mat = item.material || '未知材质';
+        const proc = item.process || '未知工艺';
+        const key = item.name + '|' + mat + '|' + proc;
+
+        if (!entry.items.has(key)) {
+            entry.items.set(key, {
+                name: item.name,
+                material: mat,
+                process: proc,
+                // 采集尺寸信息（优先使用 originalDims，回退到 w/d/h）
+                dimensions: item.originalDims
+                    ? `${item.originalDims.l}×${item.originalDims.w}×${item.originalDims.h}mm`
+                    : `${item.w}×${item.d}×${item.h}mm`,
+                singleWeight: item.weight || 0,
+                count: 0,
+                totalWeight: 0
+            });
+        }
+        const iEntry = entry.items.get(key);
+        iEntry.count++;
+        iEntry.totalWeight += item.weight || 0;
+        entry.totalItems++;
+        entry.totalWeight += item.weight || 0;
+    });
+
+    // ===== 统计每个 layer 的搁板信息 =====
+    if (furnace.shelvesUsed && furnace.shelvesUsed.length > 0) {
+        const sortedShelves = [...furnace.shelvesUsed].sort((a, b) => a.y - b.y);
+        sortedShelves.forEach((s, idx) => {
+            const layer = idx + 2; // 底层=layer1, 第一块搁板上方=layer2
+            if (layerMap.has(layer)) {
+                layerMap.get(layer).shelfCount++;
+                layerMap.get(layer).shelfInfo = {
+                    dimensions: `${furnace.w}×${furnace.d}mm`,
+                    thickness: s.thickness || placementRules.shelfThickness || 20
+                };
+            }
+        });
+    }
+
+    // ===== 构建 HTML =====
+    const sortedLayers = [...layerMap.entries()].sort((a, b) => a[0] - b[0]);
+    let html = '<div class="bom-header">📋 ' + furnace.instanceId + ' · 施工分层清单</div>';
+    html += '<div class="bom-subtitle">共 ' + sortedLayers.length + ' 层 · ' + furnace.packedItems.length + ' 件工件 · ' + furnace.totalWeight.toFixed(1) + 'kg</div>';
+
+    sortedLayers.forEach(([layer, data]) => {
+        const layerLabel = layer === 1 ? '底层（炉底）' : '第 ' + layer + ' 层';
+        const shelfInfo = data.shelfCount > 0
+            ? '<span style="color:#667788;"> | 搁板 × ' + data.shelfCount + '</span>'
+            : '';
+        html += '<div class="bom-layer-section">';
+        html += '<div class="bom-layer-title">📦 ' + layerLabel + shelfInfo + ' — 共 ' + data.totalItems + ' 件 · ' + data.totalWeight.toFixed(1) + 'kg</div>';
+
+        // 🔧 TASK 3: 先展示搁板行（如果本层有搁板）
+        if (data.shelfCount > 0 && data.shelfInfo) {
+            html += '<div class="bom-item-row bom-shelf-row">';
+            html += '<span class="bom-item-name">[搁板] ' + data.shelfInfo.dimensions + ' (厚' + data.shelfInfo.thickness + 'mm)</span>';
+            html += '<span class="bom-item-count">× ' + data.shelfCount + '</span>';
+            html += '</div>';
+        }
+
+        // 🔧 TASK 3: 按 count 降序展示工件行，完整展示 name | material | process | weight
+        const sortedItems = [...data.items.entries()].sort((a, b) => b[1].count - a[1].count);
+        sortedItems.forEach(([, iData]) => {
+            const avgWeight = iData.count > 0 ? (iData.totalWeight / iData.count).toFixed(1) : '0.0';
+            html += '<div class="bom-item-row">';
+            html += '<span class="bom-item-name">'
+                + '[工件] ' + iData.name
+                + ' <span class="bom-mat-badge">' + iData.material + '</span>'
+                + ' <span class="bom-process-badge">' + iData.process + '</span>'
+                + ' <span class="bom-dim-info">' + iData.dimensions + '</span>'
+                + '</span>';
+            html += '<span class="bom-item-weight">' + avgWeight + 'kg/件</span>';
+            html += '<span class="bom-item-count">× ' + iData.count + ' 件</span>';
+            html += '<span class="bom-item-subtotal">' + iData.totalWeight.toFixed(1) + 'kg</span>';
+            html += '</div>';
+        });
+
+        html += '</div>';
+    });
+
+    // 显示在弹窗中
+    let panel = document.getElementById('bom-panel');
+    if (!panel) {
+        panel = document.createElement('div');
+        panel.id = 'bom-panel';
+        panel.className = 'bom-panel';
+        document.body.appendChild(panel);
+    }
+    panel.innerHTML = html + '<button class="bom-close-btn" id="bom-close-btn">✕ 关闭</button>';
+    panel.style.display = 'block';
+
+    // 关闭按钮事件
+    const closeBtn = document.getElementById('bom-close-btn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            panel.style.display = 'none';
+        });
+    }
+
+    // 点击背景关闭
+    panel.addEventListener('click', (e) => {
+        if (e.target === panel) panel.style.display = 'none';
+    });
+}
+
+// ==================== TASK 1: 多炉膛原点居中渲染 ====================
+
+/**
+ * V2.7: 构建单个炉膛的完整 Group（在原点创建，不偏移）
+ * 该 Group 包含：料框框架 + 工件 + 搁板 + 轮廓线
+ *
+ * @param {Object} furnace - 炉膛配置
+ * @param {number} index - 炉膛索引
+ * @param {string|null} filterMaterialName - 物料筛选
+ * @returns {THREE.Group} furnaceGroup
+ */
+function buildFurnaceGroup(furnace, index, filterMaterialName) {
+    const furnaceGroup = new THREE.Group();
     const baseY = -120;
+    const fw = furnace.w;
+    const fh = furnace.h;
+    const fd = furnace.d;
 
-    /**
-     * V2.3: 炉膛沿X轴排列
-     * 第1台 X=0，后续依次增加偏移量
-     * 偏移值从 furnace.xOffset 读取（由 executeAndRender 设置）
-     */
-    const xOffset = furnace.xOffset || 0;
-
-    /**
-     * V2.3: 使用每台炉膛独立的 basketType
-     * 从 furnace.basketType 读取，若不存在则默认 'grid'
-     */
+    // 料框框架 — 在原点，底部对齐 baseY
     const basketType = furnace.basketType || 'grid';
-    const basketGroup = createBasketFrame(furnace.w, furnace.h, furnace.d, 100, basketType);
-    // 料框位置：X偏移 + 居中Z轴，底部对齐地面
-    basketGroup.position.set(xOffset - furnace.w / 2, baseY, -furnace.d / 2);
-    itemsGroup.add(basketGroup);
+    const basketGroup = createBasketFrame(fw, fh, fd, 100, basketType);
+    // 料框局部坐标：原点 (0,0,0) 在 furnaceGroup 的 baseY 处
+    basketGroup.position.set(-fw / 2, baseY, -fd / 2);
+    furnaceGroup.add(basketGroup);
 
     // 蓝色外轮廓边框
-    const containerGeo = new THREE.BoxGeometry(furnace.w, furnace.h, furnace.d);
+    const containerGeo = new THREE.BoxGeometry(fw, fh, fd);
     const containerEdges = new THREE.EdgesGeometry(containerGeo);
     const containerLine = new THREE.LineSegments(containerEdges,
         new THREE.LineBasicMaterial({ color: 0x0066cc, linewidth: 1, transparent: true, opacity: 0.5 }));
-    containerLine.position.set(xOffset, furnace.h / 2 + baseY, 0);
-    itemsGroup.add(containerLine);
+    containerLine.position.set(0, fh / 2 + baseY, 0);
+    furnaceGroup.add(containerLine);
+
+    // 🔧 TASK 2: 预计算每个工件的 layer，供爆炸图和 BOM 使用
+    const itemLayerMap = new Map(); // itemId → layer
+    if (furnace.shelvesUsed && furnace.shelvesUsed.length > 0) {
+        const sortedShelves = [...furnace.shelvesUsed].sort((a, b) => a.y - b.y);
+        furnace.packedItems.forEach(item => {
+            let layer = 1;
+            for (let si = sortedShelves.length - 1; si >= 0; si--) {
+                if (item.y >= sortedShelves[si].y) {
+                    layer = si + 2;
+                    break;
+                }
+            }
+            itemLayerMap.set(item.id, layer);
+        });
+    } else {
+        furnace.packedItems.forEach(item => {
+            itemLayerMap.set(item.id, 1);
+        });
+    }
 
     // 渲染工件
     furnace.packedItems.forEach(item => {
@@ -1058,37 +1158,109 @@ export function renderSingleFurnace(index, filterMaterialName) {
         }
 
         const originalColor = new THREE.Color(item.color);
+        // V2.7 TASK 3: 工件材质 — 强制关闭透明度，除非被筛选
         const material = new THREE.MeshStandardMaterial({
             color: originalColor,
-            transparent: true,
-            opacity: isFiltered ? 0.12 : 0.85,
-            roughness: 0.3, metalness: 0.2
+            transparent: isFiltered,
+            opacity: isFiltered ? 0.12 : 1.0,
+            roughness: 0.3,
+            metalness: 0.2,
+            depthWrite: !isFiltered
         });
         const mesh = new THREE.Mesh(geometry, material);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+
+        const itemLayer = itemLayerMap.get(item.id) || 1;
+        const meshOriginalY = item.y + item.h / 2 + baseY;
+
         mesh.userData = {
             itemName: item.name,
             itemId: item.id,
             furnaceIndex: index,
             originalColor: item.color,
             itemMaterial: item.material || '',
-            itemProcess: item.process || ''
+            itemProcess: item.process || '',
+            itemWeight: item.weight || 0,
+            itemDimensions: item.originalDims || { l: item.w, w: item.d, h: item.h },
+            layer: itemLayer,
+            _originalY: meshOriginalY
         };
         const edgeMat = new THREE.LineBasicMaterial({ color: isFiltered ? 0xcccccc : 0x444444 });
         mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geometry), edgeMat));
+
+        // 工件位置：基于炉膛局部坐标系（料框原点对齐 baseY）
         mesh.position.set(
-            xOffset + item.x - furnace.w / 2 + item.w / 2,
-            item.y + item.h / 2 + baseY,
-            item.z - furnace.d / 2 + item.d / 2
+            item.x - fw / 2 + item.w / 2,
+            meshOriginalY,
+            item.z - fd / 2 + item.d / 2
         );
-        itemsGroup.add(mesh);
+        furnaceGroup.add(mesh);
     });
 
-    controls.target.set(xOffset, furnace.h / 2 + baseY, 0);
-    camera.position.set(xOffset + furnace.w * 1.5, furnace.h * 1.8 + baseY, furnace.d * 2.5);
+    // 渲染搁板（传入 baseY，确保搁板 Y 坐标在炉膛局部空间中正确）
+    if ((placementRules.useShelfLayered || placementRules.centerOfGravity) && furnace.packedItems.length > 0) {
+        renderShelvesForFurnace(furnace, furnaceGroup, baseY);
+    }
+
+    furnaceGroup.userData = { furnaceIndex: index, furnaceName: furnace.instanceId };
+    furnaceGroup.visible = false; // 默认隐藏，由 renderSingleFurnace 控制显示
+    return furnaceGroup;
+}
+
+/**
+ * V2.7: 构建所有炉膛 Group（在原点创建），隐藏全部 → 显示当前索引的炉膛
+ */
+function buildAllFurnaceGroups(filterMaterialName) {
+    // 清理旧 Group
+    clearFurnaceGroups();
+    disposeShelfMeshes();
+    while (itemsGroup.children.length > 0) itemsGroup.remove(itemsGroup.children[0]);
+
+    if (!globalFurnacesResult || globalFurnacesResult.length === 0) return;
+
+    globalFurnacesResult.forEach((furnace, idx) => {
+        const group = buildFurnaceGroup(furnace, idx, filterMaterialName);
+        itemsGroup.add(group);
+        setFurnaceGroup(idx, group);
+    });
+}
+
+/**
+ * V2.7: 渲染单个炉膛（原点居中版本）
+ * 构建所有炉膛 Group，然后只显示当前索引的 Group
+ */
+export function renderSingleFurnace(index, filterMaterialName) {
+    if (!globalFurnacesResult || index >= globalFurnacesResult.length || index < 0) {
+        document.getElementById('empty-state').style.display = 'block';
+        return;
+    }
+    document.getElementById('empty-state').style.display = 'none';
+
+    const furnace = globalFurnacesResult[index];
+
+    // 构建所有炉膛（如果尚未构建）
+    const existingGroup = furnaceGroups.get(index);
+    if (!existingGroup || existingGroup.parent !== itemsGroup) {
+        buildAllFurnaceGroups(filterMaterialName);
+    }
+
+    // 切换可见性：只显示当前炉膛
+    furnaceGroups.forEach((group, grpIdx) => {
+        group.visible = (grpIdx === index);
+    });
+
+    // 更新相机位置 — 对准原点
+    const baseY = -120;
+    controls.target.set(0, furnace.h / 2 + baseY, 0);
+    camera.position.set(furnace.w * 1.5, furnace.h * 1.8 + baseY, furnace.d * 2.5);
     controls.update();
 
-    if ((placementRules.useShelfLayered || placementRules.centerOfGravity) && furnace.packedItems.length > 0) {
-        renderShelvesForFurnace(furnace, basketGroup);
+    // 如果爆炸图模式开启，需要重新应用爆炸偏移
+    if (explodedView) {
+        // 需要重新应用爆炸图
+        setExplodedView(false);
+        toggleExplodedView();
     }
 
     update3DStatsPanel(furnace);
@@ -1110,7 +1282,6 @@ function update3DStatsPanel(furnace) {
 
     const items = furnace.packedItems;
 
-    // 基础统计
     let totalWeightVal = 0;
     const materialWeightMap = new Map();
     const processWeightMap = new Map();
@@ -1185,14 +1356,15 @@ export function getSelectedMaterialName() {
     return material || null;
 }
 
-// ==================== IMPROVED ANIMATION (V2.2) ====================
+// ==================== IMPROVED ANIMATION (V2.7) ====================
 
 /**
- * V2.2: 装料动画改进
+ * V2.7: 装料动画改进（原点居中 + 性能优化）
  *
- * 工件生成于料框上方 → 缓慢下降 → 落入目标位置 → 完成摆放
- * 阶梯式启动：第一件 0.0s→0.5s，第二件 0.1s→0.6s，第三件 0.2s→0.7s
- * 形成流水式装料效果
+ * TASK 3 性能优化：
+ *   - 动画开始前关闭方向光阴影 castShadow
+ *   - 动画结束后重新开启阴影
+ *   - 工件材质强制 transparent: false（杜绝性能杀手）
  */
 export async function playLoadingAnimation() {
     if (isAnimating || !globalFurnacesResult || globalFurnacesResult.length === 0) return;
@@ -1215,8 +1387,14 @@ export async function playLoadingAnimation() {
     const controlBar = document.getElementById('anim-control-bar');
     controlBar.classList.add('visible');
 
+    // V2.7 TASK 3: 动画开始前关闭阴影
+    const dirLight = mainDirectionalLight;
+    const shadowWasEnabled = dirLight ? dirLight.castShadow : false;
+    if (dirLight) dirLight.castShadow = false;
+
     disposeShelfMeshes();
     while (itemsGroup.children.length > 0) itemsGroup.remove(itemsGroup.children[0]);
+    clearFurnaceGroups();
 
     const baseY = -120;
     const itemDrawSteps = [];
@@ -1226,7 +1404,7 @@ export async function playLoadingAnimation() {
         orderedIndices.push((startFurnaceIndex + i) % furnaceCount);
     }
 
-    // V2.3: 动画中使用每台炉膛独立的 basketType
+    // 为动画创建初始炉膛 Group（在原点）
     const initialFurnace = globalFurnacesResult[orderedIndices[0]];
     const initialBasketType = initialFurnace.basketType || 'grid';
     const basketGroup = createBasketFrame(initialFurnace.w, initialFurnace.h, initialFurnace.d, 100, initialBasketType);
@@ -1243,36 +1421,40 @@ export async function playLoadingAnimation() {
 
     orderedIndices.forEach(fIdx => {
         const furnace = globalFurnacesResult[fIdx];
-        const xOffset = furnace.xOffset || 0;
         furnace.packedItems.forEach((item) => {
             if (filterMaterialName && item.material !== filterMaterialName) return;
             let geometry;
             if (item.shape === 'cylinder') geometry = new THREE.CylinderGeometry(item.w / 2, item.w / 2, item.h, 32);
             else geometry = new THREE.BoxGeometry(item.w, item.h, item.d);
 
+            // V2.7 TASK 3: 工件材质 — 强制 transparent: false
             const material = new THREE.MeshStandardMaterial({
                 color: new THREE.Color(item.color),
-                transparent: true, opacity: 0.85,
-                roughness: 0.3, metalness: 0.2
+                transparent: false,
+                roughness: 0.3, metalness: 0.2,
+                depthWrite: true
             });
             const mesh = new THREE.Mesh(geometry, material);
+            mesh.castShadow = false;  // TASK 3: 动画期间关闭工件阴影
+            mesh.receiveShadow = false;
             mesh.userData = {
                 itemName: item.name,
                 itemId: item.id,
                 shape: item.shape,
                 originalColor: item.color,
                 itemMaterial: item.material || '',
-                itemProcess: item.process || ''
+                itemProcess: item.process || '',
+                _originalY: null,
+                _animMesh: true  // 标记为动画工件
             };
             mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geometry),
                 new THREE.LineBasicMaterial({ color: 0x444444 })));
 
-            // 目标位置（包含 xOffset）
-            const targetX = xOffset + item.x - furnace.w / 2 + item.w / 2;
+            // 目标位置（基于原点，无 xOffset）
+            const targetX = item.x - furnace.w / 2 + item.w / 2;
             const targetY = item.y + item.h / 2 + baseY;
             const targetZ = item.z - furnace.d / 2 + item.d / 2;
 
-            // V2.2: 初始位置在料框上方高处
             const startY = furnace.h + baseY + 300;
 
             mesh.position.set(targetX, startY, targetZ);
@@ -1291,6 +1473,7 @@ export async function playLoadingAnimation() {
         setIsAnimating(false); controlBar.classList.remove('visible');
         btnAnimate.disabled = false; btnAnimate.style.opacity = '1';
         document.getElementById('stats-3d-panel').style.display = 'none';
+        if (dirLight) dirLight.castShadow = shadowWasEnabled;
         return;
     }
 
@@ -1373,6 +1556,15 @@ export async function playLoadingAnimation() {
 
     document.getElementById('anim-progress-text').textContent = '';
     controlBar.classList.remove('visible');
+
+    // V2.7 TASK 3: 动画结束后恢复阴影
+    if (dirLight) dirLight.castShadow = shadowWasEnabled;
+    // 重新开启所有落下工件的阴影
+    itemDrawSteps.forEach(step => {
+        step.mesh.castShadow = true;
+        step.mesh.receiveShadow = true;
+    });
+
     if (animStopped) {
         renderSingleFurnace(currentFurnaceIndex, filterMaterialName);
     }
@@ -1393,6 +1585,7 @@ function rebuildSceneUpTo(stepIndex, allSteps, filterMaterialName) {
     const furnace = globalFurnacesResult[furnaceIndex];
     const baseY = -120;
 
+    // V2.7: 在原点重建
     const basketType = furnace.basketType || 'grid';
     const basketGroup = createBasketFrame(furnace.w, furnace.h, furnace.d, 100, basketType);
     basketGroup.position.set(-furnace.w / 2, baseY, -furnace.d / 2);
@@ -1424,12 +1617,10 @@ export function renderMasterPlan(plan) {
     while (masterScene.children.length > 5) masterScene.remove(masterScene.children[masterScene.children.length - 1]);
     const fw = plan.furnaceW || 800, fh = plan.furnaceH || 600, fd = plan.furnaceD || 600;
 
-    // V2.3: 历史方案默认使用 'grid' 料框类型
     const basketGroup = createBasketFrame(fw, fh, fd, 100, 'grid');
     basketGroup.position.set(-fw / 2, -120, -fd / 2);
     masterScene.add(basketGroup);
 
-    // 轮廓线
     const containerGeo = new THREE.BoxGeometry(fw, fh, fd);
     const containerLine = new THREE.LineSegments(
         new THREE.EdgesGeometry(containerGeo),
@@ -1443,10 +1634,12 @@ export function renderMasterPlan(plan) {
         let geo;
         if (item.shape === 'cylinder') geo = new THREE.CylinderGeometry(item.w / 2, item.w / 2, item.h, 32);
         else geo = new THREE.BoxGeometry(item.w, item.h, item.d);
+        // V2.7 TASK 3: 主视图工件也关闭透明度
         const mat = new THREE.MeshStandardMaterial({
             color: new THREE.Color(item.color),
-            transparent: true, opacity: 0.85,
-            roughness: 0.3, metalness: 0.2
+            transparent: false,
+            roughness: 0.3, metalness: 0.2,
+            depthWrite: true
         });
         const mesh = new THREE.Mesh(geo, mat);
         mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0x444444 })));

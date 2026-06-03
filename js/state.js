@@ -1,11 +1,16 @@
 /**
- * state.js - Central Application State (V2.2)
+ * state.js - Central Application State (V2.7)
+ *
+ * V2.7 Updates:
+ *   - Task 1: 多炉膛原点居中 — 新增 furnaceGroups Map 管理所有炉膛 Group
+ *   - Task 2: 爆炸图模式 + 施工清单状态
+ *   - Task 3: 性能优化状态标记
+ *
+ * V2.3 Updates:
+ *   - 每个炉膛独立 basketType 参数
+ *   - 标尺系统修复
  *
  * V2.2: Added basket type state, 3D visibility settings
- *
- * Future Extension:
- *   - Could be migrated to a reactive state manager (e.g., Vuex, Zustand) for AI Copilot
- *   - Could add persistence layer for state backup/restore
  */
 
 // ==================== THREE.JS OBJECTS ====================
@@ -29,6 +34,24 @@ export let masterControls = null;
 
 /** Group containing all rendered furnace items */
 export let itemsGroup = null;
+
+// ==================== TASK 1: 多炉膛原点居中 — Furnace Group 管理 ====================
+/**
+ * Map<number, THREE.Group> — 炉膛索引 → 炉膛根Group
+ * 所有炉膛 Group 均在原点 (0,0,0) 创建，通过 visible 切换显示
+ */
+export let furnaceGroups = new Map();
+
+/** 主场景方向光引用 — 用于动画期间临时关闭阴影 */
+export let mainDirectionalLight = null;
+
+// ==================== TASK 2: 爆炸图 + 施工清单状态 ====================
+/** 爆炸图模式开关 */
+export let explodedView = false;
+/** 爆炸间距常数 (mm) */
+export const EXPLODE_GAP = 300;
+/** 爆炸图动画过渡时长 (ms) */
+export const EXPLODE_ANIM_DURATION = 600;
 
 // ==================== FURNACE/MATERIAL RESULT STATE ====================
 /** Array of completed furnace instances with packedItems */
@@ -229,3 +252,7 @@ export function setPlacementRules(v) { placementRules = v; }
 export function setAggregationStats(v) { aggregationStats = v; }
 export function setCurrentBasketType(v) { currentBasketType = v; }
 export function setDisplaySettings(v) { displaySettings = v; }
+export function setExplodedView(v) { explodedView = v; }
+export function setMainDirectionalLight(v) { mainDirectionalLight = v; }
+export function clearFurnaceGroups() { furnaceGroups.clear(); }
+export function setFurnaceGroup(index, group) { furnaceGroups.set(index, group); }

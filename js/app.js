@@ -1,17 +1,14 @@
 /**
- * app.js - Application Startup and Module Coordination (V2.3)
+ * app.js - Application Startup and Module Coordination (V2.7)
+ *
+ * V2.7 Updates:
+ *   - Task 1: 多炉膛原点居中 — 移除 xOffset 计算，所有炉膛在原点渲染
+ *   - Task 2: 爆炸图按钮 + 施工清单按钮事件绑定
+ *   - Task 3: 动画性能优化（阴影降级由 three-scene.js 内部处理）
  *
  * V2.3 Updates:
  *   - 炉膛独立料框类型配置：basketType 从 furnace card 读取并传入 packing engine
- *   - 炉膛沿X轴排列：计算 xOffset 用于 3D 渲染
  *   - 容量不足详细提示：显示缺少数值 (kg)
- *   - 移除全局料框类型选择器事件（改为炉膛详情面板管理）
- *
- * V2.2 Updates:
- *   - 默认炉膛：标准台车炉 600×600×900mm, 500kg
- *   - 料框类型选择器事件处理
- *   - 3D显示设置 — 网格/标尺/坐标轴独立开关
- *   - 装料大师页面 — 统一料框类型和显示设置
  */
 import {
     isAnimating, animPaused, animStopped,
@@ -22,14 +19,16 @@ import {
     setAnimPaused, setAnimStopped, setCurrentFurnaceIndex,
     setFdpCollapsed, setMdpCollapsed,
     setGlobalFurnacesResult, setGlobalUnpackedItems, setGlobalSpacingValue,
-    setCurrentBasketType, setDisplaySettings
+    setCurrentBasketType, setDisplaySettings,
+    clearFurnaceGroups
 } from './state.js';
 import {
     initThree, initMasterThree, renderSingleFurnace,
     getSelectedMaterialName,
     playLoadingAnimation, renderMasterPlan,
     findResultIndexByFid, generateUniqueColor,
-    refreshAllDisplayVisibility
+    refreshAllDisplayVisibility,
+    toggleExplodedView, showLayeredBOM
 } from './three-scene.js';
 import {
     createFurnaceCard, selectFurnaceCard, showFurnaceDetail,
@@ -46,14 +45,13 @@ import { executePacking } from './furnace-engine.js';
 import { showPdfSelectModal, exportSingleFurnacePDF } from './pdf-export.js';
 
 /**
- * V2.3: executeAndRender — 核心入口函数
+ * V2.7: executeAndRender — 核心入口函数
  *
  * 流程：
  *   1. 读取炉膛卡片（含独立 basketType）+ 物料卡片
- *   2. 传入 executePacking 执行装炉算法（禁止自动生成炉膛）
- *   3. 计算每台炉膛的 xOffset（沿X轴排列）
- *   4. 渲染 3D 场景
- *   5. 容量不足时显示详细缺少数值
+ *   2. 传入 executePacking 执行装炉算法
+ *   3. 渲染 3D 场景（所有炉膛在原点创建，visible 切换）
+ *   4. 容量不足时显示详细缺少数值
  */
 function executeAndRender() {
     if (isAnimating) return;
@@ -61,10 +59,6 @@ function executeAndRender() {
     let furnacePoolInput = [];
     document.querySelectorAll('.furnace-card').forEach(card => {
         const d = getFurnaceDataFromCard(card);
-        /**
-         * V2.3: 传递 basketType 到 packing engine
-         * 每个炉膛独立存储自己的料框类型（从 data-basket-type 读取）
-         */
         furnacePoolInput.push({
             name: d.name, count: d.count,
             width: d.width, height: d.height, depth: d.depth,
@@ -87,27 +81,10 @@ function executeAndRender() {
     setGlobalSpacingValue(spacing);
 
     /**
-     * V2.3: 执行装炉算法
-     * executePacking 内部仅使用用户已配置的炉膛实例
-     * 禁止自动生成/复制/扩容炉膛
+     * V2.7: 执行装炉算法
+     * 移除 xOffset 计算 — 所有炉膛在原点渲染
      */
     const result = executePacking(furnacePoolInput, itemsInput, spacing);
-
-    /**
-     * V2.3: 计算每台炉膛的 xOffset（沿X轴排列）
-     *
-     * 第1台炉 X=0（原点附近）
-     * 第2台炉 X=炉宽1 + 200mm间距
-     * 第3台炉 X=炉宽1 + 炉宽2 + 400mm间距
-     *
-     * 保持炉膛在 Z 轴居中对齐
-     */
-    const furnaceGap = 200; // 炉膛间距 200mm
-    let cumulativeX = 0;
-    result.completedFurnaces.forEach((f, idx) => {
-        f.xOffset = cumulativeX;
-        cumulativeX += f.w + furnaceGap;
-    });
 
     setGlobalFurnacesResult(result.completedFurnaces);
     setGlobalUnpackedItems(result.unpackedItems);
@@ -126,13 +103,19 @@ function executeAndRender() {
     }
     setCurrentFurnaceIndex(startIndex);
 
+    // V2.7: 清理旧 furnaceGroups，确保重新构建
+    clearFurnaceGroups();
+
     if (result.completedFurnaces.length > 0) {
         renderSingleFurnace(startIndex);
         updateFurnaceNav();
         updateLeftPanelActiveForIndex(startIndex);
+        // 显示爆炸图和施工清单按钮
+        updateExplodeBOMButtons();
     } else {
         document.getElementById('empty-state').style.display = 'block';
         document.getElementById('furnace-nav').style.display = 'none';
+        hideExplodeBOMButtons();
     }
     updateCenterStats(onCenterFurnaceClick);
     updateTopSummary();
@@ -155,10 +138,6 @@ function executeAndRender() {
         globalUnpackedItems.forEach(u => { summary[u.name] = (summary[u.name] || 0) + 1; });
         const uList = Object.entries(summary).map(([k, v]) => k + '×' + v).join('、');
 
-        /**
-         * V2.3: 容量不足时计算缺少数值
-         * 汇总未装炉物料的重量作为 "缺少容量"
-         */
         const missingWeight = globalUnpackedItems.reduce((s, u) => s + (u.weight || 0), 0);
         const missingInfo = missingWeight > 0 ? ('缺少容量: ' + missingWeight.toFixed(1) + 'kg') : '';
 
@@ -169,6 +148,23 @@ function executeAndRender() {
             '建议：增加炉膛台数 / 提高承重上限 / 减少物料数量' +
             aggInfo);
     }
+}
+
+/**
+ * V2.7: 控制爆炸图和施工清单按钮的显示/隐藏
+ */
+function updateExplodeBOMButtons() {
+    const btnExplode = document.getElementById('btn-explode');
+    const btnBOM = document.getElementById('btn-bom');
+    if (btnExplode) btnExplode.style.display = 'inline-block';
+    if (btnBOM) btnBOM.style.display = 'inline-block';
+}
+
+function hideExplodeBOMButtons() {
+    const btnExplode = document.getElementById('btn-explode');
+    const btnBOM = document.getElementById('btn-bom');
+    if (btnExplode) btnExplode.style.display = 'none';
+    if (btnBOM) btnBOM.style.display = 'none';
 }
 
 function navigateFurnace(direction) {
@@ -198,6 +194,7 @@ function showMasterView() {
     document.getElementById('canvas-container').style.display = 'none';
     document.getElementById('center-stats-panel').style.display = 'none';
     document.getElementById('anim-control-bar').classList.remove('visible');
+    hideExplodeBOMButtons();
     if (!masterRenderer) {
         setTimeout(() => {
             initMasterThree();
@@ -214,26 +211,17 @@ function hideMasterView() {
     if (globalFurnacesResult && globalFurnacesResult.length > 0) {
         document.getElementById('furnace-nav').style.display = 'flex';
         document.getElementById('center-stats-panel').style.display = 'block';
+        updateExplodeBOMButtons();
     }
 }
 
 function init() {
     initThree();
 
-    /**
-     * V2.2: 默认炉膛配置
-     * 系统首次打开自动生成标准台车炉（小型）
-     * 尺寸: 600 × 600 × 900 mm
-     * 承重: 500 kg
-     *
-     * V2.3: 第8个参数 basketType 默认 'grid'
-     *
-     * createFurnaceCard(name, depth, width, height, maxWeight, count, plannedHeats, actualSpacing, basketType)
-     * 参数顺序: name, depth(Z), width(X), height(Y), maxWeight, count, plannedHeats, actualSpacing, basketType
-     */
     createFurnaceCard('标准料框（小型）', 900, 600, 600, 500, 1, 0, null, 'grid');
     createFurnaceCard('标准料框（大型）', 1200, 900, 900, 1000, 1, 0, null, 'grid');
     updateTopSummary();
+    hideExplodeBOMButtons();
 
     // ==================== EVENT LISTENERS ====================
 
@@ -253,10 +241,18 @@ function init() {
     document.getElementById('btn-animate').addEventListener('click', playLoadingAnimation);
     document.getElementById('btn-export-pdf').addEventListener('click', showPdfSelectModal);
 
-    /**
-     * V2.3: + 增加炉膛默认使用 grid 料框类型
-     * 用户可在炉膛详情面板中修改料框类型
-     */
+    // V2.7: 爆炸图按钮
+    const btnExplode = document.getElementById('btn-explode');
+    if (btnExplode) {
+        btnExplode.addEventListener('click', toggleExplodedView);
+    }
+
+    // V2.7: 施工清单按钮
+    const btnBOM = document.getElementById('btn-bom');
+    if (btnBOM) {
+        btnBOM.addEventListener('click', showLayeredBOM);
+    }
+
     document.getElementById('btn-add-furnace').addEventListener('click', () => {
         createFurnaceCard('自定义料框', 1200, 900, 900, 1000, 1, 0, null, 'grid');
         updateTopSummary();
@@ -311,11 +307,13 @@ function init() {
         setGlobalFurnacesResult(null);
         setGlobalUnpackedItems([]);
         setCurrentFurnaceIndex(0);
+        clearFurnaceGroups();
         document.getElementById('btn-export-pdf').style.display = 'none';
         document.getElementById('btn-animate').style.display = 'none';
         document.getElementById('furnace-nav').style.display = 'none';
         document.getElementById('empty-state').style.display = 'block';
         document.getElementById('center-stats-panel').style.display = 'none';
+        hideExplodeBOMButtons();
         if (itemsGroup) {
             while (itemsGroup.children.length > 0) itemsGroup.remove(itemsGroup.children[0]);
         }
@@ -436,19 +434,11 @@ function init() {
         reader.readAsText(file, 'utf-8');
     }
 
-    /**
-     * V2.3: 移除全局料框类型选择器事件处理
-     * 料框类型现在由每个炉膛详情面板独立管理
-     * 全局选择器保留但仅影响新建炉膛的默认值（通过 state.currentBasketType）
-     */
+    // V2.3: 全局料框类型选择器 — 仅影响新建炉膛的默认值
     const basketTypeSelect = document.getElementById('basket-type-select');
     if (basketTypeSelect) {
         basketTypeSelect.addEventListener('change', () => {
             setCurrentBasketType(basketTypeSelect.value);
-            /**
-             * V2.3: 仅更新新建炉膛的默认料框类型，不影响已有炉膛
-             * 不再触发 3D 场景刷新（由每个炉膛独立管理）
-             */
         });
     }
 
