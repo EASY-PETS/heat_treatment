@@ -34,13 +34,15 @@ import {
     currentFurnaceIndex, selectedFurnaceCardId, selectedMaterialCardId,
     placementRules,
     currentBasketType, displaySettings,
-    explodedView, EXPLODE_GAP, EXPLODE_ANIM_DURATION,
+    explodedView, explodeMode, focusedLayer,
+    EXPLODE_GAP, EXPLODE_ANIM_DURATION,
     setScene, setCamera, setRenderer, setControls,
     setMasterScene, setMasterCamera, setMasterRenderer, setMasterControls,
     setItemsGroup, setShelfMeshes,
     setIsAnimating, setAnimPaused, setAnimStopped,
     setCurrentFurnaceIndex, setSelectedFurnaceCardId,
-    setExplodedView, setMainDirectionalLight,
+    setExplodedView, setExplodeMode, setFocusedLayer,
+    setMainDirectionalLight,
     clearFurnaceGroups, setFurnaceGroup
 } from './state.js';
 
@@ -528,7 +530,16 @@ export function disposeShelfMeshes() {
  * @param {THREE.Group} furnaceGroup - 炉膛根 Group
  * @param {number} baseY - 炉膛基础 Y 偏移（料框底部在场景中的 Y 坐标，如 -120）
  */
-export function renderShelvesForFurnace(furnace, furnaceGroup, baseY) {
+/**
+ * 🔧 重构：renderShelvesForFurnace — 现在接收 layerGroups Map 参数
+ * 搁板 Mesh 将被添加到对应的 layerGroup 中，而不是直接挂载到 furnaceGroup。
+ *
+ * @param {Object} furnace - 炉膛配置
+ * @param {THREE.Group} furnaceGroup - 炉膛根 Group（保留用于向后兼容）
+ * @param {number} baseY - 炉膛基础 Y 偏移
+ * @param {Map<number, THREE.Group>} layerGroups - layer编号 → LayerGroup 的映射
+ */
+export function renderShelvesForFurnace(furnace, furnaceGroup, baseY, layerGroups) {
     if (baseY === undefined) baseY = -120;
     const shelfThickness = placementRules.shelfThickness || 20;
 
@@ -562,9 +573,8 @@ export function renderShelvesForFurnace(furnace, furnaceGroup, baseY) {
 
         const shelfMesh = createShelfMesh(fw, fd, shelfThickness);
 
-        // 🔧 TASK 1 修复：搁板 XZ 必须对齐料框几何中心（furnaceGroup 原点）
-        // 料框在 furnaceGroup 中占据 X:[-fw/2, fw/2], Z:[-fd/2, fd/2]
-        // BoxGeometry(fw, thickness, fd) 居中时自然占据该区间，所以 position.x=0, position.z=0
+        // 🔧 搁板 XZ 必须对齐料框几何中心（furnaceGroup 原点）
+        // 搁板在 LayerGroup 内部，其 position 保持为全局坐标值
         const shelfYSpace = baseY + shelfY + shelfThickness / 2;
         shelfMesh.position.set(0, shelfYSpace, 0);
 
@@ -585,7 +595,13 @@ export function renderShelvesForFurnace(furnace, furnaceGroup, baseY) {
             _originalY: shelfYSpace
         };
 
-        furnaceGroup.add(shelfMesh);
+        // 🔧 重构：将搁板加入对应的 layerGroup（如果提供了 layerGroups）
+        if (layerGroups && layerGroups.has(shelfLayer)) {
+            layerGroups.get(shelfLayer).add(shelfMesh);
+        } else {
+            // 回退：直接加入 furnaceGroup（用于动画等不创建 layerGroups 的场景）
+            furnaceGroup.add(shelfMesh);
+        }
         shelfMeshes.push(shelfMesh);
     });
 }
@@ -848,7 +864,7 @@ export function initMasterThree() {
     animateMaster();
 }
 
-// ==================== TASK 2: 爆炸图模式 ====================
+// ==================== 🔧 V3.0: 爆炸图模式（LayerGroup 架构重写） ====================
 
 /**
  * V2.7: 获取工件所在的 layer 编号
@@ -868,69 +884,69 @@ function getItemLayer(item, furnace) {
 }
 
 /**
- * V2.8: 切换爆炸图模式（修复物料遗漏）
- *
- * 🔧 TASK 2 修复：遍历 furnaceGroup 下所有子对象（工件 Mesh + 搁板 Mesh），
- * 统一使用 userData.layer 执行 Y 轴爆炸位移。
- * 不再区分 isShelfMesh / itemId，不再依赖 packedItems 查找。
+ * 🔧 V3.0: 保留旧 toggleExplodedView() 用于向后兼容（内部调用 setExplodeVertical/关闭）
+ * 新代码应直接调用 setExplodeVertical() / setExplodeHorizontal() / resetExplode()
  */
 export async function toggleExplodedView() {
-    const toggled = !explodedView;
-    setExplodedView(toggled);
+    if (!explodeMode) {
+        await setExplodeVertical();
+    } else if (explodeMode === 'vertical') {
+        await setExplodeHorizontal();
+    } else {
+        // explodeMode === 'horizontal' → 关闭
+        await resetExplode();
+    }
+}
 
-    const btn = document.getElementById('btn-explode');
-    if (btn) {
-        btn.textContent = toggled ? '🔍 关闭爆炸图' : '🔍 开启爆炸图';
-        btn.classList.toggle('active', toggled);
+/**
+ * 🔧 V3.0: 纵向爆炸展开 — 按 layer 在 Y 轴方向层叠展开
+ *
+ * 逻辑：每个 LayerGroup 沿 Y 轴偏移 (layerIndex-1) * EXPLODE_GAP，
+ *       X 和 Z 保持在 _originalX/_originalZ（始终为 0）。
+ *       内部工件/搁板的 position 完全不动，只移动 LayerGroup 本身。
+ */
+export async function setExplodeVertical() {
+    // 如果已经在纵向模式，不做重复操作
+    if (explodeMode === 'vertical') return;
+    // 如果当前有其他模式，先复位
+    if (explodeMode) {
+        await resetExplodeSilent();
     }
 
-    if (!globalFurnacesResult || globalFurnacesResult.length === 0) return;
-    const furnace = globalFurnacesResult[currentFurnaceIndex];
-    if (!furnace) return;
+    setExplodeMode('vertical');
+    setExplodedView(true);
+    updateExplodeButtonUI('vertical');
 
     const group = furnaceGroups.get(currentFurnaceIndex);
-    if (!group) return;
+    if (!group || !group.userData || !group.userData.layerGroups) return;
 
+    const layerGroups = group.userData.layerGroups;
     const duration = EXPLODE_ANIM_DURATION;
     const startTime = performance.now();
 
-    // 🔧 TASK 2 修复：收集所有具备 userData.layer 的对象（工件 + 搁板）
+    // 🔧 收集所有 LayerGroup 的动画数据
     const animations = [];
-    group.traverse(child => {
-        if (!child.userData) return;
-        // 跳过料框框架（不参与爆炸移动）
-        if (child.userData.isBasketFrame) return;
+    layerGroups.forEach((layerGroup, layerIndex) => {
+        if (!layerGroup.userData || !layerGroup.userData.isLayerGroup) return;
+        const targetX = layerGroup.userData._originalX || 0;  // 始终为 0
+        const targetY = layerGroup.userData._originalY + (layerIndex - 1) * EXPLODE_GAP;  // Y 轴偏移
+        const targetZ = layerGroup.userData._originalZ || 0;  // 始终为 0
 
-        // 🔧 核心修复：直接读取 userData.layer，不再从 packedItems 推算
-        const layer = typeof child.userData.layer === 'number' ? child.userData.layer : 1;
-
-        const originalY = parseFloat(child.userData._originalY);
-        const currentY = child.position.y;
-
-        let targetY;
-        if (toggled) {
-            // 爆炸展开：原始Y + (layer-1) * EXPLODE_GAP
-            if (isNaN(originalY)) {
-                child.userData._originalY = currentY;
-                targetY = currentY + (layer - 1) * EXPLODE_GAP;
-            } else {
-                targetY = originalY + (layer - 1) * EXPLODE_GAP;
-            }
-        } else {
-            // 收缩回原始位置
-            targetY = !isNaN(originalY) ? originalY : currentY;
-        }
-
-        if (Math.abs(child.position.y - targetY) > 0.01) {
-            animations.push({ obj: child, startY: child.position.y, targetY, layer });
-        }
+        // 记录起始位置
+        animations.push({
+            obj: layerGroup,
+            startX: layerGroup.position.x,
+            startY: layerGroup.position.y,
+            startZ: layerGroup.position.z,
+            targetX, targetY, targetZ,
+            layerIndex
+        });
     });
 
-    // 使用 requestAnimationFrame 实现缓动动画
     if (animations.length === 0) return;
 
     return new Promise(resolve => {
-        function animate(currentTime) {
+        function animStep(currentTime) {
             const elapsed = currentTime - startTime;
             const progress = Math.min(elapsed / duration, 1.0);
             // easeInOutCubic
@@ -939,23 +955,301 @@ export async function toggleExplodedView() {
                 : 1 - Math.pow(-2 * progress + 2, 3) / 2;
 
             animations.forEach(a => {
+                a.obj.position.x = a.startX + (a.targetX - a.startX) * eased;
                 a.obj.position.y = a.startY + (a.targetY - a.startY) * eased;
+                a.obj.position.z = a.startZ + (a.targetZ - a.startZ) * eased;
             });
 
             if (progress < 1.0) {
-                requestAnimationFrame(animate);
+                requestAnimationFrame(animStep);
             } else {
-                // 动画结束，清理临时状态
-                if (!toggled) {
-                    animations.forEach(a => {
-                        delete a.obj.userData._originalY;
-                    });
-                }
+                // 确保最终位置精确
+                animations.forEach(a => {
+                    a.obj.position.set(a.targetX, a.targetY, a.targetZ);
+                });
                 resolve();
             }
         }
-        requestAnimationFrame(animate);
+        requestAnimationFrame(animStep);
     });
+}
+
+/**
+ * 🔧 V3.0: 横向爆炸展开 — 按 layer 在 X 轴方向平铺展开，Y 轴降至 0（地面）
+ *
+ * 便于从正上方俯瞰时，所有层平铺在地面上，X 轴分布清晰可见。
+ */
+export async function setExplodeHorizontal() {
+    // 如果已经在横向模式，不做重复操作
+    if (explodeMode === 'horizontal') return;
+    // 如果当前有其他模式，先复位
+    if (explodeMode) {
+        await resetExplodeSilent();
+    }
+
+    setExplodeMode('horizontal');
+    setExplodedView(true);
+    updateExplodeButtonUI('horizontal');
+
+    const group = furnaceGroups.get(currentFurnaceIndex);
+    if (!group || !group.userData || !group.userData.layerGroups) return;
+
+    const layerGroups = group.userData.layerGroups;
+    const duration = EXPLODE_ANIM_DURATION;
+    const startTime = performance.now();
+
+    const animations = [];
+    layerGroups.forEach((layerGroup, layerIndex) => {
+        if (!layerGroup.userData || !layerGroup.userData.isLayerGroup) return;
+        // X 轴方向展开
+        const targetX = layerGroup.userData._originalX + (layerIndex - 1) * EXPLODE_GAP;
+        // Y 轴降至 0（地面），方便俯瞰
+        const targetY = 0;
+        const targetZ = layerGroup.userData._originalZ || 0;
+
+        animations.push({
+            obj: layerGroup,
+            startX: layerGroup.position.x,
+            startY: layerGroup.position.y,
+            startZ: layerGroup.position.z,
+            targetX, targetY, targetZ,
+            layerIndex
+        });
+    });
+
+    if (animations.length === 0) return;
+
+    return new Promise(resolve => {
+        function animStep(currentTime) {
+            const elapsed = currentTime - startTime;
+            const progress = Math.min(elapsed / duration, 1.0);
+            const eased = progress < 0.5
+                ? 4 * progress * progress * progress
+                : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+
+            animations.forEach(a => {
+                a.obj.position.x = a.startX + (a.targetX - a.startX) * eased;
+                a.obj.position.y = a.startY + (a.targetY - a.startY) * eased;
+                a.obj.position.z = a.startZ + (a.targetZ - a.startZ) * eased;
+            });
+
+            if (progress < 1.0) {
+                requestAnimationFrame(animStep);
+            } else {
+                animations.forEach(a => {
+                    a.obj.position.set(a.targetX, a.targetY, a.targetZ);
+                });
+                resolve();
+            }
+        }
+        requestAnimationFrame(animStep);
+    });
+}
+
+/**
+ * 🔧 V3.0: 关闭爆炸图，所有 LayerGroup 回到原始位置 (0,0,0)
+ */
+export async function resetExplode() {
+    if (!explodeMode) return; // 已关闭
+
+    setExplodeMode(null);
+    setExplodedView(false);
+    updateExplodeButtonUI(null);
+
+    const group = furnaceGroups.get(currentFurnaceIndex);
+    if (!group || !group.userData || !group.userData.layerGroups) return;
+
+    const layerGroups = group.userData.layerGroups;
+    const duration = EXPLODE_ANIM_DURATION;
+    const startTime = performance.now();
+
+    const animations = [];
+    layerGroups.forEach((layerGroup) => {
+        // 回到原始位置 (0,0,0)
+        const targetX = layerGroup.userData._originalX || 0;
+        const targetY = layerGroup.userData._originalY || 0;
+        const targetZ = layerGroup.userData._originalZ || 0;
+
+        if (Math.abs(layerGroup.position.x - targetX) > 0.01 ||
+            Math.abs(layerGroup.position.y - targetY) > 0.01 ||
+            Math.abs(layerGroup.position.z - targetZ) > 0.01) {
+            animations.push({
+                obj: layerGroup,
+                startX: layerGroup.position.x,
+                startY: layerGroup.position.y,
+                startZ: layerGroup.position.z,
+                targetX, targetY, targetZ
+            });
+        }
+    });
+
+    if (animations.length === 0) return;
+
+    return new Promise(resolve => {
+        function animStep(currentTime) {
+            const elapsed = currentTime - startTime;
+            const progress = Math.min(elapsed / duration, 1.0);
+            const eased = progress < 0.5
+                ? 4 * progress * progress * progress
+                : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+
+            animations.forEach(a => {
+                a.obj.position.x = a.startX + (a.targetX - a.startX) * eased;
+                a.obj.position.y = a.startY + (a.targetY - a.startY) * eased;
+                a.obj.position.z = a.startZ + (a.targetZ - a.startZ) * eased;
+            });
+
+            if (progress < 1.0) {
+                requestAnimationFrame(animStep);
+            } else {
+                animations.forEach(a => {
+                    a.obj.position.set(a.targetX, a.targetY, a.targetZ);
+                });
+                resolve();
+            }
+        }
+        requestAnimationFrame(animStep);
+    });
+}
+
+/**
+ * 静默复位（不更新 UI 状态），供 setExplodeVertical/Horizontal 内部切换时使用
+ */
+async function resetExplodeSilent() {
+    const group = furnaceGroups.get(currentFurnaceIndex);
+    if (!group || !group.userData || !group.userData.layerGroups) return;
+
+    const layerGroups = group.userData.layerGroups;
+    const animations = [];
+    layerGroups.forEach((layerGroup) => {
+        if (!layerGroup.userData || !layerGroup.userData.isLayerGroup) return;
+        const tx = layerGroup.userData._originalX || 0;
+        const ty = layerGroup.userData._originalY || 0;
+        const tz = layerGroup.userData._originalZ || 0;
+        if (Math.abs(layerGroup.position.x - tx) > 0.01 ||
+            Math.abs(layerGroup.position.y - ty) > 0.01 ||
+            Math.abs(layerGroup.position.z - tz) > 0.01) {
+            animations.push({
+                obj: layerGroup,
+                startX: layerGroup.position.x, startY: layerGroup.position.y, startZ: layerGroup.position.z,
+                targetX: tx, targetY: ty, targetZ: tz
+            });
+        }
+    });
+
+    if (animations.length === 0) return;
+
+    const duration = EXPLODE_ANIM_DURATION * 0.5; // 静默切换用一半时长
+    const startTime = performance.now();
+    return new Promise(resolve => {
+        function animStep(currentTime) {
+            const progress = Math.min((currentTime - startTime) / duration, 1.0);
+            const eased = progress < 0.5 ? 4 * progress * progress * progress : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+            animations.forEach(a => {
+                a.obj.position.x = a.startX + (a.targetX - a.startX) * eased;
+                a.obj.position.y = a.startY + (a.targetY - a.startY) * eased;
+                a.obj.position.z = a.startZ + (a.targetZ - a.startZ) * eased;
+            });
+            if (progress < 1.0) {
+                requestAnimationFrame(animStep);
+            } else {
+                animations.forEach(a => a.obj.position.set(a.targetX, a.targetY, a.targetZ));
+                resolve();
+            }
+        }
+        requestAnimationFrame(animStep);
+    });
+}
+
+/**
+ * 更新爆炸按钮 UI 状态
+ */
+function updateExplodeButtonUI(mode) {
+    const btn = document.getElementById('btn-explode');
+    if (!btn) return;
+
+    if (mode === 'vertical') {
+        btn.textContent = '🔍 纵向爆炸';
+        btn.classList.add('active');
+    } else if (mode === 'horizontal') {
+        btn.textContent = '🔍 横向爆炸';
+        btn.classList.add('active');
+    } else {
+        btn.textContent = '🔍 开启爆炸图';
+        btn.classList.remove('active');
+    }
+}
+
+// ==================== 🔧 V3.0: 层级聚焦（筛选与隐藏） ====================
+
+/**
+ * 🔧 V3.0: 聚焦某一层 — 隐藏所有非目标层的 LayerGroup
+ *
+ * @param {number|null} layerIndex - 要聚焦的层编号，传 null 显示全部
+ *
+ * 实现原理：
+ *   - 遍历 furnaceGroup.userData.layerGroups Map
+ *   - 设置 layerGroup.visible = (layerIndex === null || layerGroup.layerIndex === layerIndex)
+ *   - 仅操作 visible 属性，不改变场景结构
+ *   - focusLayer(null) 恢复全部显示
+ */
+export function focusLayer(layerIndex) {
+    setFocusedLayer(layerIndex);
+
+    const group = furnaceGroups.get(currentFurnaceIndex);
+    if (!group || !group.userData || !group.userData.layerGroups) return;
+
+    const layerGroups = group.userData.layerGroups;
+    layerGroups.forEach((layerGroup) => {
+        if (!layerGroup.userData || !layerGroup.userData.isLayerGroup) return;
+        if (layerIndex === null) {
+            // 显示全部
+            layerGroup.visible = true;
+        } else {
+            // 仅显示匹配的层
+            layerGroup.visible = (layerGroup.userData.layerIndex === layerIndex);
+        }
+    });
+}
+
+// ==================== 🔧 V3.0: 一键俯视视角（手册截图专用） ====================
+
+/**
+ * 🔧 V3.0: 一键俯视 — 将相机移动至炉膛正上方，确保物体居中、全屏可见
+ *
+ * 实现步骤：
+ *   1. 通过 THREE.Box3 计算当前炉膛 Group 的包围盒
+ *   2. 获取包围盒中心点和尺寸
+ *   3. 将相机移动至中心点正上方
+ *   4. 调整相机距离使包围盒全屏可见
+ */
+export function setTopViewForScreenshot() {
+    const group = furnaceGroups.get(currentFurnaceIndex);
+    if (!group) return;
+
+    // 1. 计算包围盒（包含所有 LayerGroup + 料框框架）
+    const box = new THREE.Box3().setFromObject(group);
+    const center = new THREE.Vector3();
+    box.getCenter(center);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+
+    // 2. 计算相机距离：取包围盒 XZ 最大尺寸 * 1.3（留 30% 边距）
+    const maxDim = Math.max(size.x, size.z);
+    // 透视相机：fov=45° 时，高度 distance = (size / 2) / tan(fov/2)
+    const fovRad = (camera.fov * Math.PI) / 180;
+    const distance = (maxDim * 1.3) / (2 * Math.tan(fovRad / 2));
+
+    // 3. 相机设置到正上方
+    camera.position.set(
+        center.x,
+        center.y + distance * 0.8,  // 正上方，略小于计算值使视野更紧凑
+        center.z + 5  // 轻微 Z 偏移避免正交视角导致的 NaN
+    );
+
+    // 4. 确保相机朝向正下方（设置 controls target 为包围盒中心）
+    controls.target.copy(center);
+    controls.update();
 }
 
 // ==================== TASK 2: 分层施工清单 (Layered BOM) ====================
@@ -1097,8 +1391,21 @@ export function showLayeredBOM() {
 // ==================== TASK 1: 多炉膛原点居中渲染 ====================
 
 /**
- * V2.7: 构建单个炉膛的完整 Group（在原点创建，不偏移）
- * 该 Group 包含：料框框架 + 工件 + 搁板 + 轮廓线
+ * 🔧 重构 V3.0：构建单个炉膛的完整 Group — 引入 LayerGroup 容器架构
+ *
+ * 新结构：
+ *   furnaceGroup
+ *   ├── basketGroup (料框框架)
+ *   ├── containerLine (蓝色轮廓)
+ *   ├── layerGroup_1 (THREE.Group, isLayerGroup=true, layerIndex=1)
+ *   │   ├── item_mesh_a (工件)
+ *   │   └── shelfMesh_1 (搁板，如存在)
+ *   ├── layerGroup_2 (THREE.Group, isLayerGroup=true, layerIndex=2)
+ *   │   ├── item_mesh_b, item_mesh_c ...
+ *   │   └── shelfMesh_2
+ *   └── ...
+ *
+ * 爆炸位移和层级隐藏操作仅针对 LayerGroup 本身，内部工件/搁板位置不变。
  *
  * @param {Object} furnace - 炉膛配置
  * @param {number} index - 炉膛索引
@@ -1127,7 +1434,7 @@ function buildFurnaceGroup(furnace, index, filterMaterialName) {
     containerLine.position.set(0, fh / 2 + baseY, 0);
     furnaceGroup.add(containerLine);
 
-    // 🔧 TASK 2: 预计算每个工件的 layer，供爆炸图和 BOM 使用
+    // 🔧 重构：预计算每个工件的 layer → itemLayerMap
     const itemLayerMap = new Map(); // itemId → layer
     if (furnace.shelvesUsed && furnace.shelvesUsed.length > 0) {
         const sortedShelves = [...furnace.shelvesUsed].sort((a, b) => a.y - b.y);
@@ -1146,6 +1453,43 @@ function buildFurnaceGroup(furnace, index, filterMaterialName) {
             itemLayerMap.set(item.id, 1);
         });
     }
+
+    // 🔧 重构：统计实际用到的 layer 编号，为每个 layer 创建 LayerGroup 容器
+    const usedLayers = new Set();
+    itemLayerMap.forEach(layer => usedLayers.add(layer));
+    // 搁板也可能引入额外的 layer（搁板属于 layer = si+2）
+    if (furnace.shelvesUsed && furnace.shelvesUsed.length > 0) {
+        for (let i = 0; i < furnace.shelvesUsed.length; i++) {
+            usedLayers.add(i + 2);
+        }
+    }
+    usedLayers.add(1); // 确保至少有一个底层 layerGroup
+
+    // 🔧 重构：创建 LayerGroup 容器 Map<layerIndex, THREE.Group>
+    const layerGroups = new Map();
+    usedLayers.forEach(layerNum => {
+        const layerGroup = new THREE.Group();
+        layerGroup.userData = {
+            isLayerGroup: true,
+            layerIndex: layerNum,
+            // 🔧 _originalX/Y/Z 始终为 (0,0,0)，表示 LayerGroup 在 furnaceGroup 局部坐标中的原始位置
+            // 爆炸时通过动画将 layerGroup.position 从 (0,0,0) 过渡到目标偏移，原值不变
+            _originalX: 0,
+            _originalY: 0,
+            _originalZ: 0
+        };
+        layerGroup.position.set(0, 0, 0);
+        layerGroups.set(layerNum, layerGroup);
+        furnaceGroup.add(layerGroup);
+    });
+
+    // 🔧 重构：将 furnaceGroup 上的 layerGroups Map 引用保存在 userData 中，
+    // 方便后续爆炸/筛选/俯视等操作直接获取
+    furnaceGroup.userData = {
+        furnaceIndex: index,
+        furnaceName: furnace.instanceId,
+        layerGroups: layerGroups // 新增：layer编号 → LayerGroup 的映射
+    };
 
     // 渲染工件
     furnace.packedItems.forEach(item => {
@@ -1195,15 +1539,22 @@ function buildFurnaceGroup(furnace, index, filterMaterialName) {
             meshOriginalY,
             item.z - fd / 2 + item.d / 2
         );
-        furnaceGroup.add(mesh);
+
+        // 🔧 重构：将工件加入对应的 LayerGroup，而非 furnaceGroup
+        const targetLayerGroup = layerGroups.get(itemLayer);
+        if (targetLayerGroup) {
+            targetLayerGroup.add(mesh);
+        } else {
+            // 回退：如果 LayerGroup 不存在（不应发生），直接加 furnaceGroup
+            furnaceGroup.add(mesh);
+        }
     });
 
-    // 渲染搁板（传入 baseY，确保搁板 Y 坐标在炉膛局部空间中正确）
+    // 渲染搁板（传入 layerGroups Map，搁板将加入对应的 LayerGroup）
     if ((placementRules.useShelfLayered || placementRules.centerOfGravity) && furnace.packedItems.length > 0) {
-        renderShelvesForFurnace(furnace, furnaceGroup, baseY);
+        renderShelvesForFurnace(furnace, furnaceGroup, baseY, layerGroups);
     }
 
-    furnaceGroup.userData = { furnaceIndex: index, furnaceName: furnace.instanceId };
     furnaceGroup.visible = false; // 默认隐藏，由 renderSingleFurnace 控制显示
     return furnaceGroup;
 }
@@ -1256,11 +1607,18 @@ export function renderSingleFurnace(index, filterMaterialName) {
     camera.position.set(furnace.w * 1.5, furnace.h * 1.8 + baseY, furnace.d * 2.5);
     controls.update();
 
-    // 如果爆炸图模式开启，需要重新应用爆炸偏移
-    if (explodedView) {
-        // 需要重新应用爆炸图
+    // 🔧 V3.0: 如果爆炸图模式开启，需要重新应用爆炸偏移到新构建的 LayerGroup
+    if (explodeMode) {
+        const currentMode = explodeMode;
+        // 先清除状态，避免 setExplodeXXX 内部的防重复逻辑干扰
+        setExplodeMode(null);
         setExplodedView(false);
-        toggleExplodedView();
+        // 根据之前保存的模式重新应用
+        if (currentMode === 'vertical') {
+            setExplodeVertical();
+        } else if (currentMode === 'horizontal') {
+            setExplodeHorizontal();
+        }
     }
 
     update3DStatsPanel(furnace);

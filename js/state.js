@@ -48,6 +48,10 @@ export let mainDirectionalLight = null;
 // ==================== TASK 2: 爆炸图 + 施工清单状态 ====================
 /** 爆炸图模式开关 */
 export let explodedView = false;
+/** 爆炸图模式：null=关闭 | 'vertical'=纵向展开 | 'horizontal'=横向展开 */
+export let explodeMode = null;
+/** 当前聚焦层：null=显示全部，数字=仅显示该编号的 layerGroup */
+export let focusedLayer = null;
 /** 爆炸间距常数 (mm) */
 export const EXPLODE_GAP = 300;
 /** 爆炸图动画过渡时长 (ms) */
@@ -253,6 +257,8 @@ export function setAggregationStats(v) { aggregationStats = v; }
 export function setCurrentBasketType(v) { currentBasketType = v; }
 export function setDisplaySettings(v) { displaySettings = v; }
 export function setExplodedView(v) { explodedView = v; }
+export function setExplodeMode(v) { explodeMode = v; }
+export function setFocusedLayer(v) { focusedLayer = v; }
 export function setMainDirectionalLight(v) { mainDirectionalLight = v; }
 export function clearFurnaceGroups() { furnaceGroups.clear(); }
 export function setFurnaceGroup(index, group) { furnaceGroups.set(index, group); }
