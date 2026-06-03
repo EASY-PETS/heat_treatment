@@ -13,6 +13,7 @@
 import {
     isAnimating, animPaused, animStopped,
     globalFurnacesResult, globalUnpackedItems, aggregationStats,
+    groupingInfo,
     currentFurnaceIndex, selectedFurnaceCardId,
     masterRenderer, itemsGroup, usedColors,
     currentBasketType, displaySettings,
@@ -74,7 +75,9 @@ function executeAndRender() {
             name: d.name, shape: d.shape, count: d.count,
             dim1: d.dim1, dim2: d.dim2, dim3: d.dim3,
             weight: d.totalWeight, color: d.color,
-            material: d.material || '', process: d.process || ''
+            material: d.material || '', process: d.process || '',
+            customer: d.customer || '', itemCode: d.itemCode || '',
+            showName: d.showName || ''
         });
     });
 

@@ -112,12 +112,12 @@ function buildPage1_TaskOverviewWithShots(furnace, screenshots, pdfWrapper, mult
                     <thead>
                         <tr>
                             <th style="width:22px;">色标</th>
+                            <th style="width:60px;">物料编码</th>
                             <th>工件名称</th>
-                            <th>形态</th>
+                            <th>客户</th>
                             <th>尺寸 (mm)</th>
                             <th>单重</th>
                             <th>数量</th>
-                            <th>小计</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -174,10 +174,16 @@ function buildPage1_TaskOverviewWithShots(furnace, screenshots, pdfWrapper, mult
 function buildMaterialTableRows(furnace) {
     const grouped = new Map();
     furnace.packedItems.forEach(item => {
-        const key = item.name + '|' + (item.material || '') + '|' + (item.process || '');
+        /** V3.4: 分组键使用物料编码+纯净名称+客户，精确聚合 */
+        const cleanName = item.showName || (item.name ? item.name.split('_')[0] : '未知');
+        const customer = item.customer || '';
+        const key = (item.itemCode || '') + '|' + cleanName + '|' + customer + '|' + (item.material || '') + '|' + (item.process || '');
         if (!grouped.has(key)) {
             grouped.set(key, {
                 name: item.name,
+                showName: cleanName,
+                customer: customer,
+                itemCode: item.itemCode || '',
                 shape: item.shape,
                 w: item.w,
                 h: item.h,
@@ -198,16 +204,15 @@ function buildMaterialTableRows(furnace) {
         const dimStr = g.shape === 'cylinder'
             ? `⌀${g.w}×H${g.h}`
             : `${g.w}×${g.h}×${g.d}`;
-        const shapeLabel = g.shape === 'cylinder' ? '圆柱' : '立方';
         return `
             <tr style="${i % 2 === 0 ? 'background:#fafafa;' : ''}">
                 <td><span class="pdf-color-dot" style="background:${escapeHtml(g.color)};"></span></td>
-                <td style="text-align:left;">${escapeHtml(g.name)}</td>
-                <td>${shapeLabel}</td>
+                <td style="font-size:9px;">${escapeHtml(g.itemCode)}</td>
+                <td style="text-align:left;">${escapeHtml(g.showName)}</td>
+                <td>${escapeHtml(g.customer)}</td>
                 <td>${dimStr}</td>
                 <td>${g.singleWeight.toFixed(1)}</td>
                 <td>${g.count}</td>
-                <td>${g.totalWeight.toFixed(1)}</td>
             </tr>`;
     }).join('');
 }
@@ -229,13 +234,17 @@ function buildPage2_StepByStep(furnace, layeredShots, pdfWrapper, multiLabel) {
             if (shot.items && shot.items.length > 0) {
                 itemsHTML = shot.items.map(item => {
                     const avgWeight = item.count > 0 ? (item.totalWeight / item.count).toFixed(1) : '0.0';
+                    /** V3.4: 工件名称净化 — 只展示干净的产品名称(客户) */
+                    const cleanName = item.showName || (item.name ? item.name.split('_')[0] : '未知');
+                    const customer = item.customer || '';
+                    const customerStr = customer ? ` (${escapeHtml(customer)})` : '';
                     return `
                         <div class="item-entry">
                             <span>
                                 <span class="pdf-color-dot" style="background:${escapeHtml(item.color || '#888')};"></span>
-                                ${escapeHtml(item.name)} | ${escapeHtml(item.material || '—')} | ${escapeHtml(item.process || '—')}
+                                ${escapeHtml(cleanName)}${customerStr} × ${item.count} 件
                             </span>
-                            <span>${escapeHtml(item.dimensions || '')} · ${avgWeight}kg × ${item.count} 件</span>
+                            <span>${escapeHtml(item.dimensions || '')} · ${avgWeight}kg/件 · ${escapeHtml(item.material || '—')} · ${escapeHtml(item.process || '—')}</span>
                         </div>`;
                 }).join('');
             }

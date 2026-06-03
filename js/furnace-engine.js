@@ -24,7 +24,8 @@
  *   - state.js (placementRules, aggregationStats)
  */
 
-import { placementRules, setAggregationStats } from './state.js';
+import { placementRules, setAggregationStats, setGroupingInfo } from './state.js';
+import { groupMaterials, getGroupingSummary, getGroupingRules } from './PackingRuleEngine.js';
 
 // ==================== 摆放姿态优化（Task 3） ====================
 
@@ -189,7 +190,11 @@ export function solveHeterogeneousPacking(furnacePoolInput, itemsInput, spacing)
                 weight: singleWeight, color: item.color,
                 material: item.material || '', process: item.process || '',
                 rotationInfo: optimized.rotationInfo,
-                originalDims: { l: item.dim1, w: item.dim2, h: item.dim3 }
+                originalDims: { l: item.dim1, w: item.dim2, h: item.dim3 },
+                /** V3.4: 透传新字段用于 PDF 渲染名称净化 */
+                showName: item.showName || '',
+                customer: item.customer || '',
+                itemCode: item.itemCode || ''
             });
             itemMaterialMap.set(itemId, item.material || '未知材质');
             itemProcessMap.set(itemId, item.process || '未知工艺');
@@ -440,7 +445,11 @@ export function solveShelfLayeredMultiFurnace(furnacePoolInput, itemsInput, spac
                 weight: singleWeight, color: item.color,
                 material: item.material || '', process: item.process || '',
                 rotationInfo: optimized.rotationInfo,
-                originalDims: { l: item.dim1, w: item.dim2, h: item.dim3 }
+                originalDims: { l: item.dim1, w: item.dim2, h: item.dim3 },
+                /** V3.4: 透传新字段用于 PDF 渲染名称净化 */
+                showName: item.showName || '',
+                customer: item.customer || '',
+                itemCode: item.itemCode || ''
             });
             itemMaterialMap.set(itemId, item.material || '未知材质');
             itemProcessMap.set(itemId, item.process || '未知工艺');
@@ -972,7 +981,11 @@ export function solveCenterOfGravityMultiFurnace(furnacePoolInput, itemsInput, s
                 weight: singleWeight, color: item.color,
                 material: item.material || '', process: item.process || '',
                 rotationInfo: optimized.rotationInfo,
-                originalDims: { l: item.dim1, w: item.dim2, h: item.dim3 }
+                originalDims: { l: item.dim1, w: item.dim2, h: item.dim3 },
+                /** V3.4: 透传新字段用于 PDF 渲染名称净化 */
+                showName: item.showName || '',
+                customer: item.customer || '',
+                itemCode: item.itemCode || ''
             });
             itemMaterialMap.set(itemId, item.material || '未知材质');
             itemProcessMap.set(itemId, item.process || '未知工艺');
@@ -1318,7 +1331,11 @@ function solveUnifiedMultiFurnace(furnacePoolInput, itemsInput, spacing) {
                 weight: singleWeight, color: item.color,
                 material: item.material || '', process: item.process || '',
                 rotationInfo: optimized.rotationInfo,
-                originalDims: { l: item.dim1, w: item.dim2, h: item.dim3 }
+                originalDims: { l: item.dim1, w: item.dim2, h: item.dim3 },
+                /** V3.4: 透传新字段用于 PDF 渲染名称净化 */
+                showName: item.showName || '',
+                customer: item.customer || '',
+                itemCode: item.itemCode || ''
             });
             itemMaterialMap.set(itemId, item.material || '未知材质');
             itemProcessMap.set(itemId, item.process || '未知工艺');
@@ -1340,34 +1357,89 @@ function solveUnifiedMultiFurnace(furnacePoolInput, itemsInput, spacing) {
     return { completedFurnaces, unpackedItems: flattenedItems, aggregationStats: aggStats };
 }
 
-// ==================== MAIN EXECUTE ENTRY POINT（V2.5：嵌套融合）====================
+// ==================== MAIN EXECUTE ENTRY POINT（V3.0：分组预处理 + 嵌套融合）====================
 
 /**
- * V2.5 修复：搁板分层 + 重心居中 → 嵌套融合，不再是 if-else 互斥关系
+ * V3.0 重构：集成 groupMaterials() 预处理步骤
  *
- * 决策逻辑：
+ * 执行顺序:
+ *   Step 1 — 读取规则配置（sameMaterial / sameProcess）
+ *   Step 2 — 根据规则对工件进行分组预处理
+ *   Step 3 — 每个分组独立调用现有装炉算法（group → packing → group → packing）
+ *
+ * 向后兼容性:
+ *   - 关闭全部规则时，groupMaterials() 返回单组 = 与当前版本行为完全一致
+ *   - 分组逻辑仅在 executePacking 层面介入，不修改任何现有算法函数
+ *
+ * 分组优先级（两者同时开启）:
+ *   工艺优先 → 材质优先 → 装炉
+ *
+ * 决策逻辑（每个分组的内部算法）:
  *   - 搁板ON 或 重心ON → 使用统一嵌套算法 solveUnifiedMultiFurnace
  *   - 两者都OFF → 使用旧版异构装炉 solveHeterogeneousPacking
  *
- * 旧版 shelf-layered 和 CG-only 入口保留作为回退/兼容，
- * 但主入口通过统一算法处理所有嵌套场景。
+ * @param {Array} furnacePoolInput - 炉膛池配置
+ * @param {Array} itemsInput - 待装炉工件列表（未展平，含 count 字段）
+ * @param {number} spacing - 全局安全间距 (mm)
+ * @returns {{ completedFurnaces: Array, unpackedItems: Array, aggregationStats: Object, groupingInfo: Object }}
  */
 export function executePacking(furnacePoolInput, itemsInput, spacing) {
-    let result;
     const useShelf = placementRules.useShelfLayered;
     const useCG = placementRules.centerOfGravity;
 
-    if (useShelf || useCG) {
-        // V2.5: 统一嵌套算法 — 搁板控制Y分层，重心控制XZ落子
-        result = solveUnifiedMultiFurnace(furnacePoolInput, itemsInput, spacing);
-    } else {
-        // 两者都OFF：使用旧版异构装炉
-        result = solveHeterogeneousPacking(furnacePoolInput, itemsInput, spacing);
+    // Step 1: 读取分组规则配置
+    const groupingRules = getGroupingRules();
+
+    // Step 2: 根据规则对工件进行分组预处理
+    const groups = groupMaterials(itemsInput, groupingRules);
+
+    // Step 3: 每个分组独立调用现有装炉算法
+    let allCompletedFurnaces = [];
+    let allUnpackedItems = [];
+    let totalAggStats = null;
+
+    for (const group of groups) {
+        if (group.items.length === 0) continue;
+
+        let result;
+        if (useShelf || useCG) {
+            // 统一嵌套算法 — 搁板控制Y分层，重心控制XZ落子
+            result = solveUnifiedMultiFurnace(furnacePoolInput, group.items, spacing);
+        } else {
+            // 两者都OFF：使用旧版异构装炉
+            result = solveHeterogeneousPacking(furnacePoolInput, group.items, spacing);
+        }
+
+        // 合并装炉结果
+        allCompletedFurnaces.push(...result.completedFurnaces);
+        allUnpackedItems.push(...result.unpackedItems);
     }
 
-    // Task 2: 更新全局聚集率统计
-    if (result.aggregationStats) {
-        setAggregationStats(result.aggregationStats);
+    // 计算全部分组的聚集率统计
+    // 构建全局材质/工艺映射用于聚集率计算
+    const itemMaterialMap = new Map();
+    const itemProcessMap = new Map();
+    allCompletedFurnaces.forEach(furnace => {
+        furnace.packedItems.forEach(item => {
+            itemMaterialMap.set(item.id, item.material || '未知材质');
+            itemProcessMap.set(item.id, item.process || '未知工艺');
+        });
+    });
+    const aggStats = computeAggregationRates(allCompletedFurnaces, itemMaterialMap, itemProcessMap);
+
+    // 更新全局聚集率统计
+    if (aggStats) {
+        setAggregationStats(aggStats);
     }
-    return result;
+
+    // V3.0: 生成并存储分组统计信息
+    const groupingSummary = getGroupingSummary(groups, groupingRules);
+    setGroupingInfo(groupingSummary);
+
+    return {
+        completedFurnaces: allCompletedFurnaces,
+        unpackedItems: allUnpackedItems,
+        aggregationStats: aggStats,
+        groupingInfo: groupingSummary
+    };
 }

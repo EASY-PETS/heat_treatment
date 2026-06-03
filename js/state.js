@@ -130,6 +130,13 @@ export let aggregationStats = {
     processRate: null     // 工艺聚集率 (0-100)
 };
 
+/** V3.0: 分组规则信息 — 用于方案统计面板展示 */
+export let groupingInfo = {
+    rulesText: [],        // 启用的规则文本列表 ['✓ 同工艺优先', '✓ 同材质优先']
+    summaryText: [],      // 分组结果文本列表 ['渗碳（3种物料）', '氮化（2种物料）']
+    totalGroups: 0        // 分组总数
+};
+
 // ==================== COLOR GENERATOR STATE ====================
 /** Set of colors already assigned to materials, to avoid duplicates */
 export const usedColors = new Set();
@@ -254,6 +261,7 @@ export function setImportPreviewData(v) { importPreviewData = v; }
 export function setJiParsedData(v) { jiParsedData = v; }
 export function setPlacementRules(v) { placementRules = v; }
 export function setAggregationStats(v) { aggregationStats = v; }
+export function setGroupingInfo(v) { groupingInfo = v; }
 export function setCurrentBasketType(v) { currentBasketType = v; }
 export function setDisplaySettings(v) { displaySettings = v; }
 export function setExplodedView(v) { explodedView = v; }

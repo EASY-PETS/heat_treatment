@@ -21,6 +21,7 @@ import {
     globalFurnacesResult, globalUnpackedItems, globalSpacingValue,
     currentFurnaceIndex,
     placementRules, aggregationStats,
+    groupingInfo,
     usedColors, masterPlans,
     setFurnaceCounter, setMaterialCounter,
     setSelectedFurnaceCardId, setSelectedMaterialCardId,
@@ -75,7 +76,10 @@ export function getMaterialDataFromCard(card) {
     const orderDate = card.getAttribute('data-order-date') || ''; const deliveryDate = card.getAttribute('data-delivery-date') || '';
     const remark = card.getAttribute('data-remark') || ''; const hardness = card.getAttribute('data-hardness') || '';
     const cadImage = card.getAttribute('data-cad-image') || '';
-    return { mid, name, shape, count, dim1, dim2, dim3, totalWeight, color, material, process, orderDate, deliveryDate, remark, hardness, cadImage };
+    const showName = card.getAttribute('data-show-name') || '';
+    const customer = card.getAttribute('data-customer') || '';
+    const itemCode = card.getAttribute('data-item-code') || '';
+    return { mid, name, shape, count, dim1, dim2, dim3, totalWeight, color, material, process, orderDate, deliveryDate, remark, hardness, cadImage, showName, customer, itemCode };
 }
 
 // ==================== FURNACE CARD CREATION ====================
@@ -199,8 +203,11 @@ export function createMaterialCard(name, shape, count, dim1, dim2, dim3, totalWe
     const dimLabel = shape === 'cylinder' ? '⌀' + dim1 + '×H' + dim3 : dim1 + '×' + dim2 + '×' + dim3;
     const card = document.createElement('div');
     card.className = 'material-card'; card.id = cardId; card.setAttribute('data-mid', newMC); card.style.borderLeftColor = color;
-    if (extraData) { if (extraData.material) card.setAttribute('data-material', extraData.material); if (extraData.process) card.setAttribute('data-process', extraData.process); if (extraData.orderDate) card.setAttribute('data-order-date', extraData.orderDate); if (extraData.deliveryDate) card.setAttribute('data-delivery-date', extraData.deliveryDate); if (extraData.remark) card.setAttribute('data-remark', extraData.remark); if (extraData.hardness) card.setAttribute('data-hardness', extraData.hardness); if (extraData.cadImage) card.setAttribute('data-cad-image', extraData.cadImage); }
-    card.innerHTML = '<button class="m-delete" data-action="delete-material" data-mid="' + newMC + '">✕</button><div class="m-color-swatch" style="background-color:' + color + ';" title="' + name + '"></div><div class="m-info"><div class="m-name">' + name + '</div><div class="m-meta">' + shapeLabel + ' · ' + dimLabel + 'mm · ×' + count + '件 · ' + totalWeight + 'kg</div></div>';
+    if (extraData) { if (extraData.material) card.setAttribute('data-material', extraData.material); if (extraData.process) card.setAttribute('data-process', extraData.process); if (extraData.orderDate) card.setAttribute('data-order-date', extraData.orderDate); if (extraData.deliveryDate) card.setAttribute('data-delivery-date', extraData.deliveryDate); if (extraData.remark) card.setAttribute('data-remark', extraData.remark); if (extraData.hardness) card.setAttribute('data-hardness', extraData.hardness); if (extraData.cadImage) card.setAttribute('data-cad-image', extraData.cadImage); if (extraData.showName) card.setAttribute('data-show-name', extraData.showName); if (extraData.customer) card.setAttribute('data-customer', extraData.customer); if (extraData.itemCode) card.setAttribute('data-item-code', extraData.itemCode); }
+    const itemCode = extraData && extraData.itemCode ? extraData.itemCode : '';
+    const customer = extraData && extraData.customer ? extraData.customer : '';
+    const metaExtra = (itemCode || customer) ? '<div class="item-meta">编码: ' + itemCode + ' | 客户: ' + customer + '</div>' : '';
+    card.innerHTML = '<button class="m-delete" data-action="delete-material" data-mid="' + newMC + '">✕</button><div class="m-color-swatch" style="background-color:' + color + ';" title="' + name + '"></div><div class="m-info"><div class="m-name">' + name + '</div><div class="m-meta">' + shapeLabel + ' · ' + dimLabel + 'mm · ×' + count + '件 · ' + totalWeight + 'kg</div>' + metaExtra + '</div>';
     card.addEventListener('click', (e) => { if (e.target.closest('[data-action="delete-material"]')) return; const wasSelected = card.classList.contains('active'); selectMaterialCard(cardId); if (!wasSelected) { showMaterialDetail(cardId); } else { document.getElementById('mdp-placeholder').style.display = 'block'; document.getElementById('mdp-body').style.display = 'none'; document.getElementById('mdp-title').textContent = '📋 工件详情'; } });
     document.getElementById('material-cards-container').appendChild(card);
     return { cardId, materialCounter: newMC, name, shape, count, dim1, dim2, dim3, totalWeight, color };
@@ -260,8 +267,26 @@ export function updateCenterStats(onFurnaceClick) {
     panel.style.display = 'block';
     let totalWeight = 0, totalCount = 0;
     globalFurnacesResult.forEach(f => { totalWeight += f.totalWeight; totalCount += f.packedItems.length; });
-    document.getElementById('csp-summary').textContent = '共' + globalFurnacesResult.length + '炉 · ' + totalCount + '件 · ' + totalWeight.toFixed(1) + 'kg';
+
+    // V3.0: 在摘要中显示分组规则信息
+    let summaryExtra = '';
+    const gi = groupingInfo;
+    if (gi && gi.rulesText && gi.rulesText.length > 0 && !gi.rulesText.includes('✗ 无分组规则')) {
+        summaryExtra = ' | 规则：' + gi.rulesText.join(' ');
+    }
+
+    document.getElementById('csp-summary').textContent = '共' + globalFurnacesResult.length + '炉 · ' + totalCount + '件 · ' + totalWeight.toFixed(1) + 'kg' + summaryExtra;
     body.innerHTML = '';
+
+    // V3.0: 如果启用了分组规则，显示分组结果摘要
+    if (gi && gi.summaryText && gi.summaryText.length > 0) {
+        const groupingDiv = document.createElement('div');
+        groupingDiv.className = 'csp-grouping-info';
+        groupingDiv.style.cssText = 'background:rgba(8,145,178,0.1);border:1px solid rgba(8,145,178,0.3);border-radius:6px;padding:8px 10px;margin-bottom:8px;font-size:10px;color:#67e8f9;';
+        groupingDiv.innerHTML = '<strong>🔀 分组结果（' + gi.totalGroups + '组）：</strong><br>' + gi.summaryText.join('<br>');
+        body.appendChild(groupingDiv);
+    }
+
     globalFurnacesResult.forEach((f, idx) => { const totalVol = f.w * f.h * f.d; const packedVol = f.packedItems.reduce((acc, curr) => acc + (curr.w * curr.h * curr.d), 0); const div = document.createElement('div'); div.className = 'csp-furnace-item' + (idx === currentFurnaceIndex ? ' active' : ''); div.innerHTML = '<strong>' + f.instanceId + '</strong>负载: ' + f.totalWeight.toFixed(1) + '/' + f.max_weight + 'kg<br>利用率: ' + ((packedVol/totalVol)*100).toFixed(1) + '% · ' + f.packedItems.length + '件'; div.addEventListener('click', () => { if (onFurnaceClick) onFurnaceClick(idx); }); body.appendChild(div); });
     if (globalUnpackedItems.length > 0) { let summary = {}; globalUnpackedItems.forEach(u => { summary[u.name] = (summary[u.name] || 0) + 1; }); unpackedDiv.style.display = 'block'; unpackedDiv.innerHTML = '<strong>⚠️ ' + globalUnpackedItems.length + ' 件无法装炉：</strong> ' + Object.entries(summary).map(([k,v]) => k + '×' + v).join(' · '); } else { unpackedDiv.style.display = 'none'; }
 }
@@ -283,17 +308,20 @@ export function openRulesModal() {
     document.getElementById('rule-shelf-layered').checked = placementRules.useShelfLayered;
     document.getElementById('rule-shelf-height').value = placementRules.shelfHeight || 100;
     document.getElementById('rule-shelf-thickness').value = placementRules.shelfThickness || 20;
+    // V3.0: 装炉分组规则
+    document.getElementById('rule-same-process').checked = placementRules.sameProcess || false;
+    document.getElementById('rule-same-material').checked = placementRules.sameMaterial || false;
     // 姿态优化
     document.getElementById('rule-posture-optimization').checked = placementRules.allowPostureOptimization !== false;
 }
 
 export function saveRulesModal() {
-    // 🔧 V2.6 清理：只保存核心有效参数，重心居中已固化于算法内部
+    // V3.0: 保存核心有效参数，新增分组规则 sameMaterial / sameProcess
     setPlacementRules({
         gravity: true,                          // 重力优先已固化
         dense: true,                            // 密集排布已固化
-        sameMaterial: false,                    // 同材质聚集保持关闭（待后续启用）
-        sameProcess: false,                     // 同工艺聚集保持关闭（待后续启用）
+        sameMaterial: document.getElementById('rule-same-material').checked,     // V3.0: 同材质分组
+        sameProcess: document.getElementById('rule-same-process').checked,       // V3.0: 同工艺分组
         minSpacing: parseFloat(document.getElementById('rule-min-spacing').value) || 5,
         wallSpacing: parseFloat(document.getElementById('rule-wall-spacing').value) || 30,
         rotate: document.getElementById('rule-rotate').checked,
@@ -327,18 +355,95 @@ export function parseExcelData(workbook) {
     const sheetName = workbook.SheetNames[0]; const sheet = workbook.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
     if (rows.length < 2) return []; let headerRow = 0;
-    for (let i = 0; i < Math.min(5, rows.length); i++) { if (rows[i].some(c => String(c).includes('名称'))) { headerRow = i; break; } }
+    for (let i = 0; i < Math.min(5, rows.length); i++) { if (rows[i].some(c => String(c).includes('名称') || String(c).includes('编码') || String(c).includes('规格'))) { headerRow = i; break; } }
     const headers = rows[headerRow].map(h => String(h).trim());
     const getCol = (keywords) => { for (let kw of keywords) { const idx = headers.findIndex(h => h.includes(kw)); if (idx >= 0) return idx; } return -1; };
-    const colName = getCol(['名称']); const colL = getCol(['长度', 'L']); const colW = getCol(['宽度', 'W']); const colH = getCol(['高度', 'H']); const colD = getCol(['直径', 'D']); const colCount = getCol(['数量']); const colWeight = getCol(['总重', '重量']); const colMaterial = getCol(['材质']); const colHardness = getCol(['硬度']); const colProcess = getCol(['工艺']); const colDate = getCol(['日期', '下单']); const colRemark = getCol(['备注']);
+    /** V3.4: 新表头 — 产品名称/工件名称、客户/客户名称、物料编码、规格、数量、单重、工艺、材质 */
+    const colProductName = getCol(['产品名称', '工件名称']);
+    const colCustomer = getCol(['客户名称', '客户']);
+    const colItemCode = getCol(['物料编码']);
+    const colSpec = getCol(['规格']);
+    const colCount = getCol(['数量']);
+    const colUnitWeight = getCol(['单重']);
+    const colProcess = getCol(['工艺']);
+    const colMaterial = getCol(['材质']);
+    // 旧表头兼容
+    const colNameOld = getCol(['名称']);
+    const colL = getCol(['长度', 'L']); const colW = getCol(['宽度', 'W']); const colH = getCol(['高度', 'H']); const colD = getCol(['直径', 'D']);
+    const colWeightOld = getCol(['总重', '重量']);
+    const colHardness = getCol(['硬度']); const colDate = getCol(['日期', '下单']); const colRemark = getCol(['备注']);
+
     const results = [];
-    for (let i = headerRow + 1; i < rows.length; i++) { const row = rows[i]; const name = String(row[colName] || '').trim(); if (!name) continue; const L = parseFloat(row[colL]) || 0; const W = parseFloat(row[colW]) || 0; const H = parseFloat(row[colH]) || 0; const D = parseFloat(row[colD]) || 0; const count = parseInt(row[colCount]) || 1; const weight = parseFloat(row[colWeight]) || 0; const material = String(row[colMaterial] || '').trim(); const hardness = String(row[colHardness] || '').trim(); const process = String(row[colProcess] || '').trim(); const date = String(row[colDate] || '').trim(); const remark = String(row[colRemark] || '').trim(); let shape, dim1, dim2, dim3; const hasDiam = D > 0; const hasCuboid = L > 0 && W > 0; if (hasDiam && H > 0) { shape = 'cylinder'; dim1 = D; dim2 = D; dim3 = H; } else if (hasCuboid) { shape = 'cuboid'; dim1 = L; dim2 = W; dim3 = H || Math.min(L, W); } else if (D > 0) { shape = 'cylinder'; dim1 = D; dim2 = D; dim3 = H || D; } else { shape = 'cuboid'; dim1 = L || 50; dim2 = W || 50; dim3 = H || 50; } const valid = dim1 > 0 && dim3 > 0; results.push({ name, shape, dim1, dim2, dim3, count, weight, material, hardness, process, orderDate: date, deliveryDate: '', remark, valid }); }
+    /** 新格式规格解析器：支持 "60*150*150" 或 "⌀60×H150" 等格式 */
+    const parseSpec = (specStr) => {
+        if (!specStr) return null;
+        const s = String(specStr).trim();
+        const diamMatch = s.match(/[⌀Φ]?(\d+(?:\.\d+)?)\s*[×*]\s*H?\s*(\d+(?:\.\d+)?)/i);
+        if (diamMatch) return { shape: 'cylinder', dim1: parseFloat(diamMatch[1]), dim2: parseFloat(diamMatch[1]), dim3: parseFloat(diamMatch[2]) };
+        const parts = s.split(/[\*x×X]/);
+        if (parts.length >= 3) return { shape: 'cuboid', dim1: parseFloat(parts[0]) || 0, dim2: parseFloat(parts[1]) || 0, dim3: parseFloat(parts[2]) || 0 };
+        if (parts.length === 2) return { shape: 'cylinder', dim1: parseFloat(parts[0]) || 0, dim2: parseFloat(parts[0]) || 0, dim3: parseFloat(parts[1]) || 0 };
+        return null;
+    };
+
+    const isNewFormat = colProductName >= 0 || colSpec >= 0 || colItemCode >= 0;
+
+    for (let i = headerRow + 1; i < rows.length; i++) {
+        const row = rows[i];
+        let productName, customerName, itemCode, shape, dim1, dim2, dim3, count, weight, material, process;
+
+        if (isNewFormat) {
+            productName = String(row[colProductName] || '').trim();
+            customerName = String(row[colCustomer] || '').trim();
+            itemCode = String(row[colItemCode] || '').trim();
+            if (!productName && !itemCode) continue;
+            const specStr = String(row[colSpec] || '').trim();
+            const specParsed = parseSpec(specStr);
+            if (specParsed) { shape = specParsed.shape; dim1 = specParsed.dim1; dim2 = specParsed.dim2; dim3 = specParsed.dim3; }
+            else { shape = 'cuboid'; dim1 = 50; dim2 = 50; dim3 = 50; }
+            count = parseInt(row[colCount]) || 1;
+            weight = parseFloat(row[colUnitWeight]) || 0;
+            material = String(row[colMaterial] || '').trim();
+            process = String(row[colProcess] || '').trim();
+        } else {
+            // 旧格式兼容
+            productName = String(row[colNameOld] || '').trim();
+            customerName = '';
+            itemCode = '';
+            if (!productName) continue;
+            const L = parseFloat(row[colL]) || 0; const W = parseFloat(row[colW]) || 0;
+            const H = parseFloat(row[colH]) || 0; const D = parseFloat(row[colD]) || 0;
+            const hasDiam = D > 0; const hasCuboid = L > 0 && W > 0;
+            if (hasDiam && H > 0) { shape = 'cylinder'; dim1 = D; dim2 = D; dim3 = H; }
+            else if (hasCuboid) { shape = 'cuboid'; dim1 = L; dim2 = W; dim3 = H || Math.min(L, W); }
+            else if (D > 0) { shape = 'cylinder'; dim1 = D; dim2 = D; dim3 = H || D; }
+            else { shape = 'cuboid'; dim1 = L || 50; dim2 = W || 50; dim3 = H || 50; }
+            count = parseInt(row[colCount]) || 1;
+            weight = parseFloat(row[colWeightOld]) || 0;
+            material = String(row[colMaterial] || '').trim();
+            process = String(row[colProcess] || '').trim();
+        }
+
+        /** V3.4 核心：唯一标识 name = 产品名称_客户名称，防止重名 */
+        const uniqueName = productName && customerName ? `${productName}_${customerName}` : (productName || itemCode || '未知工件');
+        const valid = dim1 > 0 && dim3 > 0;
+        results.push({
+            name: uniqueName,
+            showName: productName || uniqueName,
+            customer: customerName,
+            itemCode: itemCode,
+            shape, dim1, dim2, dim3, count, weight, material,
+            hardness: '', process,
+            orderDate: '', deliveryDate: '', remark: '',
+            valid
+        });
+    }
     return results;
 }
 
-export function showImportPreview(data) { setImportPreviewData(data); const content = document.getElementById('import-preview-content'); let html = '<table class="import-table"><thead><tr><th>名称</th><th>形态</th><th>尺寸</th><th>数量</th><th>总重(kg)</th><th>材质</th><th>工艺</th><th>状态</th></tr></thead><tbody>'; data.forEach(d => { const dimStr = d.shape === 'cylinder' ? '⌀' + d.dim1 + '×H' + d.dim3 : d.dim1 + '×' + d.dim2 + '×' + d.dim3; const cls = d.valid ? '' : ' class="error"'; html += '<tr' + cls + '><td>' + d.name + '</td><td>' + (d.shape==='cylinder'?'圆柱':'立方') + '</td><td>' + dimStr + 'mm</td><td>' + d.count + '</td><td>' + d.weight + '</td><td>' + d.material + '</td><td>' + d.process + '</td><td>' + (d.valid?'✅':'⚠️ 尺寸不足') + '</td></tr>'; }); html += '</tbody></table>'; content.innerHTML = html; document.getElementById('import-preview-overlay').style.display = 'flex'; }
+export function showImportPreview(data) { setImportPreviewData(data); const content = document.getElementById('import-preview-content'); let html = '<table class="import-table"><thead><tr><th>产品名称</th><th>客户</th><th>物料编码</th><th>形态</th><th>尺寸</th><th>数量</th><th>单重(kg)</th><th>材质</th><th>工艺</th><th>状态</th></tr></thead><tbody>'; data.forEach(d => { const dimStr = d.shape === 'cylinder' ? '⌀' + d.dim1 + '×H' + d.dim3 : d.dim1 + '×' + d.dim2 + '×' + d.dim3; const cls = d.valid ? '' : ' class="error"'; const displayName = d.showName || d.name.split('_')[0]; const customer = d.customer || ''; html += '<tr' + cls + '><td>' + displayName + '</td><td>' + customer + '</td><td>' + (d.itemCode || '') + '</td><td>' + (d.shape==='cylinder'?'圆柱':'立方') + '</td><td>' + dimStr + 'mm</td><td>' + d.count + '</td><td>' + d.weight + '</td><td>' + d.material + '</td><td>' + d.process + '</td><td>' + (d.valid?'✅':'⚠️ 尺寸不足') + '</td></tr>'; }); html += '</tbody></table>'; content.innerHTML = html; document.getElementById('import-preview-overlay').style.display = 'flex'; }
 
-export function applyImportData(replace) { if (replace) { document.querySelectorAll('.material-card').forEach(c => c.remove()); usedColors.clear(); } importPreviewData.filter(d => d.valid).forEach(d => { const color = generateUniqueColor(usedColors); createMaterialCard(d.name, d.shape, d.count, d.dim1, d.dim2, d.dim3, d.weight, color, { material: d.material, hardness: d.hardness, process: d.process, orderDate: d.orderDate, deliveryDate: d.deliveryDate, remark: d.remark }); }); updateTopSummary(); document.getElementById('import-preview-overlay').style.display = 'none'; }
+export function applyImportData(replace) { if (replace) { document.querySelectorAll('.material-card').forEach(c => c.remove()); usedColors.clear(); } importPreviewData.filter(d => d.valid).forEach(d => { const color = generateUniqueColor(usedColors); createMaterialCard(d.name, d.shape, d.count, d.dim1, d.dim2, d.dim3, d.weight, color, { material: d.material, hardness: d.hardness, process: d.process, orderDate: d.orderDate, deliveryDate: d.deliveryDate, remark: d.remark, showName: d.showName, customer: d.customer, itemCode: d.itemCode }); }); updateTopSummary(); document.getElementById('import-preview-overlay').style.display = 'none'; }
 
 // ==================== JSON IMPORT (MASTER) ====================
 

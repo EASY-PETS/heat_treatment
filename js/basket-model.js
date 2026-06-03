@@ -238,7 +238,7 @@ export function createShelfModel(width, depth, thickness, yPosition) {
     const frameMaterial = new THREE.MeshStandardMaterial({
         color: 0xb4b4c8,
         transparent: true,
-        opacity: 0.6,
+        opacity: 1.0,
         roughness: 0.6,
         metalness: 0.3,
         side: THREE.DoubleSide
@@ -247,7 +247,7 @@ export function createShelfModel(width, depth, thickness, yPosition) {
     const gridMaterial = new THREE.MeshStandardMaterial({
         color: 0xc4c4d8,
         transparent: true,
-        opacity: 0.5,
+        opacity: 1.0,
         roughness: 0.5,
         metalness: 0.2,
         side: THREE.DoubleSide
