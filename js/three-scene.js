@@ -1011,14 +1011,7 @@ export function renderShelvesForFurnace(furnace, furnaceGroup, baseY, layerGroup
             return;
         }
 
-        const shelfMesh = createShelfMesh(fw, fd, shelfThickness);
-
-        // 🔧 搁板 XZ 必须对齐料框几何中心（furnaceGroup 原点）
-        // 【修复】：直接贴合起始面，让 ExtrudeGeometry 自身向上自然拉伸出厚度
-        const shelfYSpace = baseY + shelfY;
-        shelfMesh.position.set(0, shelfYSpace, 0);
-
-        // 计算搁板所属 layer — 用于爆炸图展开
+        // 🔧 计算搁板所属 layer，并检查上方是否有工件
         let shelfLayer = 1;
         for (let li = 0; li < sortedShelves.length; li++) {
             if (Math.abs(sortedShelves[li].y - shelfY) < 0.5) {
@@ -1026,6 +1019,20 @@ export function renderShelvesForFurnace(furnace, furnaceGroup, baseY, layerGroup
                 break;
             }
         }
+        // 🔧 跳过上方无工件的空搁板
+        const layerHasItems = furnace.packedItems.some(
+            item => getItemLayer(item, furnace) === shelfLayer
+        );
+        if (!layerHasItems) {
+            return;
+        }
+
+        const shelfMesh = createShelfMesh(fw, fd, shelfThickness);
+
+        // 🔧 搁板 XZ 必须对齐料框几何中心（furnaceGroup 原点）
+        // 【修复】：直接贴合起始面，让 ExtrudeGeometry 自身向上自然拉伸出厚度
+        const shelfYSpace = baseY + shelfY;
+        shelfMesh.position.set(0, shelfYSpace, 0);
 
         shelfMesh.userData = {
             isShelfMesh: true,
@@ -2196,36 +2203,50 @@ export async function playLoadingAnimation() {
 
     const baseY = -120;
     const itemDrawSteps = [];
-    const furnaceCount = globalFurnacesResult.length;
-    const orderedIndices = [];
-    for (let i = 0; i < furnaceCount; i++) {
-        orderedIndices.push((startFurnaceIndex + i) % furnaceCount);
-    }
+    const furnace = globalFurnacesResult[startFurnaceIndex];
 
-    // 为动画创建初始炉膛 Group（在原点）
-    const initialFurnace = globalFurnacesResult[orderedIndices[0]];
-    const initialBasketType = initialFurnace.basketType || 'grid';
-    const basketGroup = createBasketFrame(initialFurnace.w, initialFurnace.h, initialFurnace.d, 100, initialBasketType);
-    basketGroup.position.set(-initialFurnace.w / 2, baseY, -initialFurnace.d / 2);
+    // 为动画创建当前炉膛 Group（在原点）
+    const basketType = furnace.basketType || 'grid';
+    const basketGroup = createBasketFrame(furnace.w, furnace.h, furnace.d, 100, basketType);
+    basketGroup.position.set(-furnace.w / 2, baseY, -furnace.d / 2);
     itemsGroup.add(basketGroup);
 
-    const initialContainerGeo = new THREE.BoxGeometry(initialFurnace.w, initialFurnace.h, initialFurnace.d);
-    const initialContainerLine = new THREE.LineSegments(
-        new THREE.EdgesGeometry(initialContainerGeo),
+    const containerGeo = new THREE.BoxGeometry(furnace.w, furnace.h, furnace.d);
+    const containerLine = new THREE.LineSegments(
+        new THREE.EdgesGeometry(containerGeo),
         new THREE.LineBasicMaterial({ color: 0x0066cc, linewidth: 1, transparent: true, opacity: 0.5 })
     );
-    initialContainerLine.position.set(0, initialFurnace.h / 2 + baseY, 0);
-    itemsGroup.add(initialContainerLine);
+    containerLine.position.set(0, furnace.h / 2 + baseY, 0);
+    itemsGroup.add(containerLine);
 
-    orderedIndices.forEach(fIdx => {
-        const furnace = globalFurnacesResult[fIdx];
-        furnace.packedItems.forEach((item) => {
-            if (filterMaterialName && item.material !== filterMaterialName) return;
+    // 🔧 按 layer 分组工件，按层级编排动画步骤：Layer1工件→搁板1→Layer2工件→搁板2→...
+    const layerItemMap = new Map(); // layer → [items]
+    const sortedShelves = furnace.shelvesUsed && furnace.shelvesUsed.length > 0
+        ? [...furnace.shelvesUsed].sort((a, b) => a.y - b.y)
+        : [];
+
+    furnace.packedItems.forEach((item) => {
+        if (filterMaterialName && item.material !== filterMaterialName) return;
+        let layer = 1;
+        for (let si = sortedShelves.length - 1; si >= 0; si--) {
+            if (item.y >= sortedShelves[si].y) {
+                layer = si + 2;
+                break;
+            }
+        }
+        if (!layerItemMap.has(layer)) layerItemMap.set(layer, []);
+        layerItemMap.get(layer).push(item);
+    });
+
+    const maxLayer = layerItemMap.size > 0 ? Math.max(...layerItemMap.keys()) : 1;
+    for (let layer = 1; layer <= maxLayer; layer++) {
+        // 添加该层工件
+        const layerItems = layerItemMap.get(layer) || [];
+        layerItems.forEach((item) => {
             let geometry;
             if (item.shape === 'cylinder') geometry = new THREE.CylinderGeometry(item.w / 2, item.w / 2, item.h, 32);
             else geometry = new THREE.BoxGeometry(item.w, item.h, item.d);
 
-            // V2.7 TASK 3: 工件材质 — 强制 transparent: false
             const material = new THREE.MeshStandardMaterial({
                 color: new THREE.Color(item.color),
                 transparent: false,
@@ -2233,7 +2254,7 @@ export async function playLoadingAnimation() {
                 depthWrite: true
             });
             const mesh = new THREE.Mesh(geometry, material);
-            mesh.castShadow = false;  // TASK 3: 动画期间关闭工件阴影
+            mesh.castShadow = false;
             mesh.receiveShadow = false;
             mesh.userData = {
                 itemName: item.name,
@@ -2243,29 +2264,63 @@ export async function playLoadingAnimation() {
                 itemMaterial: item.material || '',
                 itemProcess: item.process || '',
                 _originalY: null,
-                _animMesh: true  // 标记为动画工件
+                _animMesh: true
             };
             mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geometry),
                 new THREE.LineBasicMaterial({ color: 0x444444 })));
 
-            // 目标位置（基于原点，无 xOffset）
             const targetX = item.x - furnace.w / 2 + item.w / 2;
             const targetY = item.y + item.h / 2 + baseY;
             const targetZ = item.z - furnace.d / 2 + item.d / 2;
-
             const startY = furnace.h + baseY + 300;
 
             mesh.position.set(targetX, startY, targetZ);
             itemDrawSteps.push({
-                mesh, furnaceIndex: fIdx,
+                mesh, furnaceIndex: startFurnaceIndex,
                 furnaceName: furnace.instanceId,
                 itemName: item.name,
                 x: Math.round(item.x), y: Math.round(item.y), z: Math.round(item.z),
                 targetX, targetY, targetZ,
-                startY
+                startY,
+                isShelf: false
             });
         });
-    });
+
+        // 🔧 在该层工件后插入搁板动画步骤（如果上方一层有工件）
+        if (layer <= sortedShelves.length) {
+            const shelfIdx = layer - 1;
+            const shelfY = sortedShelves[shelfIdx].y;
+            const nextLayer = layer + 1;
+            const nextLayerHasItems = layerItemMap.has(nextLayer) && layerItemMap.get(nextLayer).length > 0;
+            if (nextLayerHasItems) {
+                const shelfThickness = placementRules.shelfThickness || 20;
+                const shelfMesh = createShelfMesh(furnace.w, furnace.d, shelfThickness);
+                shelfMesh.userData = {
+                    isShelfMesh: true,
+                    shelfY: shelfY,
+                    thickness: shelfThickness,
+                    _animMesh: true,
+                    _isShelfAnim: true
+                };
+                const shelfTargetY = baseY + shelfY;
+                const shelfStartY = furnace.h + baseY + 300;
+                shelfMesh.position.set(0, shelfStartY, 0);
+                itemsGroup.add(shelfMesh); // 搁板先加入场景（从高处下落）
+
+                itemDrawSteps.push({
+                    mesh: shelfMesh,
+                    furnaceIndex: startFurnaceIndex,
+                    furnaceName: furnace.instanceId,
+                    itemName: '[搁板]',
+                    x: 0, y: Math.round(shelfY), z: 0,
+                    targetX: 0, targetY: shelfTargetY, targetZ: 0,
+                    startY: shelfStartY,
+                    isShelf: true
+                });
+            }
+        }
+    }
+
 
     if (itemDrawSteps.length === 0) {
         setIsAnimating(false); controlBar.classList.remove('visible');
@@ -2283,11 +2338,10 @@ export async function playLoadingAnimation() {
 
     if (itemDrawSteps.length > 0) {
         const firstStep = itemDrawSteps[0];
-        if (firstStep.furnaceIndex !== currentFurnaceIndex) {
-            setCurrentFurnaceIndex(firstStep.furnaceIndex);
-            rebuildSceneUpTo(-1, itemDrawSteps, filterMaterialName);
+        // 🔧 单炉膛模式：工件首次加入，搁板已在创建时加入
+        if (!firstStep.isShelf) {
+            itemsGroup.add(firstStep.mesh);
         }
-        itemsGroup.add(firstStep.mesh);
 
         document.getElementById('anim-progress-text').textContent =
             '(1/' + itemDrawSteps.length + ') · 将【' + firstStep.itemName + '】吊装至 ' + firstStep.furnaceName + ' · 坐标(' + firstStep.x + ',' + firstStep.y + ',' + firstStep.z + ')';
@@ -2298,22 +2352,14 @@ export async function playLoadingAnimation() {
         await waitIfPaused();
         if (animStopped) break;
 
-        // 不再硬编码，每次动画开始前直接读取当前 UI 的速度值
-        // （假设 select 里的 value 代表完成一个物体的总时长，比如 200, 400, 1000 等）
         const speedMs = parseInt(document.getElementById('anim-speed-select').value) || 400;
-        
-        // 把总时长的 80% 用来做下落动画，20% 用作物体之间的短暂间隔缓冲
-        const dropDurationMs = speedMs * 0.8; 
-        const entryDelayMs = speedMs * 0.2; // 如果你需要并排掉落效果，这个值可以保留原逻辑
+        const dropDurationMs = speedMs * 0.8;
+        const entryDelayMs = speedMs * 0.2;
 
         const step = itemDrawSteps[i];
 
-        if (step.furnaceIndex !== currentFurnaceIndex && i > 0) {
-            setCurrentFurnaceIndex(step.furnaceIndex);
-            rebuildSceneUpTo(i - 1, itemDrawSteps, filterMaterialName);
-            itemsGroup.add(step.mesh);
-            update3DStatsPanel(globalFurnacesResult[step.furnaceIndex]);
-        } else if (i > 0) {
+        // 🔧 单炉膛模式：搁板已在创建时加入 itemsGroup，工件在首次下落前加入
+        if (i > 0 && !step.isShelf) {
             itemsGroup.add(step.mesh);
         }
 
