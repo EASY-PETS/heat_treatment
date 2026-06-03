@@ -94,70 +94,147 @@ function createBar(start, end, radius, material) {
     return mesh;
 }
 
-// ==================== HONEYCOMB TEXTURE GENERATION (V2.2) ====================
+// ==================== HOLLOW HEXAGON GEOMETRY (V2.9) ====================
+
+/** 六边形几何参数 */
+const HEX_OUTER_RADIUS = 25;  // 外径 25mm（直径 50mm）
+const HEX_BORDER_WIDTH = 4;   // 边框宽度 4mm
 
 /**
- * 生成六边形蜂窝纹理Canvas — 用于料框侧面的Alpha Map / Texture
+ * 创建中空六边形边框几何体 — 供 InstancedMesh 复用
+ * 外六边形 + 内六边形孔洞 = 边框效果
+ * 
+ * @param {number} outerRadius - 外六边形半径（顶点到中心）
+ * @param {number} innerRadius - 内六边形半径
+ * @returns {THREE.ShapeGeometry}
  */
-function createHoneycombTexture() {
-    const size = 256;
-    const canvas = document.createElement('canvas');
-    canvas.width = size;
-    canvas.height = size;
-    const ctx = canvas.getContext('2d');
+function createHollowHexagonGeometry(outerRadius, innerRadius) {
+    const shape = new THREE.Shape();
+    for (let i = 0; i < 6; i++) {
+        const angle = Math.PI / 6 + i * Math.PI / 3;
+        const x = outerRadius * Math.cos(angle);
+        const y = outerRadius * Math.sin(angle);
+        if (i === 0) shape.moveTo(x, y);
+        else shape.lineTo(x, y);
+    }
+    shape.closePath();
 
-    ctx.fillStyle = 'rgba(200, 200, 210, 0.15)';
-    ctx.fillRect(0, 0, size, size);
-
-    const hexRadius = 30;
-    const hexHeight = hexRadius * Math.sqrt(3);
-    const hexWidth = hexRadius * 2;
-
-    ctx.strokeStyle = 'rgba(68, 85, 102, 0.85)';
-    ctx.lineWidth = 3;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-
-    function drawHex(cx, cy, r) {
-        ctx.beginPath();
+    if (innerRadius > 0) {
+        const hole = new THREE.Path();
         for (let i = 0; i < 6; i++) {
             const angle = Math.PI / 6 + i * Math.PI / 3;
-            const x = cx + r * Math.cos(angle);
-            const y = cy + r * Math.sin(angle);
-            if (i === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
+            const x = innerRadius * Math.cos(angle);
+            const y = innerRadius * Math.sin(angle);
+            if (i === 0) hole.moveTo(x, y);
+            else hole.lineTo(x, y);
         }
-        ctx.closePath();
-        ctx.stroke();
+        hole.closePath();
+        shape.holes.push(hole);
     }
 
-    const cols = Math.ceil(size / (hexWidth * 0.75)) + 1;
-    const rows = Math.ceil(size / hexHeight) + 1;
-    for (let row = -1; row <= rows; row++) {
-        for (let col = -1; col <= cols; col++) {
-            const cx = col * hexWidth * 0.75;
-            const cy = row * hexHeight + (col % 2) * hexHeight / 2;
-            drawHex(cx, cy, hexRadius);
-        }
-    }
-
-    return canvas;
+    return new THREE.ShapeGeometry(shape, 1);
 }
 
-/** 缓存蜂窝纹理，避免重复生成 */
-let cachedHoneycombTexture = null;
-function getHoneycombTexture() {
-    if (!cachedHoneycombTexture) {
-        const canvas = createHoneycombTexture();
-        cachedHoneycombTexture = new THREE.CanvasTexture(canvas);
-        cachedHoneycombTexture.wrapS = THREE.RepeatWrapping;
-        cachedHoneycombTexture.wrapT = THREE.RepeatWrapping;
-        cachedHoneycombTexture.repeat.set(1, 1);
-        cachedHoneycombTexture.magFilter = THREE.LinearFilter;
-        cachedHoneycombTexture.minFilter = THREE.LinearMipmapLinearFilter;
-        cachedHoneycombTexture.generateMipmaps = true;
+/** 缓存中空六边形几何体（供料框复用） */
+let cachedHexGeometry = null;
+function getHollowHexagonGeometry() {
+    if (!cachedHexGeometry) {
+        cachedHexGeometry = createHollowHexagonGeometry(HEX_OUTER_RADIUS, HEX_OUTER_RADIUS - HEX_BORDER_WIDTH);
     }
-    return cachedHoneycombTexture;
+    return cachedHexGeometry;
+}
+
+/**
+ * 在指定面上创建蜂窝六边形 InstancedMesh 面板
+ * @param {string} faceType - 'bottom'|'front'|'back'|'left'|'right'
+ * @param {number} w - 料框宽度
+ * @param {number} h - 料框高度
+ * @param {number} d - 料框深度
+ * @param {THREE.Material} material - 材质
+ * @returns {THREE.InstancedMesh}
+ */
+function createHoneycombPanel(faceType, w, h, d, material) {
+    const hexGeo = getHollowHexagonGeometry();
+    const outerR = HEX_OUTER_RADIUS;
+    const hexW = outerR * 2;
+    const hexH = outerR * Math.sqrt(3);
+    const colSpacing = hexW * 0.75;
+    const rowSpacing = hexH;
+
+    let panelU, panelV, ox, oy, oz, ux, uy, uz, vx, vy, vz, rotX, rotY, rotZ;
+
+    switch (faceType) {
+        case 'bottom':
+            panelU = w; panelV = d;
+            ox = 0; oy = 0; oz = 0;
+            ux = 1; uy = 0; uz = 0;
+            vx = 0; vy = 0; vz = 1;
+            rotX = -Math.PI / 2; rotY = 0; rotZ = 0;
+            break;
+        case 'front':
+            panelU = w; panelV = h;
+            ox = 0; oy = 0; oz = d;
+            ux = 1; uy = 0; uz = 0;
+            vx = 0; vy = 1; vz = 0;
+            rotX = 0; rotY = 0; rotZ = 0;
+            break;
+        case 'back':
+            panelU = w; panelV = h;
+            ox = 0; oy = 0; oz = 0;
+            ux = 1; uy = 0; uz = 0;
+            vx = 0; vy = 1; vz = 0;
+            rotX = 0; rotY = 0; rotZ = 0;
+            break;
+        case 'left':
+            panelU = d; panelV = h;
+            ox = 0; oy = 0; oz = 0;
+            ux = 0; uy = 0; uz = 1;
+            vx = 0; vy = 1; vz = 0;
+            rotX = 0; rotY = Math.PI / 2; rotZ = 0;
+            break;
+        case 'right':
+            panelU = d; panelV = h;
+            ox = w; oy = 0; oz = 0;
+            ux = 0; uy = 0; uz = 1;
+            vx = 0; vy = 1; vz = 0;
+            rotX = 0; rotY = Math.PI / 2; rotZ = 0;
+            break;
+        default: return null;
+    }
+
+    const cols = Math.ceil(panelU / colSpacing) + 2;
+    const rows = Math.ceil(panelV / rowSpacing) + 2;
+    const mesh = new THREE.InstancedMesh(hexGeo.clone(), material, cols * rows);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+
+    const dummy = new THREE.Object3D();
+    let idx = 0;
+
+    for (let row = -1; row < rows; row++) {
+        for (let col = -1; col < cols; col++) {
+            const u = col * colSpacing;
+            const v = row * rowSpacing + (col % 2) * rowSpacing / 2;
+
+            if (u < -hexW / 2 || u > panelU + hexW / 2) continue;
+            if (v < -hexH / 2 || v > panelV + hexH / 2) continue;
+
+            dummy.position.set(
+                ox + u * ux + v * vx,
+                oy + u * uy + v * vy,
+                oz + u * uz + v * vz
+            );
+            dummy.rotation.set(rotX, rotY, rotZ);
+            dummy.scale.set(1, 1, 1);
+            dummy.updateMatrix();
+            mesh.setMatrixAt(idx, dummy.matrix);
+            idx++;
+        }
+    }
+
+    mesh.count = idx;
+    mesh.instanceMatrix.needsUpdate = true;
+    return mesh;
 }
 
 // ==================== BASKET FRAME MODELING ====================
@@ -285,8 +362,26 @@ function createGridBasketFrame(w, h, d, gridSize) {
 
 function createHoneycombBasketFrame(w, h, d) {
     const group = new THREE.Group();
-    const frameRadius = 4.5;
 
+    const panelMaterial = new THREE.MeshStandardMaterial({
+        color: 0x556677,
+        roughness: 0.55,
+        metalness: 0.7,
+        transparent: true,
+        opacity: 0.6,
+        side: THREE.DoubleSide,
+        depthWrite: false
+    });
+
+    // 五面蜂窝面板 — 每个面一个 InstancedMesh，大幅减少 draw calls
+    group.add(createHoneycombPanel('bottom', w, h, d, panelMaterial));
+    group.add(createHoneycombPanel('front', w, h, d, panelMaterial));
+    group.add(createHoneycombPanel('back', w, h, d, panelMaterial));
+    group.add(createHoneycombPanel('left', w, h, d, panelMaterial));
+    group.add(createHoneycombPanel('right', w, h, d, panelMaterial));
+
+    // 边框钢筋
+    const frameRadius = 4.5;
     const frameMaterial = new THREE.MeshStandardMaterial({
         color: 0x445566,
         roughness: 0.5,
@@ -296,39 +391,6 @@ function createHoneycombBasketFrame(w, h, d) {
         depthWrite: false
     });
 
-    const honeycombTex = getHoneycombTexture();
-    const panelMaterial = new THREE.MeshStandardMaterial({
-        color: 0x556677,
-        roughness: 0.55,
-        metalness: 0.7,
-        transparent: true,
-        opacity: 0.6,
-        alphaMap: honeycombTex,
-        side: THREE.DoubleSide,
-        depthWrite: false
-    });
-
-    function createHoneycombPanel(panelW, panelH, originX, originY, originZ, orientation) {
-        const panelGeo = new THREE.PlaneGeometry(panelW, panelH);
-        const texMaterial = panelMaterial.clone();
-        texMaterial.alphaMap = getHoneycombTexture();
-        const panel = new THREE.Mesh(panelGeo, texMaterial);
-        panel.position.set(originX, originY, originZ);
-
-        switch (orientation) {
-            case 'xy': break;
-            case 'yz': panel.rotation.y = Math.PI / 2; break;
-            case 'xz': panel.rotation.x = -Math.PI / 2; break;
-        }
-        return panel;
-    }
-
-    group.add(createHoneycombPanel(w, d, w / 2, 1, d / 2, 'xz'));
-    group.add(createHoneycombPanel(w, h, w / 2, h / 2, d, 'xy'));
-    group.add(createHoneycombPanel(w, h, w / 2, h / 2, 0, 'xy'));
-    group.add(createHoneycombPanel(d, h, 0, h / 2, d / 2, 'yz'));
-    group.add(createHoneycombPanel(d, h, w, h / 2, d / 2, 'yz'));
-
     function createEdgeBar(x1, y1, z1, x2, y2, z2) {
         return createBar(
             new THREE.Vector3(x1, y1, z1),
@@ -337,16 +399,19 @@ function createHoneycombBasketFrame(w, h, d) {
         );
     }
 
+    // 底部边框
     group.add(createEdgeBar(0, 0, 0, w, 0, 0));
     group.add(createEdgeBar(w, 0, 0, w, 0, d));
     group.add(createEdgeBar(w, 0, d, 0, 0, d));
     group.add(createEdgeBar(0, 0, d, 0, 0, 0));
 
+    // 顶部边框
     group.add(createEdgeBar(0, h, 0, w, h, 0));
     group.add(createEdgeBar(w, h, 0, w, h, d));
     group.add(createEdgeBar(w, h, d, 0, h, d));
     group.add(createEdgeBar(0, h, d, 0, h, 0));
 
+    // 垂直边框
     group.add(createEdgeBar(0, 0, 0, 0, h, 0));
     group.add(createEdgeBar(w, 0, 0, w, h, 0));
     group.add(createEdgeBar(w, 0, d, w, h, d));
@@ -473,29 +538,54 @@ function createBasketFrame(w, h, d, gridSize, basketType) {
  * 创建搁板实体 3D 模型 — BoxGeometry 实体厚度
  */
 function createShelfMesh(w, d, thickness) {
-    const geo = new THREE.BoxGeometry(w, thickness, d);
+    // 蜂窝搁板 — InstancedMesh 中空六边形阵列
+    const hexGeo = getHollowHexagonGeometry().clone();
+    const outerR = HEX_OUTER_RADIUS;
+    const hexW = outerR * 2;
+    const hexH = outerR * Math.sqrt(3);
+    const colSpacing = hexW * 0.75;
+    const rowSpacing = hexH;
 
-    const mat = new THREE.MeshStandardMaterial({
-        color: 0xcccccc,
+    const shelfMat = new THREE.MeshStandardMaterial({
+        color: 0xb4b4c8,
         roughness: 0.5,
-        metalness: 0.8,
+        metalness: 0.5,
         transparent: true,
-        opacity: 0.45,
+        opacity: 0.7,
         side: THREE.DoubleSide,
         depthWrite: true
     });
 
-    const mesh = new THREE.Mesh(geo, mat);
+    const cols = Math.ceil(w / colSpacing) + 2;
+    const rows = Math.ceil(d / rowSpacing) + 2;
+    const mesh = new THREE.InstancedMesh(hexGeo, shelfMat, cols * rows);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
 
-    const edgesGeo = new THREE.EdgesGeometry(geo);
-    const edgesLine = new THREE.LineSegments(
-        edgesGeo,
-        new THREE.LineBasicMaterial({ color: 0x888888, linewidth: 1, transparent: true, opacity: 0.5 })
-    );
-    mesh.add(edgesLine);
+    const dummy = new THREE.Object3D();
+    const halfW = w / 2;
+    const halfD = d / 2;
+    let idx = 0;
 
+    for (let row = -1; row < rows; row++) {
+        for (let col = -1; col < cols; col++) {
+            const cx = col * colSpacing - halfW;
+            const cz = row * rowSpacing + (col % 2) * rowSpacing / 2 - halfD;
+
+            if (cx < -halfW - outerR || cx > halfW + outerR) continue;
+            if (cz < -halfD - outerR || cz > halfD + outerR) continue;
+
+            dummy.position.set(cx, 0, cz);
+            dummy.rotation.set(-Math.PI / 2, 0, 0);
+            dummy.scale.set(1, 1, 1);
+            dummy.updateMatrix();
+            mesh.setMatrixAt(idx, dummy.matrix);
+            idx++;
+        }
+    }
+
+    mesh.count = idx;
+    mesh.instanceMatrix.needsUpdate = true;
     mesh.userData = { isShelfMesh: true };
     return mesh;
 }
