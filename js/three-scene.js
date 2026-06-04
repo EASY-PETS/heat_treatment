@@ -79,6 +79,14 @@ export function generateUniqueColor(usedColors) {
  * @param {THREE.Material} material - 材质
  * @returns {THREE.Mesh} 圆柱钢筋mesh
  */
+/**
+ * 创建圆柱形钢筋线段 — 用于料框网格建模和搁板建模的通用工具
+ * @param {THREE.Vector3} start - 起点
+ * @param {THREE.Vector3} end - 终点
+ * @param {number} radius - 半径
+ * @param {THREE.Material} material - 材质
+ * @returns {THREE.Mesh} 圆柱钢筋mesh
+ */
 function createBar(start, end, radius, material) {
     const dir = new THREE.Vector3().subVectors(end, start);
     const len = dir.length();
@@ -100,6 +108,14 @@ function createBar(start, end, radius, material) {
 const HEX_OUTER_RADIUS = 25;  // 外径 25mm（直径 50mm）
 const HEX_BORDER_WIDTH = 4;   // 边框宽度 4mm
 
+/**
+ * 创建中空六边形边框几何体 — 供 InstancedMesh 复用
+ * 外六边形 + 内六边形孔洞 = 边框效果
+ * 
+ * @param {number} outerRadius - 外六边形半径（顶点到中心）
+ * @param {number} innerRadius - 内六边形半径
+ * @returns {THREE.ShapeGeometry}
+ */
 /**
  * 创建中空六边形边框几何体 — 供 InstancedMesh 复用
  * 外六边形 + 内六边形孔洞 = 边框效果
@@ -137,6 +153,10 @@ function createHollowHexagonGeometry(outerRadius, innerRadius) {
 
 /** 缓存中空六边形几何体（供料框复用） */
 let cachedHexGeometry = null;
+/**
+ * 获取缓存的中空六边形几何体，如果不存在则创建。
+ * @returns {THREE.ShapeGeometry}
+ */
 function getHollowHexagonGeometry() {
     if (!cachedHexGeometry) {
         cachedHexGeometry = createHollowHexagonGeometry(HEX_OUTER_RADIUS, HEX_OUTER_RADIUS - HEX_BORDER_WIDTH);
@@ -156,6 +176,10 @@ const RING_NODE_HALF_SPACE = RING_OUTER_RADIUS + ARM_LENGTH;    // 半间距 ≈
 
 /** 缓存圆环几何体（Torus — 8 段径向 × 16 段周向，面数极低） */
 let cachedRingGeometry = null;
+/**
+ * 获取缓存的圆环几何体，如果不存在则创建。
+ * @returns {THREE.TorusGeometry}
+ */
 function getRingGeometry() {
     if (!cachedRingGeometry) {
         cachedRingGeometry = new THREE.TorusGeometry(RING_OUTER_RADIUS, RING_TUBE_RADIUS, 8, 16);
@@ -165,6 +189,10 @@ function getRingGeometry() {
 
 /** 缓存连接臂几何体（Cylinder — 6 段，长度 = 2×ARM_LENGTH） */
 let cachedArmGeometry = null;
+/**
+ * 获取缓存的连接臂几何体，如果不存在则创建。
+ * @returns {THREE.CylinderGeometry}
+ */
 function getArmGeometry() {
     if (!cachedArmGeometry) {
         cachedArmGeometry = new THREE.CylinderGeometry(ARM_RADIUS, ARM_RADIUS, ARM_LENGTH * 2, 6);
@@ -186,6 +214,21 @@ function getArmGeometry() {
  * @param {THREE.Material} ringMaterial - 圆环材质
  * @param {THREE.Material} armMaterial - 连接臂材质
  * @returns {THREE.Group} 包含两个 InstancedMesh 的 Group
+ */
+/**
+ * 在指定面上创建圆环节点 InstancedMesh 阵列（V3.5）
+ *
+ * 每个单元 = 1 个中空圆环（Torus） + 4 个连接臂（±X, ±Z 方向）。
+ * 分为两层 InstancedMesh：ringsInstanced（所有圆环） + armsInstanced（所有连接臂）。
+ * 相邻单元的连接臂端点重合，自然形成 ◯—🞎—◯ 的视觉结构。
+ *
+ * @param {string} face - 面类型 (
+ * @param {number} w - 料框宽度。
+ * @param {number} h - 料框高度。
+ * @param {number} d - 料框深度。
+ * @param {THREE.Material} ringMaterial - 圆环材质。
+ * @param {THREE.Material} armMaterial - 连接臂材质。
+ * @returns {THREE.Group} 包含两个 InstancedMesh 的 Group。
  */
 function createRingNodePanel(face, w, h, d, ringMaterial, armMaterial) {
     const panelGroup = new THREE.Group();

@@ -273,7 +273,7 @@ function buildPage2_StepByStep(furnace, layeredShots, pdfWrapper, multiLabel) {
                         
                         <div class="pdf-step-image-area" style="flex: 1; background: #fafafa; border: 1px solid #e2e8f0; border-radius: 4px; padding: 4px; display: flex; flex-direction: column; align-items: center; justify-content: center;">
                             ${shot.dataURL ? `<img src="${shot.dataURL}" alt="Step ${stepNum}" style="width: 100%; height: auto; object-fit: contain;">` : '<span style="color:#ccc;">透视图未生成</span>'}
-                            <div style="font-size:9px; color:#64748b; margin-top:2px; font-weight:bold; text-align:center;">↖ 装配透视图 (侧45°)</div>
+                            <div style="font-size:9px; color:#64748b; margin-top:2px; font-weight:bold; text-align:center;">↖ 装配透视图</div>
                         </div>
                     </div>
                     <div class="pdf-step-info-area" style="flex:none; width:100%; padding-top: 2px !important;">

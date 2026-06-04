@@ -1,8 +1,22 @@
-// server.js - 智能预装炉云端安全中转中心
-const express = require('express');
-const axios = require('axios');
-const path = require('path');
-const cors = require('cors');
+/**
+ * server.js - 智能预装炉云端安全中转中心
+ *
+ * 该服务器作为 Three.js 前端应用的后端中转，主要负责：
+ * 1. 提供静态文件托管服务。
+ * 2. 安全地获取并刷新飞书 (Feishu) 的 tenant access token。
+ * 3. 根据客户端 ID (x-client-id) 安全地从飞书多维表格中拉取指定客户的炉膛配置数据。
+ * 4. 实现多租户数据隔离，确保不同客户只能访问自己的配置。
+ *
+ * Dependencies:
+ *   - express: 用于构建 Web 服务器。
+ *   - axios: 用于发起 HTTP 请求，与飞书 API 交互。
+ *   - path: Node.js 内置模块，用于处理文件路径。
+ *   - cors: 处理跨域请求，方便本地开发调试。
+ */
+const express = require("express");
+const axios = require("axios");
+const path = require("path");
+const cors = require("cors");
 
 const app = express();
 app.use(express.json());
@@ -42,6 +56,12 @@ let tokenExpiryTime = 0;
 
 /**
  * 核心安全机制：自动获取并续期飞书凭证的中间件
+ * 验证并刷新飞书租户访问凭证。如果凭证过期或不存在，则向飞书开放平台请求新的凭证。
+ * 凭证成功获取后，会缓存下来并在有效期内复用，以优化性能。
+ * @param {object} req - Express 请求对象，feishu_token 将被挂载到此对象上。
+ * @param {object} res - Express 响应对象。
+ * @param {function} next - Express 中间件的下一个函数。
+ * @returns {Promise<void>}
  */
 async function ensureFeishuToken(req, res, next) {
     const currentTime = Date.now();
@@ -53,7 +73,7 @@ async function ensureFeishuToken(req, res, next) {
 
     try {
         console.log("正在向飞书中心申请新的租户凭证...");
-        const response = await axios.post('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
+        const response = await axios.post("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal", {
             app_id: FEISHU_CONFIG.app_id,
             app_secret: FEISHU_CONFIG.app_secret
         });
@@ -75,10 +95,13 @@ async function ensureFeishuToken(req, res, next) {
 
 /**
  * 接口1：安全拉取指定客户专属的炉膛资产
- * 请求头必须携带 x-client-id 来决定读取哪张表
+ * 请求头必须携带 x-client-id 来决定读取哪张表。
+ * @param {object} req - Express 请求对象，包含客户 ID 和飞书 token。
+ * @param {object} res - Express 响应对象。
+ * @returns {Promise<void>}
  */
-app.get('/api/furnaces', ensureFeishuToken, async (req, res) => {
-    const clientId = req.headers['x-client-id'];
+app.get("/api/furnaces", ensureFeishuToken, async (req, res) => {
+    const clientId = req.headers["x-client-id"];
     const tenant = TENANT_DATABASE[clientId];
 
     if (!tenant) {
@@ -91,7 +114,7 @@ app.get('/api/furnaces', ensureFeishuToken, async (req, res) => {
         const url = `https://open.feishu.cn/open-apis/bitable/v1/apps/${tenant.appToken}/tables/${tenant.furnaceTableId}/records?page_size=100`;
         
         const fsResponse = await axios.get(url, {
-            headers: { 'Authorization': `Bearer ${req.feishu_token}` }
+            headers: { "Authorization": `Bearer ${req.feishu_token}` }
         });
 
         if (fsResponse.data.code !== 0) {
@@ -123,14 +146,23 @@ app.get('/api/furnaces', ensureFeishuToken, async (req, res) => {
 
 // 5. 静态文件托管：让 Azure 直接代理你的前端解耦目录
 // 项目根目录在上层（因为此文件位于 js/ 目录内）
-const ROOT_DIR = path.resolve(__dirname, '..');
+const ROOT_DIR = path.resolve(__dirname, "..");
 app.use(express.static(ROOT_DIR));
 
-// 兜底路由，指向主页
-app.get('*', (req, res) => {
-    res.sendFile(path.resolve(ROOT_DIR, 'furnace.html'));
+/**
+ * 兜底路由：处理所有未匹配的 GET 请求，并返回主页文件 `furnace.html`。
+ * @param {object} req - Express 请求对象。
+ * @param {object} res - Express 响应对象。
+ * @returns {void}
+ */
+app.get("*", (req, res) => {
+    res.sendFile(path.resolve(ROOT_DIR, "furnace.html"));
 });
 
+/**
+ * 启动 Express 服务器，监听指定端口。
+ * @returns {void}
+ */
 app.listen(PORT, () => {
     console.log(`🚀 热处理云端排产引擎已成功在端口 ${PORT} 挂载！`);
 });

@@ -407,7 +407,8 @@ export async function captureLayeredScreenshots(furnaceIndex) {
         // // 截图（使用正交相机）
         // const dataURL = captureCanvasWithCamera(SCREENSHOT_SCALE, orthoCamera);
         // 🔧 修改：改用透视相机（立体侧45度俯视视角，12%边距），展示累积装配效果
-        setTightFitCamera(new THREE.Vector3(1, 0.8, 1), 0.12);
+        // setTightFitCamera(new THREE.Vector3(1, 0.8, 1), 0.12);
+        setTightFitCamera(new THREE.Vector3(0, 1, 0.01), 0.06);
         // 等待场景稳定
         await delay(200);
 
