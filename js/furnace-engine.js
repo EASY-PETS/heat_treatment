@@ -258,6 +258,8 @@ export function solveHeterogeneousPacking(furnacePoolInput, itemsInput, spacing)
         flattenedItems.sort((a, b) => (b.w_algo * b.d_algo) - (a.w_algo * a.d_algo) || (b.h_algo - a.h_algo));
     }
 
+    const allowRotate = placementRules.rotate !== false;
+
     let completedFurnaces = [];
     for (let furnace of availableFurnaceInstances) {
         if (flattenedItems.length === 0) break;
@@ -265,20 +267,45 @@ export function solveHeterogeneousPacking(furnacePoolInput, itemsInput, spacing)
         for (let i = 0; i < flattenedItems.length; i++) {
             let item = flattenedItems[i];
             if (furnace.totalWeight + item.weight > furnace.max_weight) continue;
-            let spaceIdx = -1;
-            for (let j = 0; j < furnace.emptySpaces.length; j++) {
-                let s = furnace.emptySpaces[j];
-                const iw = item.w + sp, ih = item.h + sp, id_ = item.d + sp;
-                if (iw <= s.w && ih <= s.h && id_ <= s.d) { spaceIdx = j; break; }
+
+            const ih = item.h + sp;
+
+            // V4.7: 生成朝向候选并尝试匹配空位
+            const orientCandidates = [{ w: item.w, d: item.d }];
+            if (allowRotate && Math.abs(item.w - item.d) > 0.5 && item.shape !== 'cylinder') {
+                orientCandidates.push({ w: item.d, d: item.w });
             }
-            if (spaceIdx !== -1) {
-                let s = furnace.emptySpaces[spaceIdx];
-                const iw = item.w + sp, ih = item.h + sp, id_ = item.d + sp;
+
+            let bestSpaceIdx = -1;
+            let bestOrient = null;
+
+            for (const orient of orientCandidates) {
+                const iw = orient.w + sp;
+                const id_ = orient.d + sp;
+                for (let j = 0; j < furnace.emptySpaces.length; j++) {
+                    let s = furnace.emptySpaces[j];
+                    if (iw <= s.w && ih <= s.h && id_ <= s.d) {
+                        // 选择最小的空位（最匹配），减少碎片空位
+                        const sVol = s.w * s.h * s.d;
+                        if (bestSpaceIdx === -1 || sVol < furnace.emptySpaces[bestSpaceIdx].w * furnace.emptySpaces[bestSpaceIdx].h * furnace.emptySpaces[bestSpaceIdx].d) {
+                            bestSpaceIdx = j;
+                            bestOrient = orient;
+                        }
+                    }
+                }
+            }
+
+            if (bestSpaceIdx !== -1) {
+                let s = furnace.emptySpaces[bestSpaceIdx];
+                const iw = bestOrient.w + sp;
+                const id_ = bestOrient.d + sp;
+                item.w = bestOrient.w;
+                item.d = bestOrient.d;
                 item.x = s.x; item.y = s.y; item.z = s.z;
                 furnace.packedItems.push({ ...item });
                 furnace.totalWeight += item.weight;
                 let currentSpaces = [...furnace.emptySpaces];
-                currentSpaces.splice(spaceIdx, 1);
+                currentSpaces.splice(bestSpaceIdx, 1);
                 const remainW = s.w - iw, remainH = s.h - ih, remainD = s.d - id_;
                 if (remainW > 0) currentSpaces.push({ x: s.x + iw, y: s.y, z: s.z, w: remainW, h: s.h, d: s.d });
                 if (remainD > 0) currentSpaces.push({ x: s.x, y: s.y, z: s.z + id_, w: iw, h: s.h, d: remainD });
@@ -395,19 +422,60 @@ export function solveShelfLayeredPacking(items, furnaceConfig, customShelfHeight
                 // 垂直高度检查
                 if (currentY + item.h + sp > fh) continue;
 
-                const iw = item.w + sp;
                 const ih = item.h + sp;
-                const id_ = item.d + sp;
 
-                // 尺寸检查
-                if (item.w > fw || item.h > fh || item.d > fd) continue;
+                // 尺寸检查：任一朝向能放入即可
+                if (item.w > fw || item.h > fh || item.d > fd) {
+                    // V4.7: 如果原始朝向装不下，尝试旋转后是否能装下
+                    if (placementRules.rotate === false || item.shape === 'cylinder') continue;
+                    if (item.w <= fd && item.d <= fw && item.h <= fh) {
+                        // 旋转后能装下，继续尝试
+                    } else {
+                        continue;
+                    }
+                }
 
-                // 2D 水平平铺 — 结合重心居中找最佳位置
-                const placement = find2DPlacement(iw, id_, layerItems);
-                if (placement !== null) {
+                // V4.7: 支持水平旋转的2D平铺
+                const allowRotate = placementRules.rotate !== false;
+                let bestPlacement = null;
+                let bestW = item.w, bestD = item.d;
+
+                const tryOrientations = [{ w: item.w, d: item.d }];
+                if (allowRotate && Math.abs(item.w - item.d) > 0.5 && item.shape !== 'cylinder') {
+                    tryOrientations.push({ w: item.d, d: item.w });
+                }
+
+                for (const orient of tryOrientations) {
+                    const iw = orient.w + sp;
+                    const id_ = orient.d + sp;
+                    const placement = find2DPlacement(iw, id_, layerItems);
+                    if (placement !== null) {
+                        // 按重心居中选择最佳朝向（距离中心越近越好）
+                        if (bestPlacement === null) {
+                            bestPlacement = placement;
+                            bestW = orient.w;
+                            bestD = orient.d;
+                        } else {
+                            const da = (placement.x + iw / 2 - furnaceCenterX) ** 2 + (placement.z + id_ / 2 - furnaceCenterZ) ** 2;
+                            const db = (bestPlacement.x + (bestW + sp) / 2 - furnaceCenterX) ** 2 + (bestPlacement.z + (bestD + sp) / 2 - furnaceCenterZ) ** 2;
+                            if (da < db) {
+                                bestPlacement = placement;
+                                bestW = orient.w;
+                                bestD = orient.d;
+                            }
+                        }
+                    }
+                }
+
+                if (bestPlacement !== null) {
+                    const iw = bestW + sp;
+                    const id_ = bestD + sp;
+                    const placement = bestPlacement;
                     item.x = placement.x;
                     item.y = currentY;
                     item.z = placement.z;
+                    item.w = bestW;
+                    item.d = bestD;
                     item.w_algo = iw;
                     item.h_algo = ih;
                     item.d_algo = id_;
@@ -671,11 +739,25 @@ export function solveCenterOfGravityPacking(items, furnaceConfig, itemMaterialMa
          * V4.1: 收集所有重力支撑面 Y 坐标
          * 包括炉底(0) + 每个已放置工件顶面
          */
+        // const supportYs = new Set();
+        // supportYs.add(0); // 炉底
+        // for (const p of placedItems) {
+        //     supportYs.add(p.y + p.h_algo);
+        // }
+        // ==================== 修改后 (加入拦截逻辑) ====================
         const supportYs = new Set();
-        supportYs.add(0); // 炉底
-        for (const p of placedItems) {
-            supportYs.add(p.y + p.h_algo);
+        supportYs.add(0); // 永远包含炉底
+
+        // 只有在开启了搁板分层（或某种允许堆叠的模式）时，才收集工件顶面作为支撑点
+        if (placementRules.useShelfLayered) { 
+            for (const p of placedItems) {
+                supportYs.add(p.y + p.h_algo);
+            }
+        } else {
+            // 强制只保留炉底 (y=0)，这样所有后续产生的候选位置 Y 都只能是 0
+            // 从而实现“平铺”而非“堆叠”
         }
+
         // 去重排序，低Y优先
         const sortedSupportYs = [...supportYs].sort((a, b) => a - b);
         // 过滤掉超出范围的Y
@@ -923,7 +1005,9 @@ export function solveCenterOfGravityPacking(items, furnaceConfig, itemMaterialMa
         return b.weight - a.weight;
     });
 
-    // ==================== 主循环：全局优化放置 ====================
+    // ==================== 主循环：全局优化放置（V4.7: 支持水平旋转）====================
+    const allowRotate = placementRules.rotate !== false;
+
     for (let i = 0; i < sortedItems.length; i++) {
         const item = sortedItems[i];
 
@@ -933,31 +1017,42 @@ export function solveCenterOfGravityPacking(items, furnaceConfig, itemMaterialMa
             continue;
         }
 
-        const iw = item.w + sp;
         const ih = item.h + sp;
-        const id_ = item.d + sp;
 
-        // 尺寸检查（是否超过炉膛整体尺寸）
-        if (item.w > fw || item.h > fh || item.d > fd) {
+        // 尺寸检查（任一朝向能放入即可）
+        let canFit = item.w <= fw && item.h <= fh && item.d <= fd;
+        if (!canFit && allowRotate && item.shape !== 'cylinder') {
+            canFit = item.d <= fw && item.h <= fh && item.w <= fd;
+        }
+        if (!canFit) {
             unpacked.push(item);
             continue;
         }
 
-        // ===== 生成全局 3D 候选位置网格 =====
-        const candidates = generateGlobalCandidates(iw, ih, id_);
+        // 生成朝向候选
+        const orientCandidates = [{ w: item.w, d: item.d }];
+        if (allowRotate && Math.abs(item.w - item.d) > 0.5 && item.shape !== 'cylinder') {
+            orientCandidates.push({ w: item.d, d: item.w });
+        }
 
-        // ===== 遍历候选位置，评分选优 =====
-        let best = { x: 0, y: 0, z: 0, score: Infinity };
+        let best = { x: 0, y: 0, z: 0, w: item.w, d: item.d, score: Infinity };
         let found = false;
 
-        for (const cand of candidates) {
-            // 碰撞检测
-            if (hasCollision(cand.x, cand.y, cand.z, iw, ih, id_)) continue;
+        for (const orient of orientCandidates) {
+            const iw = orient.w + sp;
+            const id_ = orient.d + sp;
+            if (iw > fw || id_ > fd) continue;
 
-            const score = evaluatePlacement(cand.x, cand.y, cand.z, iw, ih, id_, item.weight);
-            if (score < best.score) {
-                best = { x: cand.x, y: cand.y, z: cand.z, score };
-                found = true;
+            // ===== 生成全局 3D 候选位置网格 =====
+            const candidates = generateGlobalCandidates(iw, ih, id_);
+
+            for (const cand of candidates) {
+                if (hasCollision(cand.x, cand.y, cand.z, iw, ih, id_)) continue;
+                const score = evaluatePlacement(cand.x, cand.y, cand.z, iw, ih, id_, item.weight);
+                if (score < best.score) {
+                    best = { x: cand.x, y: cand.y, z: cand.z, w: orient.w, d: orient.d, score };
+                    found = true;
+                }
             }
         }
 
@@ -966,20 +1061,25 @@ export function solveCenterOfGravityPacking(items, furnaceConfig, itemMaterialMa
             continue;
         }
 
-        // ===== 放置工件 =====
+        // ===== 放置工件（V4.7: 使用选中的朝向）=====
+        const finalIW = best.w + sp;
+        const finalID = best.d + sp;
+
+        item.w = best.w;
+        item.d = best.d;
         item.x = best.x;
         item.y = best.y;
         item.z = best.z;
-        item.w_algo = iw;
+        item.w_algo = finalIW;
         item.h_algo = ih;
-        item.d_algo = id_;
+        item.d_algo = finalID;
 
         placedItems.push({
             id: item.id, name: item.name, shape: item.shape,
             needsRotation: item.needsRotation || false,
             x: item.x, y: item.y, z: item.z,
-            w: item.w, h: item.h, d: item.d,
-            w_algo: iw, h_algo: ih, d_algo: id_,
+            w: best.w, h: item.h, d: best.d,
+            w_algo: finalIW, h_algo: ih, d_algo: finalID,
             weight: item.weight, color: item.color,
             material: item.material || '', process: item.process || '',
             rotationInfo: item.rotationInfo || '',
@@ -988,7 +1088,7 @@ export function solveCenterOfGravityPacking(items, furnaceConfig, itemMaterialMa
         totalWeight += item.weight;
 
         // 更新四象限重量
-        const qIdx = getQuadrant(item.x + item.w / 2, item.z + item.d / 2);
+        const qIdx = getQuadrant(item.x + best.w / 2, item.z + best.d / 2);
         quadrantWeights[qIdx] += item.weight;
     }
 
@@ -1162,104 +1262,122 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
 
     /**
      * 在当前层内使用重心居中找最佳XZ位置
-     * @param {number} iw, id_ - 工件尺寸
+     * V4.7: 支持水平旋转候选 — 尝试 w×d 和 d×w 两种朝向，选出最佳
+     * @param {number} itemW, itemD - 工件原始宽/深（不含间距）
      * @param {number} itemWeight - 工件重量
      * @param {Array} layerItems - 当前层已放置工件
      * @param {number} layerBaseY - 当前层底面Y
-     * @returns {{ x: number, z: number } | null}
+     * @returns {{ x: number, z: number, w: number, d: number } | null}
+     *          w/d 为选中的原始尺寸（若旋转则已交换）
      */
-    function findCGXZPlacement(iw, id_, itemWeight, layerItems, layerBaseY) {
-        const xRange = fw - iw;
-        const zRange = fd - id_;
-        if (xRange < 0 || zRange < 0) return null;
+    function findCGXZPlacement(itemW, itemD, itemWeight, layerItems, layerBaseY) {
+        const allowRotate = placementRules.rotate !== false;
 
-        const candidates = [];
-        const seen = new Set();
-
-        function addCandidate(x, z) {
-            x = Math.round(Math.max(0, Math.min(x, xRange)));
-            z = Math.round(Math.max(0, Math.min(z, zRange)));
-            const key = `${x},${z}`;
-            if (!seen.has(key)) {
-                seen.add(key);
-                candidates.push({ x, z });
-            }
+        // 生成朝向候选：[{w, d}]（原始尺寸，不含间距）
+        const orientCandidates = [{ w: itemW, d: itemD }];
+        if (allowRotate && Math.abs(itemW - itemD) > 0.5) {
+            orientCandidates.push({ w: itemD, d: itemW });
         }
 
-        // 全局网格采样
-        const stepX = Math.max(20, Math.floor(xRange / 15));
-        const stepZ = Math.max(20, Math.floor(zRange / 12));
-        for (let x = 0; x <= xRange; x += stepX) {
-            for (let z = 0; z <= zRange; z += stepZ) {
-                addCandidate(x, z);
-            }
-        }
-
-        // 中心密集采样
-        const denseHalf = Math.min(fw, fd) / 5;
-        const denseStep = Math.max(10, Math.floor(Math.min(xRange, zRange) / 25));
-        for (let x = Math.max(0, centerX - iw / 2 - denseHalf); x <= Math.min(xRange, centerX - iw / 2 + denseHalf); x += denseStep) {
-            for (let z = Math.max(0, centerZ - id_ / 2 - denseHalf); z <= Math.min(zRange, centerZ - id_ / 2 + denseHalf); z += denseStep) {
-                addCandidate(x, z);
-            }
-        }
-
-        // 已放置工件邻接
-        for (const p of layerItems) {
-            addCandidate(p.x + p.w_algo, p.z);
-            addCandidate(p.x - iw, p.z);
-            addCandidate(p.x, p.z + p.d_algo);
-            addCandidate(p.x, p.z - id_);
-            addCandidate(p.x + p.w_algo, p.z + p.d_algo);
-            addCandidate(p.x - iw, p.z - id_);
-        }
-
-        // 炉壁贴合
-        addCandidate(0, 0);
-        addCandidate(xRange, 0);
-        addCandidate(0, zRange);
-        addCandidate(xRange, zRange);
-
-        // 碰撞检测 + 评分
         let bestScore = Infinity;
         let bestPos = null;
+        let bestW = itemW;
+        let bestD = itemD;
 
-        for (const cand of candidates) {
-            // 与当前层工件碰撞检测
-            let collision = false;
+        for (const orient of orientCandidates) {
+            const iw = orient.w + sp;
+            const id_ = orient.d + sp;
+            const xRange = fw - iw;
+            const zRange = fd - id_;
+            if (xRange < 0 || zRange < 0) continue;
+
+            const candidates = [];
+            const seen = new Set();
+
+            function addCandidate(x, z) {
+                x = Math.round(Math.max(0, Math.min(x, xRange)));
+                z = Math.round(Math.max(0, Math.min(z, zRange)));
+                const key = `${x},${z}`;
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    candidates.push({ x, z });
+                }
+            }
+
+            // 全局网格采样
+            const stepX = Math.max(20, Math.floor(xRange / 15));
+            const stepZ = Math.max(20, Math.floor(zRange / 12));
+            for (let x = 0; x <= xRange; x += stepX) {
+                for (let z = 0; z <= zRange; z += stepZ) {
+                    addCandidate(x, z);
+                }
+            }
+
+            // 中心密集采样
+            const denseHalf = Math.min(fw, fd) / 5;
+            const denseStep = Math.max(10, Math.floor(Math.min(xRange, zRange) / 25));
+            for (let x = Math.max(0, centerX - iw / 2 - denseHalf); x <= Math.min(xRange, centerX - iw / 2 + denseHalf); x += denseStep) {
+                for (let z = Math.max(0, centerZ - id_ / 2 - denseHalf); z <= Math.min(zRange, centerZ - id_ / 2 + denseHalf); z += denseStep) {
+                    addCandidate(x, z);
+                }
+            }
+
+            // 已放置工件邻接
             for (const p of layerItems) {
-                if (cand.x + iw > p.x && p.x + p.w_algo > cand.x &&
-                    cand.z + id_ > p.z && p.z + p.d_algo > cand.z) {
-                    collision = true;
-                    break;
-                }
+                addCandidate(p.x + p.w_algo, p.z);
+                addCandidate(p.x - iw, p.z);
+                addCandidate(p.x, p.z + p.d_algo);
+                addCandidate(p.x, p.z - id_);
+                addCandidate(p.x + p.w_algo, p.z + p.d_algo);
+                addCandidate(p.x - iw, p.z - id_);
             }
-            if (collision) continue;
 
-            // 与下层工件碰撞检测（确保不穿透到下层工件体内）
-            const belowItems = packedItems.filter(p => p.y < layerBaseY);
-            let belowCollision = false;
-            for (const p of belowItems) {
-                if (p.y + p.h_algo > layerBaseY &&
-                    cand.x + iw > p.x && p.x + p.w_algo > cand.x &&
-                    cand.z + id_ > p.z && p.z + p.d_algo > cand.z) {
-                    belowCollision = true;
-                    break;
+            // 炉壁贴合
+            addCandidate(0, 0);
+            addCandidate(xRange, 0);
+            addCandidate(0, zRange);
+            addCandidate(xRange, zRange);
+
+            // 碰撞检测 + 评分
+            for (const cand of candidates) {
+                // 与当前层工件碰撞检测
+                let collision = false;
+                for (const p of layerItems) {
+                    if (cand.x + iw > p.x && p.x + p.w_algo > cand.x &&
+                        cand.z + id_ > p.z && p.z + p.d_algo > cand.z) {
+                        collision = true;
+                        break;
+                    }
                 }
-            }
-            if (belowCollision) continue;
+                if (collision) continue;
 
-            const score = useCG
-                ? scoreCGPlacement(cand.x, cand.z, iw, id_, itemWeight, layerItems)
-                : (cand.x + cand.z); // 无重心居中时用左上优先的贪心策略
+                // 与下层工件碰撞检测（确保不穿透到下层工件体内）
+                const belowItems = packedItems.filter(p => p.y < layerBaseY);
+                let belowCollision = false;
+                for (const p of belowItems) {
+                    if (p.y + p.h_algo > layerBaseY &&
+                        cand.x + iw > p.x && p.x + p.w_algo > cand.x &&
+                        cand.z + id_ > p.z && p.z + p.d_algo > cand.z) {
+                        belowCollision = true;
+                        break;
+                    }
+                }
+                if (belowCollision) continue;
 
-            if (score < bestScore) {
-                bestScore = score;
-                bestPos = { x: cand.x, z: cand.z };
+                const score = useCG
+                    ? scoreCGPlacement(cand.x, cand.z, iw, id_, itemWeight, layerItems)
+                    : (cand.x + cand.z); // 无重心居中时用左上优先的贪心策略
+
+                if (score < bestScore) {
+                    bestScore = score;
+                    bestPos = { x: cand.x, z: cand.z };
+                    bestW = orient.w;
+                    bestD = orient.d;
+                }
             }
         }
 
-        return bestPos;
+        return bestPos ? { x: bestPos.x, z: bestPos.z, w: bestW, d: bestD } : null;
     }
 
     // ==================== 主循环：外层搁板分层，内层重心居中 ====================
@@ -1282,18 +1400,23 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
             // 尺寸检查
             if (item.w > fw || item.h > fh || item.d > fd) continue;
 
-            const iw = item.w + sp;
-            const id_ = item.d + sp;
-
-            // 找最佳 XZ 位置
-            const placement = findCGXZPlacement(iw, id_, item.weight, layerItems, currentY);
+            // 找最佳 XZ 位置（V4.7: 传入原始尺寸，返回含旋转后的 w/d）
+            const placement = findCGXZPlacement(item.w, item.d, item.weight, layerItems, currentY);
             if (placement !== null) {
+                // V4.7: 使用 placement 返回的旋转后尺寸
+                const finalW = placement.w;
+                const finalD = placement.d;
+                const finalIW = finalW + sp;
+                const finalID = finalD + sp;
+
+                item.w = finalW;
+                item.d = finalD;
                 item.x = placement.x;
                 item.y = currentY;
                 item.z = placement.z;
-                item.w_algo = iw;
+                item.w_algo = finalIW;
                 item.h_algo = ih;
-                item.d_algo = id_;
+                item.d_algo = finalID;
 
                 layerItems.push({ ...item });
                 if (ih > maxItemHeight) maxItemHeight = ih;
@@ -1326,16 +1449,11 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
                 currentY = shelfY;
             }
         } else {
-            // 未开启搁板：当前层已满，但仍有垂直空间 → 继续在当前最高工件上方铺设（自然堆叠）
-            // 找出 packedItems 中的最高顶面作为新的 currentY
-            let maxTop = currentY;
-            for (const pi of packedItems) {
-                const top = pi.y + pi.h_algo;
-                if (top > maxTop) maxTop = top;
-            }
-            currentY = maxTop;
-            // 如果所有工件都放置在同一层底面上方，currentY 会更新为最高工件的顶面
-            // 下一轮循环如果有新工件能放在这之上（不碰撞），自然会继续堆叠
+            // 未开启搁板分层：仅允许底面平铺一层，不允许多层堆叠
+            // 将剩余工件标记为未装炉并退出主循环
+            unpacked.push(...remainingItems);
+            remainingItems.length = 0;
+            break;
         }
 
         // 重量上限检查
