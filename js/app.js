@@ -559,8 +559,8 @@ async function executeWithAILoading() {
     // 在后台执行装炉算法
     executeAndRender();
 
-    // AI 思考模拟：5~8 秒随机（单位 ms）
-    const aiThinkDuration = 5000 + Math.floor(Math.random() * 3000);
+    // AI 思考模拟：1~3 秒随机（单位 ms）
+    const aiThinkDuration = 1000 + Math.floor(Math.random() * 2000);
 
     await sleep(aiThinkDuration);
 

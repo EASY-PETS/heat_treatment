@@ -440,6 +440,14 @@ export async function captureLayeredScreenshots(furnaceIndex) {
 
         // 收集本层信息
         const ld = layerDataMap.get(layerIndex) || { items: new Map(), totalWeight: 0, itemCount: 0, shelfInfo: null };
+
+        // 🔧 修复：跳过空层（无工件且无搁板），避免 PDF 中生成多余的空白步骤页
+        // 原因：装炉算法可能在最高层上方多添加一块搁板，但该层无工件可放置
+        if (ld.itemCount === 0 && !ld.shelfInfo) {
+            await delay(CAPTURE_DELAY_MS);
+            continue;
+        }
+
         const layerLabel = layerIndex === 1 ? '底层（炉底）' : '第 ' + layerIndex + ' 层';
 
         results.push({

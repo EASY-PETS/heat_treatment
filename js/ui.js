@@ -386,43 +386,51 @@ export function parseExcelData(workbook) {
         return null;
     };
 
-    const isNewFormat = colProductName >= 0 || colSpec >= 0 || colItemCode >= 0;
-
     for (let i = headerRow + 1; i < rows.length; i++) {
         const row = rows[i];
         let productName, customerName, itemCode, shape, dim1, dim2, dim3, count, weight, material, process;
 
-        if (isNewFormat) {
-            productName = String(row[colProductName] || '').trim();
-            customerName = String(row[colCustomer] || '').trim();
-            itemCode = String(row[colItemCode] || '').trim();
-            if (!productName && !itemCode) continue;
-            const specStr = String(row[colSpec] || '').trim();
-            const specParsed = parseSpec(specStr);
-            if (specParsed) { shape = specParsed.shape; dim1 = specParsed.dim1; dim2 = specParsed.dim2; dim3 = specParsed.dim3; }
-            else { shape = 'cuboid'; dim1 = 50; dim2 = 50; dim3 = 50; }
-            count = parseInt(row[colCount]) || 1;
-            weight = parseFloat(row[colUnitWeight]) || 0;
-            material = String(row[colMaterial] || '').trim();
-            process = String(row[colProcess] || '').trim();
+        // ===== V3.5: 统一混合解析 — 新旧格式字段独立检测，不再互斥 =====
+
+        // 1. 产品名称：优先新格式"产品名称/工件名称"列，回退旧格式"名称"列
+        productName = String(row[colProductName >= 0 ? colProductName : colNameOld] || '').trim();
+        // 2. 客户名称 & 物料编码：独立检测（与新旧格式无关）
+        customerName = colCustomer >= 0 ? String(row[colCustomer] || '').trim() : '';
+        itemCode = colItemCode >= 0 ? String(row[colItemCode] || '').trim() : '';
+        if (!productName && !itemCode) continue;
+
+        // 3. 尺寸解析：优先尝试"规格"列 → 失败回退 L/W/H/D 列
+        const specStr = colSpec >= 0 ? String(row[colSpec] || '').trim() : '';
+        const specParsed = specStr ? parseSpec(specStr) : null;
+        if (specParsed) {
+            shape = specParsed.shape; dim1 = specParsed.dim1; dim2 = specParsed.dim2; dim3 = specParsed.dim3;
         } else {
-            // 旧格式兼容
-            productName = String(row[colNameOld] || '').trim();
-            customerName = '';
-            itemCode = '';
-            if (!productName) continue;
-            const L = parseFloat(row[colL]) || 0; const W = parseFloat(row[colW]) || 0;
-            const H = parseFloat(row[colH]) || 0; const D = parseFloat(row[colD]) || 0;
+            // 回退到旧格式 L/W/H/D 列
+            const L = colL >= 0 ? parseFloat(row[colL]) || 0 : 0;
+            const W = colW >= 0 ? parseFloat(row[colW]) || 0 : 0;
+            const H = colH >= 0 ? parseFloat(row[colH]) || 0 : 0;
+            const D = colD >= 0 ? parseFloat(row[colD]) || 0 : 0;
             const hasDiam = D > 0; const hasCuboid = L > 0 && W > 0;
             if (hasDiam && H > 0) { shape = 'cylinder'; dim1 = D; dim2 = D; dim3 = H; }
             else if (hasCuboid) { shape = 'cuboid'; dim1 = L; dim2 = W; dim3 = H || Math.min(L, W); }
             else if (D > 0) { shape = 'cylinder'; dim1 = D; dim2 = D; dim3 = H || D; }
             else { shape = 'cuboid'; dim1 = L || 50; dim2 = W || 50; dim3 = H || 50; }
-            count = parseInt(row[colCount]) || 1;
-            weight = parseFloat(row[colWeightOld]) || 0;
-            material = String(row[colMaterial] || '').trim();
-            process = String(row[colProcess] || '').trim();
         }
+
+        // 4. 数量 & 重量：优先"单重"列 → 回退旧"总重/重量"列
+        count = colCount >= 0 ? (parseInt(row[colCount]) || 1) : 1;
+        const unitWt = colUnitWeight >= 0 ? parseFloat(row[colUnitWeight]) || 0 : 0;
+        const totalWt = colWeightOld >= 0 ? parseFloat(row[colWeightOld]) || 0 : 0;
+        weight = unitWt > 0 ? unitWt : totalWt;
+
+        // 5. 材质 & 工艺：统一读取
+        material = colMaterial >= 0 ? String(row[colMaterial] || '').trim() : '';
+        process = colProcess >= 0 ? String(row[colProcess] || '').trim() : '';
+
+        // 6. 附加热处理信息（兼容旧表头）
+        const hardness = colHardness >= 0 ? String(row[colHardness] || '').trim() : '';
+        const orderDate = colDate >= 0 ? String(row[colDate] || '').trim() : '';
+        const remark = colRemark >= 0 ? String(row[colRemark] || '').trim() : '';
 
         /** V3.4 核心：唯一标识 name = 产品名称_客户名称，防止重名 */
         const uniqueName = productName && customerName ? `${productName}_${customerName}` : (productName || itemCode || '未知工件');
@@ -433,8 +441,8 @@ export function parseExcelData(workbook) {
             customer: customerName,
             itemCode: itemCode,
             shape, dim1, dim2, dim3, count, weight, material,
-            hardness: '', process,
-            orderDate: '', deliveryDate: '', remark: '',
+            hardness, process,
+            orderDate, deliveryDate: '', remark,
             valid
         });
     }
