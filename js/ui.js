@@ -313,6 +313,8 @@ export function openRulesModal() {
     document.getElementById('rule-same-material').checked = placementRules.sameMaterial || false;
     // 姿态优化
     document.getElementById('rule-posture-optimization').checked = placementRules.allowPostureOptimization !== false;
+    // V4.5: 圆盘翻转阈值
+    document.getElementById('rule-disc-flip-ratio').value = placementRules.discFlipRatio != null ? placementRules.discFlipRatio : 1.0;
 }
 
 export function saveRulesModal() {
@@ -332,6 +334,7 @@ export function saveRulesModal() {
         shelfHeight: parseFloat(document.getElementById('rule-shelf-height').value) || 100,
         shelfThickness: parseFloat(document.getElementById('rule-shelf-thickness').value) || 20,
         allowPostureOptimization: document.getElementById('rule-posture-optimization').checked,
+        discFlipRatio: parseFloat(document.getElementById('rule-disc-flip-ratio').value) || 1.0,
         centerOfGravity: true                   // 重心居中已固化，勾选搁板时无条件执行
     });
     document.getElementById('global-spacing').value = placementRules.minSpacing;

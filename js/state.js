@@ -121,7 +121,9 @@ export let placementRules = {
     /** 搁板实体厚度 (mm) - 真实占用炉膛高度空间 */
     shelfThickness: 20,
     /** 允许旋转90°寻找最佳摆放姿态（最小面积面朝下） */
-    allowPostureOptimization: true
+    allowPostureOptimization: true,
+    /** V4.5: 圆盘侧放阈值 — height/diameter < discFlipRatio 时翻转平放（值越大越容易翻，默认1.0保持当前行为） */
+    discFlipRatio: 1.0
 };
 
 /** 装炉计算结果中的聚集率统计 */

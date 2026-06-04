@@ -1943,7 +1943,14 @@ function buildFurnaceGroup(furnace, index, filterMaterialName) {
         const isFiltered = filterMaterialName && item.material !== filterMaterialName;
         let geometry;
         if (item.shape === 'cylinder') {
-            geometry = new THREE.CylinderGeometry(item.w / 2, item.w / 2, item.h, 32);
+            if (item.needsRotation) {
+                // 侧放圆盘：h = 原直径(大值), w = 原厚度(小值)
+                // CylinderGeometry 半径用直径/2，高度用厚度
+                geometry = new THREE.CylinderGeometry(item.h / 2, item.h / 2, item.w, 32);
+            } else {
+                geometry = new THREE.CylinderGeometry(item.w / 2, item.w / 2, item.h, 32);
+            }
+            // geometry = new THREE.CylinderGeometry(item.w / 2, item.w / 2, item.h, 32);
         } else {
             geometry = new THREE.BoxGeometry(item.w, item.h, item.d);
         }
@@ -1961,6 +1968,11 @@ function buildFurnaceGroup(furnace, index, filterMaterialName) {
         const mesh = new THREE.Mesh(geometry, material);
         mesh.castShadow = true;
         mesh.receiveShadow = true;
+
+        // 扁平圆盘侧放旋转
+        if (item.shape === 'cylinder' && item.needsRotation) {
+            mesh.rotation.z = Math.PI / 2;
+        }
 
         const itemLayer = itemLayerMap.get(item.id) || 1;
         const meshOriginalY = item.y + item.h / 2 + baseY;
@@ -2244,8 +2256,16 @@ export async function playLoadingAnimation() {
         const layerItems = layerItemMap.get(layer) || [];
         layerItems.forEach((item) => {
             let geometry;
-            if (item.shape === 'cylinder') geometry = new THREE.CylinderGeometry(item.w / 2, item.w / 2, item.h, 32);
-            else geometry = new THREE.BoxGeometry(item.w, item.h, item.d);
+            if (item.shape === 'cylinder') {
+                if (item.needsRotation) {
+                    // 侧放圆盘：h = 原直径(大值), w = 原厚度(小值)
+                    geometry = new THREE.CylinderGeometry(item.h / 2, item.h / 2, item.w, 32);
+                } else {
+                    geometry = new THREE.CylinderGeometry(item.w / 2, item.w / 2, item.h, 32);
+                }
+            } else {
+                geometry = new THREE.BoxGeometry(item.w, item.h, item.d);
+            }
 
             const material = new THREE.MeshStandardMaterial({
                 color: new THREE.Color(item.color),
@@ -2256,6 +2276,12 @@ export async function playLoadingAnimation() {
             const mesh = new THREE.Mesh(geometry, material);
             mesh.castShadow = false;
             mesh.receiveShadow = false;
+
+            // 扁平圆盘侧放旋转
+            if (item.shape === 'cylinder' && item.needsRotation) {
+                mesh.rotation.z = Math.PI / 2;
+            }
+
             mesh.userData = {
                 itemName: item.name,
                 itemId: item.id,
@@ -2482,8 +2508,15 @@ export function renderMasterPlan(plan) {
     const group = new THREE.Group();
     plan.items.forEach(item => {
         let geo;
-        if (item.shape === 'cylinder') geo = new THREE.CylinderGeometry(item.w / 2, item.w / 2, item.h, 32);
-        else geo = new THREE.BoxGeometry(item.w, item.h, item.d);
+        if (item.shape === 'cylinder') {
+            if (item.needsRotation) {
+                geo = new THREE.CylinderGeometry(item.h / 2, item.h / 2, item.w, 32);
+            } else {
+                geo = new THREE.CylinderGeometry(item.w / 2, item.w / 2, item.h, 32);
+            }
+        } else {
+            geo = new THREE.BoxGeometry(item.w, item.h, item.d);
+        }
         // V2.7 TASK 3: 主视图工件也关闭透明度
         const mat = new THREE.MeshStandardMaterial({
             color: new THREE.Color(item.color),
@@ -2492,6 +2525,12 @@ export function renderMasterPlan(plan) {
             depthWrite: true
         });
         const mesh = new THREE.Mesh(geo, mat);
+
+        // 扁平圆盘侧放旋转
+        if (item.shape === 'cylinder' && item.needsRotation) {
+            mesh.rotation.z = Math.PI / 2;
+        }
+
         mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0x444444 })));
         mesh.position.set(
             item.x - fw / 2 + item.w / 2,

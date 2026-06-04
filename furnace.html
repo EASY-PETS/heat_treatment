@@ -241,6 +241,11 @@
                     <label for="rule-posture-optimization">最小面积面朝下（长方体自动旋转）</label>
                     <span class="rule-desc">自动旋转长方体使最小面积面朝下，提高单层堆叠密度。圆柱体/轴类不受影响。</span>
                 </div>
+                <div class="rule-item">
+                    <label for="rule-disc-flip-ratio" style="min-width:160px;">🔄 圆盘翻转阈值</label>
+                    <input type="number" id="rule-disc-flip-ratio" value="1.0" step="0.1" min="0" max="10" style="width:80px;padding:4px 6px;background:#2a2a3e;color:#fff;border:1px solid #444;border-radius:3px;font-size:11px;text-align:center;">
+                    <span class="rule-desc">圆柱体 height/diameter < 阈值 时视为圆盘并侧放（默认为 1.0）。设为 0 则圆柱永不翻转；设为 &infin; 则总是翻转。</span>
+                </div>
             </div>
             <div style="display:flex;gap:10px;margin-top:20px;">
                 <button style="flex:1;padding:9px;background:#3e3e52;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px;font-weight:700;" id="btn-rules-cancel">取消</button>
