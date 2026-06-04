@@ -29,7 +29,8 @@ import {
     playLoadingAnimation, renderMasterPlan,
     findResultIndexByFid, generateUniqueColor,
     refreshAllDisplayVisibility,
-    toggleExplodedView, showLayeredBOM
+    toggleExplodedView, showLayeredBOM,
+    showAILoadingLoading, hideAILoadingLoading
 } from './three-scene.js';
 import {
     createFurnaceCard, selectFurnaceCard, showFurnaceDetail,
@@ -241,7 +242,7 @@ function init() {
             document.getElementById('rules-modal-overlay').style.display = 'none';
     });
     document.getElementById('btn-rules-save').addEventListener('click', saveRulesModal);
-    document.getElementById('btn-generate-plan').addEventListener('click', executeAndRender);
+    document.getElementById('btn-generate-plan').addEventListener('click', showGenerationOptions);
     document.getElementById('btn-animate').addEventListener('click', playLoadingAnimation);
     document.getElementById('btn-export-pdf').addEventListener('click', showPdfSelectModal);
 
@@ -465,6 +466,112 @@ function init() {
     if (dsGrid) dsGrid.addEventListener('change', applyDisplaySettings);
     if (dsAxes) dsAxes.addEventListener('change', applyDisplaySettings);
     if (dsRulers) dsRulers.addEventListener('change', applyDisplaySettings);
+
+    // ==================== 生成模式选择弹窗事件 ====================
+    initGenerationOptions();
 }
 
+/**
+ * 初始化生成模式选择弹窗事件
+ */
+function initGenerationOptions() {
+    const overlay = document.getElementById('gen-option-overlay');
+    const cards = document.querySelectorAll('.gen-option-card');
+    const cancelBtn = document.getElementById('btn-gen-option-cancel');
+
+    // 点击卡片选择模式
+    cards.forEach(card => {
+        card.addEventListener('click', () => {
+            const mode = card.getAttribute('data-mode');
+
+            // 添加选中效果
+            cards.forEach(c => c.classList.remove('selected'));
+            card.classList.add('selected');
+
+            // 延迟关闭弹窗并执行对应模式
+            setTimeout(() => {
+                hideGenerationOptions();
+                if (mode === 'animate') {
+                    executeWithAnimation();
+                } else if (mode === 'skip') {
+                    executeWithAILoading();
+                }
+            }, 200);
+        });
+    });
+
+    // 取消按钮
+    cancelBtn.addEventListener('click', hideGenerationOptions);
+
+    // 点击遮罩关闭
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) hideGenerationOptions();
+    });
+}
+
+/**
+ * 显示生成模式选择弹窗
+ */
+function showGenerationOptions() {
+    if (isAnimating) return;
+
+    // 检查是否有炉膛和物料数据
+    let hasFurnaces = document.querySelectorAll('.furnace-card').length > 0;
+    let hasMaterials = document.querySelectorAll('.material-card').length > 0;
+    if (!hasFurnaces || !hasMaterials) {
+        alert('请先在左侧添加料框配置，在右侧添加待处理物料');
+        return;
+    }
+
+    const overlay = document.getElementById('gen-option-overlay');
+    const cards = document.querySelectorAll('.gen-option-card');
+    // 清除之前的选中状态
+    cards.forEach(c => c.classList.remove('selected'));
+    overlay.classList.add('active');
+}
+
+/**
+ * 隐藏生成模式选择弹窗
+ */
+function hideGenerationOptions() {
+    const overlay = document.getElementById('gen-option-overlay');
+    overlay.classList.remove('active');
+}
+
+/**
+ * 模式1: 播放动画 — 执行算法后播放逐帧装框动画
+ */
+function executeWithAnimation() {
+    executeAndRender();  // 先执行算法+渲染结果
+    // 然后触发动画播放
+    setTimeout(() => {
+        playLoadingAnimation();
+    }, 300);
+}
+
+/**
+ * 模式2: 跳过动画 — AI思考加载后直接呈现结果
+ */
+async function executeWithAILoading() {
+    // 显示 AI 思考加载动画
+    showAILoadingLoading();
+
+    // 在后台执行装炉算法
+    executeAndRender();
+
+    // AI 思考模拟：5~8 秒随机（单位 ms）
+    const aiThinkDuration = 5000 + Math.floor(Math.random() * 3000);
+
+    await sleep(aiThinkDuration);
+
+    // 隐藏加载动画
+    hideAILoadingLoading();
+}
+
+/**
+ * 简易延时函数
+ */
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
 init();

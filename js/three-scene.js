@@ -1449,7 +1449,7 @@ export async function setExplodeHorizontal() {
     layerGroups.forEach((layerGroup, layerIndex) => {
         if (!layerGroup.userData || !layerGroup.userData.isLayerGroup) return;
         // X 轴方向展开
-        const targetX = layerGroup.userData._originalX + (layerIndex - 1) * EXPLODE_GAP;
+        const targetX = layerGroup.userData._originalX + (layerIndex - 1) * EXPLODE_GAP * 3;
         // Y 轴降至 0（地面），方便俯瞰
         const targetY = 0;
         const targetZ = layerGroup.userData._originalZ || 0;
@@ -1998,7 +1998,7 @@ function buildFurnaceGroup(furnace, index, filterMaterialName) {
     });
 
     // 渲染搁板（传入 layerGroups Map，搁板将加入对应的 LayerGroup）
-    if ((placementRules.useShelfLayered || placementRules.centerOfGravity) && furnace.packedItems.length > 0) {
+    if (placementRules.useShelfLayered && furnace.packedItems.length > 0) {
         renderShelvesForFurnace(furnace, furnaceGroup, baseY, layerGroups);
     }
 
@@ -2654,4 +2654,76 @@ export function restoreDisplay(snapshot) {
     if (mainSceneGridHelper) mainSceneGridHelper.visible = snapshot.showGrid;
     if (mainSceneAxesHelper) mainSceneAxesHelper.visible = snapshot.showAxes;
     if (mainSceneRulerGroup) mainSceneRulerGroup.visible = snapshot.showRulers;
+}
+
+// ==================== AI LOADING OVERLAY HELPERS ====================
+
+/** AI 思考提示文字轮播列表 */
+const AI_HINTS = [
+    '正在分析物料组合…',
+    '计算空间最优排布…',
+    '优化利用率指标…',
+    '生成装炉方案…',
+    '校验安全间距…',
+    '正在渲染 3D 场景…'
+];
+
+let _aiHintTimer = null;
+let _aiHintIndex = 0;
+
+/**
+ * 显示极简 AI 思考中加载动画
+ * 覆盖整个 3D 视口区域（而不是整个页面），避免遮挡侧边栏
+ */
+export function showAILoadingLoading() {
+    const overlay = document.getElementById('ai-loading-overlay');
+    if (!overlay) return;
+
+    // 将 overlay 定位到 canvas-area 内部而非全屏
+    const canvasArea = document.getElementById('canvas-area');
+    if (canvasArea) {
+        overlay.style.position = 'absolute';
+        overlay.style.top = '0';
+        overlay.style.left = '0';
+        overlay.style.right = '0';
+        overlay.style.bottom = '0';
+        overlay.style.zIndex = '999';
+    }
+
+    overlay.classList.add('active');
+
+    // 启动提示文字轮播
+    _aiHintIndex = 0;
+    const hintEl = document.getElementById('ai-loading-hint');
+    if (hintEl) hintEl.textContent = AI_HINTS[0];
+
+    _aiHintTimer = setInterval(() => {
+        _aiHintIndex = (_aiHintIndex + 1) % AI_HINTS.length;
+        if (hintEl) {
+            hintEl.style.opacity = '0';
+            setTimeout(() => {
+                hintEl.textContent = AI_HINTS[_aiHintIndex];
+                hintEl.style.opacity = '1';
+            }, 300);
+        }
+    }, 1800);
+}
+
+/**
+ * 隐藏 AI 思考中加载动画
+ */
+export function hideAILoadingLoading() {
+    const overlay = document.getElementById('ai-loading-overlay');
+    if (!overlay) return;
+
+    // 停止提示轮播
+    if (_aiHintTimer) {
+        clearInterval(_aiHintTimer);
+        _aiHintTimer = null;
+    }
+
+    overlay.classList.remove('active');
+
+    // 恢复 overlay 为 fixed 定位（默认全屏模式）
+    overlay.style.position = 'fixed';
 }

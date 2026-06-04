@@ -917,3 +917,158 @@ body {
 .bom-close-btn:hover {
     background: linear-gradient(135deg, #16a34a, #1f7a3a);
 }
+
+/* ==================== GEN OPTION OVERLAY ==================== */
+#gen-option-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 1000;
+    display: none;
+    justify-content: center;
+    align-items: center;
+}
+#gen-option-overlay.active {
+    display: flex;
+}
+#gen-option-modal {
+    background: #1a1a24;
+    border: 1px solid #333344;
+    border-radius: 14px;
+    padding: 32px 36px;
+    max-width: 520px;
+    width: 90%;
+    text-align: center;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+}
+#gen-option-modal h3 {
+    margin: 0 0 8px 0;
+    font-size: 22px;
+    color: #fff;
+    letter-spacing: 1px;
+}
+.gen-option-subtitle {
+    margin: 0 0 24px 0;
+    font-size: 13px;
+    color: #666;
+}
+.gen-option-cards {
+    display: flex;
+    gap: 14px;
+    margin-bottom: 20px;
+}
+.gen-option-card {
+    flex: 1;
+    background: #222230;
+    border: 2px solid #333344;
+    border-radius: 12px;
+    padding: 24px 16px;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    text-align: center;
+}
+.gen-option-card:hover {
+    border-color: #0066cc;
+    background: #262638;
+    transform: translateY(-3px);
+    box-shadow: 0 6px 24px rgba(0, 102, 204, 0.2);
+}
+.gen-option-card.selected {
+    border-color: #0066cc;
+    background: #1a2a3e;
+    box-shadow: 0 0 20px rgba(0, 102, 204, 0.3);
+}
+.gen-option-icon {
+    font-size: 42px;
+    margin-bottom: 12px;
+    display: block;
+}
+.gen-option-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 8px;
+}
+.gen-option-desc {
+    font-size: 12px;
+    color: #777;
+    line-height: 1.5;
+}
+.gen-option-cancel {
+    padding: 9px 28px;
+    background: #3e3e52;
+    color: #999;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+.gen-option-cancel:hover {
+    background: #4e4e62;
+    color: #ccc;
+}
+
+/* ==================== AI LOADING OVERLAY (MINIMALIST) ==================== */
+#ai-loading-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(10, 10, 20, 1);
+    z-index: 999;
+    display: none;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    backdrop-filter: blur(4px);
+}
+#ai-loading-overlay.active {
+    display: flex;
+}
+.ai-loading-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+}
+.ai-loading-ring {
+    width: 56px;
+    height: 56px;
+    border: 3px solid rgba(255, 255, 255, 0.08);
+    border-top-color: #0066cc;
+    border-radius: 50%;
+    animation: ai-ring-spin 1s linear infinite;
+}
+@keyframes ai-ring-spin {
+    to { transform: rotate(360deg); }
+}
+.ai-loading-text {
+    font-size: 20px;
+    font-weight: 600;
+    color: #ccc;
+    letter-spacing: 2px;
+}
+.ai-loading-dots {
+    display: flex;
+    gap: 6px;
+    font-size: 24px;
+    color: #0066cc;
+    font-weight: bold;
+    height: 28px;
+}
+.ai-loading-dots span {
+    animation: ai-dot-pulse 1.4s ease-in-out infinite;
+}
+.ai-loading-dots span:nth-child(1) { animation-delay: 0s; }
+.ai-loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+.ai-loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes ai-dot-pulse {
+    0%, 80%, 100% { opacity: 0.2; transform: translateY(0); }
+    40% { opacity: 1; transform: translateY(-6px); }
+}
+.ai-loading-hint {
+    font-size: 13px;
+    color: #555;
+    letter-spacing: 0.5px;
+    transition: opacity 0.6s ease;
+}
