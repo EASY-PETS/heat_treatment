@@ -1270,12 +1270,12 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
      * @returns {{ x: number, z: number, w: number, d: number } | null}
      *          w/d 为选中的原始尺寸（若旋转则已交换）
      */
-    function findCGXZPlacement(itemW, itemD, itemWeight, layerItems, layerBaseY) {
+    function findCGXZPlacement(itemW, itemD, itemWeight, layerItems, layerBaseY, itemShape) {
         const allowRotate = placementRules.rotate !== false;
 
         // 生成朝向候选：[{w, d}]（原始尺寸，不含间距）
         const orientCandidates = [{ w: itemW, d: itemD }];
-        if (allowRotate && Math.abs(itemW - itemD) > 0.5) {
+        if (allowRotate && Math.abs(itemW - itemD) > 0.5 && itemShape !== 'cylinder') {
             orientCandidates.push({ w: itemD, d: itemW });
         }
 
@@ -1401,7 +1401,7 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
             if (item.w > fw || item.h > fh || item.d > fd) continue;
 
             // 找最佳 XZ 位置（V4.7: 传入原始尺寸，返回含旋转后的 w/d）
-            const placement = findCGXZPlacement(item.w, item.d, item.weight, layerItems, currentY);
+            const placement = findCGXZPlacement(item.w, item.d, item.weight, layerItems, currentY, item.shape);
             if (placement !== null) {
                 // V4.7: 使用 placement 返回的旋转后尺寸
                 const finalW = placement.w;
