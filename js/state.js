@@ -46,6 +46,9 @@ export let furnaceGroups = new Map();
 export let mainDirectionalLight = null;
 
 // ==================== TASK 2: 爆炸图 + 施工清单状态 ====================
+/** 🔧 PDF截图进行中标志 — 截图期间暂停动画循环渲染，防止覆盖截图 framebuffer */
+export let screenshotInProgress = false;
+
 /** 爆炸图模式开关 */
 export let explodedView = false;
 /** 爆炸图模式：null=关闭 | 'vertical'=纵向展开 | 'horizontal'=横向展开 */
@@ -267,6 +270,7 @@ export function setDisplaySettings(v) { displaySettings = v; }
 export function setExplodedView(v) { explodedView = v; }
 export function setExplodeMode(v) { explodeMode = v; }
 export function setFocusedLayer(v) { focusedLayer = v; }
+export function setScreenshotInProgress(v) { screenshotInProgress = v; }
 export function setMainDirectionalLight(v) { mainDirectionalLight = v; }
 export function clearFurnaceGroups() { furnaceGroups.clear(); }
 export function setFurnaceGroup(index, group) { furnaceGroups.set(index, group); }

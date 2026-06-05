@@ -299,7 +299,51 @@ function buildPage2_StepByStep(furnace, layeredShots, pdfWrapper, multiLabel) {
             </div>`;
         });
     } else {
-        stepsHTML = '<div style="text-align:center;padding:40px;color:#999;">暂无分层截图数据</div>';
+        // 🔧 降级展示：无截图数据时，直接展示工件清单
+        const uniqueNames = new Set();
+        furnace.packedItems.forEach(item => uniqueNames.add(item.name));
+
+        let fallbackItemsHTML = '';
+        const grouped = new Map();
+        furnace.packedItems.forEach(item => {
+            const key = item.name;
+            if (!grouped.has(key)) {
+                grouped.set(key, { name: item.name, shape: item.shape, dims: `${item.w}×${item.h}×${item.d}`, color: item.color, count: 0, totalWeight: 0 });
+            }
+            const g = grouped.get(key);
+            g.count++;
+            g.totalWeight += item.weight || 0;
+        });
+
+        [...grouped.values()].sort((a, b) => b.totalWeight - a.totalWeight).forEach(g => {
+            fallbackItemsHTML += `<tr>
+                <td style="padding:4px 8px;border:1px solid #ddd;font-size:10px;">
+                    <span style="display:inline-block;width:10px;height:10px;background:${escapeHtml(g.color)};border-radius:2px;margin-right:4px;vertical-align:middle;"></span>${escapeHtml(g.name)}
+                </td>
+                <td style="padding:4px 8px;border:1px solid #ddd;font-size:10px;text-align:center;">${g.shape === 'cylinder' ? '圆柱' : '立方'}</td>
+                <td style="padding:4px 8px;border:1px solid #ddd;font-size:10px;text-align:center;">${g.dims} mm</td>
+                <td style="padding:4px 8px;border:1px solid #ddd;font-size:10px;text-align:center;">${g.count} 件</td>
+                <td style="padding:4px 8px;border:1px solid #ddd;font-size:10px;text-align:center;">${g.totalWeight.toFixed(1)} kg</td>
+            </tr>`;
+        });
+
+        stepsHTML = `
+            <div style="text-align:center;padding:20px;margin-bottom:12px;background:#fff8e1;border:1px solid #ffe082;border-radius:6px;font-size:12px;color:#f57f17;">
+                ⚠️ 3D分层截图未能生成，以下为工件完整清单。请确保3D场景已正确渲染后重新导出。
+            </div>
+            <div style="font-size:14px;font-weight:bold;margin-bottom:10px;">📦 全部工件清单（${furnace.packedItems.length} 件）</div>
+            <table style="width:100%;border-collapse:collapse;margin-bottom:20px;">
+                <thead>
+                    <tr style="background:#f1f5f9;">
+                        <th style="border:1px solid #ccc;padding:6px 8px;text-align:left;font-size:10px;">工件名称</th>
+                        <th style="border:1px solid #ccc;padding:6px 8px;text-align:center;font-size:10px;">形态</th>
+                        <th style="border:1px solid #ccc;padding:6px 8px;text-align:center;font-size:10px;">尺寸</th>
+                        <th style="border:1px solid #ccc;padding:6px 8px;text-align:center;font-size:10px;">数量</th>
+                        <th style="border:1px solid #ccc;padding:6px 8px;text-align:center;font-size:10px;">总重</th>
+                    </tr>
+                </thead>
+                <tbody>${fallbackItemsHTML}</tbody>
+            </table>`;
     }
 
     page.innerHTML = `

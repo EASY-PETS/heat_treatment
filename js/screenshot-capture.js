@@ -25,7 +25,9 @@ import * as THREE from 'three';
 import {
     renderer, scene, camera, controls,
     currentFurnaceIndex,
+    screenshotInProgress,
     setCurrentFurnaceIndex,
+    setScreenshotInProgress,
     globalFurnacesResult,
     furnaceGroups
 } from './state.js';
@@ -72,29 +74,37 @@ function captureCanvasWithCamera(scale = SCREENSHOT_SCALE, customCamera = null) 
         return '';
     }
 
-    // 双重 forceRender 确保 framebuffer 完全刷新（使用自定义相机）
-    forceRender(customCamera);
-    forceRender(customCamera);
+    // 🔧 截图期间暂停动画循环渲染，防止背景动画用默认相机覆盖截图 framebuffer
+    setScreenshotInProgress(true);
 
-    const originalPixelRatio = renderer.getPixelRatio();
-    if (scale !== originalPixelRatio) {
-        renderer.setPixelRatio(scale);
+    try {
+        // 双重 forceRender 确保 framebuffer 完全刷新（使用自定义相机）
         forceRender(customCamera);
         forceRender(customCamera);
+
+        const originalPixelRatio = renderer.getPixelRatio();
+        if (scale !== originalPixelRatio) {
+            renderer.setPixelRatio(scale);
+            forceRender(customCamera);
+            forceRender(customCamera);
+        }
+
+        // 如果用自定义相机，渲染最后一帧后用该相机取图
+        if (customCamera) {
+            forceRender(customCamera);
+        }
+
+        const dataURL = renderer.domElement.toDataURL('image/png');
+
+        if (scale !== originalPixelRatio) {
+            renderer.setPixelRatio(originalPixelRatio);
+        }
+
+        return dataURL;
+    } finally {
+        // 🔧 无论如何确保恢复动画循环
+        setScreenshotInProgress(false);
     }
-
-    // 如果用自定义相机，渲染最后一帧后用该相机取图
-    if (customCamera) {
-        forceRender(customCamera);
-    }
-
-    const dataURL = renderer.domElement.toDataURL('image/png');
-
-    if (scale !== originalPixelRatio) {
-        renderer.setPixelRatio(originalPixelRatio);
-    }
-
-    return dataURL;
 }
 
 /**

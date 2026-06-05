@@ -36,6 +36,7 @@ import {
     currentBasketType, displaySettings,
     explodedView, explodeMode, focusedLayer,
     EXPLODE_GAP, EXPLODE_ANIM_DURATION,
+    screenshotInProgress,
     setScene, setCamera, setRenderer, setControls,
     setMasterScene, setMasterCamera, setMasterRenderer, setMasterControls,
     setItemsGroup, setShelfMeshes,
@@ -1267,7 +1268,10 @@ export function initThree() {
     function animate() {
         requestAnimationFrame(animate);
         newControls.update();
-        newRenderer.render(newScene, newCamera);
+        // 🔧 截图期间跳过动画循环渲染，防止覆盖截图 framebuffer
+        if (!screenshotInProgress) {
+            newRenderer.render(newScene, newCamera);
+        }
     }
     animate();
 }
