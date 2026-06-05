@@ -331,7 +331,7 @@ export function solveHeterogeneousPacking(furnacePoolInput, itemsInput, spacing)
  *   3. 铺满后加搁板 — 找出本层最高工件高度，在其上方添加搁板
  *   4. 次重物继续铺放 — 下一层从搁板上方开始，继续铺放剩余工件
  */
-export function solveShelfLayeredPacking(items, furnaceConfig, customShelfHeight, itemMaterialMap, itemProcessMap) {
+export function solveShelfLayeredPacking(items, furnaceConfig, itemMaterialMap, itemProcessMap) {
     const { w: fw, h: fh, d: fd, max_weight, spacing: sp } = furnaceConfig;
     const shelfThickness = placementRules.shelfThickness || 20;
 
@@ -529,7 +529,7 @@ export function solveShelfLayeredPacking(items, furnaceConfig, customShelfHeight
     return { packedItems, totalWeight, shelfCount, unpackedItems: unpacked, shelvesUsed };
 }
 
-export function solveShelfLayeredMultiFurnace(furnacePoolInput, itemsInput, spacing, shelfHeight) {
+export function solveShelfLayeredMultiFurnace(furnacePoolInput, itemsInput, spacing) {
     let availableFurnaceInstances = [];
     furnacePoolInput.forEach(f => {
         for (let i = 0; i < f.count; i++) {
@@ -579,7 +579,7 @@ export function solveShelfLayeredMultiFurnace(furnacePoolInput, itemsInput, spac
     let completedFurnaces = [];
     for (let furnace of availableFurnaceInstances) {
         if (flattenedItems.length === 0) break;
-        const result = solveShelfLayeredPacking(flattenedItems, furnace, shelfHeight, itemMaterialMap, itemProcessMap);
+        const result = solveShelfLayeredPacking(flattenedItems, furnace, itemMaterialMap, itemProcessMap);
         furnace.packedItems = result.packedItems;
         furnace.totalWeight = result.totalWeight;
         furnace.shelvesUsed = result.shelvesUsed || [];

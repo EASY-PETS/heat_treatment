@@ -306,7 +306,6 @@ export function openRulesModal() {
     document.getElementById('rule-weight-margin').value = placementRules.weightMargin;
     // 搁板参数：主开关、层高、实体厚度
     document.getElementById('rule-shelf-layered').checked = placementRules.useShelfLayered;
-    document.getElementById('rule-shelf-height').value = placementRules.shelfHeight || 100;
     document.getElementById('rule-shelf-thickness').value = placementRules.shelfThickness || 20;
     // V3.0: 装炉分组规则
     document.getElementById('rule-same-process').checked = placementRules.sameProcess || false;
@@ -331,7 +330,6 @@ export function saveRulesModal() {
         balance: true,                          // 重心平衡已固化（搁板分层内嵌重心居中）
         sortStrategy: 'weight-desc',            // 排序策略固化为重量降序
         useShelfLayered: document.getElementById('rule-shelf-layered').checked,
-        shelfHeight: parseFloat(document.getElementById('rule-shelf-height').value) || 100,
         shelfThickness: parseFloat(document.getElementById('rule-shelf-thickness').value) || 20,
         allowPostureOptimization: document.getElementById('rule-posture-optimization').checked,
         discFlipRatio: parseFloat(document.getElementById('rule-disc-flip-ratio').value) || 1.0,

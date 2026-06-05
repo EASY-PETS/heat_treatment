@@ -116,8 +116,6 @@ export let placementRules = {
     weightMargin: 10,
     /** 搁板分层平铺算法主开关 */
     useShelfLayered: false,
-    /** 固定搁板层高 (mm)，0 = 动态计算 */
-    shelfHeight: 100,
     /** 搁板实体厚度 (mm) - 真实占用炉膛高度空间 */
     shelfThickness: 20,
     /** 允许旋转90°寻找最佳摆放姿态（最小面积面朝下） */
