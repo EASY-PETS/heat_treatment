@@ -179,7 +179,19 @@
     <div id="rules-modal-overlay">
         <div id="rules-modal">
             <h3>📐 摆放规则配置</h3>
-            <div class="rules-subtitle">配置装炉排布算法的规则参数（未来将独立为专属页面）</div>
+            <!-- 新增：装炉策略选择 -->
+            <div class="rule-group">
+                <div class="rule-group-title">装炉策略选择</div>
+                <div class="rule-item" style="flex-direction: column; align-items: flex-start;">
+                    <select id="rule-strategy" style="width: 100%; padding: 6px; background: #2a2a3e; color: #fff; border: 1px solid #444; border-radius: 4px;">
+                        <option value="balanced">重心稳定 + 贴边对称</option>
+                        <option value="spaceUtil">空间利用率优先</option>
+                        <option value="thermalBalance">热场均衡装载</option>
+                        <option value="surfaceUniform">表面均匀性优先</option>
+                    </select>
+                    <span id="rule-strategy-desc" style="font-size: 11px; color: #aaa; margin-top: 5px;"></span>
+                </div>
+            </div>
             <div class="rule-group">
                 <div class="rule-group-title">📏 尺寸与间距规则</div>
                 <div class="rule-item">

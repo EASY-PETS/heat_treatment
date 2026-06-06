@@ -314,9 +314,43 @@ export function openRulesModal() {
     document.getElementById('rule-posture-optimization').checked = placementRules.allowPostureOptimization !== false;
     // V4.5: 圆盘翻转阈值
     document.getElementById('rule-disc-flip-ratio').value = placementRules.discFlipRatio != null ? placementRules.discFlipRatio : 1.0;
+
+    // 在 openRulesModal 内部，现有代码之后
+    const strategySelect = document.getElementById('rule-strategy');
+    if (strategySelect) {
+        strategySelect.value = placementRules.strategy || 'balanced';
+        // 更新描述
+        const descSpan = document.getElementById('rule-strategy-desc');
+        if (descSpan) {
+            // 需要导入 strategyConfig，或者简单映射
+            const descMap = {
+                balanced: '少物料贴边对称，多物料兼顾重心，物理稳定',
+                spaceUtil: '塞满炉子，忽略重心，强力贴边紧凑',
+                thermalBalance: '温度均匀，避免中心聚集，控制局部密度',
+                surfaceUniform: '最大暴露面积，避免遮挡，气流路径一致'
+            };
+            descSpan.textContent = descMap[strategySelect.value] || '';
+        }
+        // 监听下拉变化，动态更新描述
+        strategySelect.addEventListener('change', (e) => {
+            const descSpanLocal = document.getElementById('rule-strategy-desc');
+            if (descSpanLocal) {
+                const descMap = {
+                    balanced: '少物料贴边对称，多物料兼顾重心，物理稳定',
+                    spaceUtil: '塞满炉子，忽略重心，强力贴边紧凑',
+                    thermalBalance: '温度均匀，避免中心聚集，控制局部密度',
+                    surfaceUniform: '最大暴露面积，避免遮挡，气流路径一致'
+                };
+                descSpanLocal.textContent = descMap[e.target.value] || '';
+            }
+        });
+    }
 }
 
 export function saveRulesModal() {
+    const strategySelect = document.getElementById('rule-strategy');
+    const selectedStrategy = strategySelect ? strategySelect.value : 'balanced';
+
     // V3.0: 保存核心有效参数，新增分组规则 sameMaterial / sameProcess
     setPlacementRules({
         gravity: true,                          // 重力优先已固化
@@ -329,6 +363,7 @@ export function saveRulesModal() {
         weightMargin: parseFloat(document.getElementById('rule-weight-margin').value) || 10,
         balance: true,                          // 重心平衡已固化（搁板分层内嵌重心居中）
         sortStrategy: 'weight-desc',            // 排序策略固化为重量降序
+        strategy: selectedStrategy,
         useShelfLayered: document.getElementById('rule-shelf-layered').checked,
         shelfThickness: parseFloat(document.getElementById('rule-shelf-thickness').value) || 20,
         allowPostureOptimization: document.getElementById('rule-posture-optimization').checked,
@@ -337,6 +372,7 @@ export function saveRulesModal() {
     });
     document.getElementById('global-spacing').value = placementRules.minSpacing;
     document.getElementById('rules-modal-overlay').style.display = 'none';
+    
     const btn = document.getElementById('btn-rules'); const orig = btn.textContent;
     btn.textContent = '✅ 规则已保存'; setTimeout(() => { btn.textContent = orig; }, 1500);
 }

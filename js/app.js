@@ -593,7 +593,7 @@ async function executeWithAILoading() {
     executeAndRender();
 
     // AI 思考模拟：1~3 秒随机（单位 ms）
-    const aiThinkDuration = 1000 + Math.floor(Math.random() * 2000);
+    const aiThinkDuration = 2000 + Math.floor(Math.random() * 2000);
 
     await sleep(aiThinkDuration);
 

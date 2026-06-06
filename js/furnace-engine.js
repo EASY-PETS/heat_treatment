@@ -26,6 +26,7 @@
 
 import { placementRules, setAggregationStats, setGroupingInfo } from './state.js';
 import { groupMaterials, getGroupingSummary, getGroupingRules } from './PackingRuleEngine.js';
+import { strategyConfig, PackingStrategy } from './strategies.js'
 
 // ==================== 摆放姿态优化（Task 3） ====================
 
@@ -1198,7 +1199,7 @@ export function solveCenterOfGravityMultiFurnace(furnacePoolInput, itemsInput, s
  * @param {Map} itemProcessMap
  * @returns {{ packedItems: Array, totalWeight: number, unpackedItems: Array, shelvesUsed: Array }}
  */
-function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessMap) {
+function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessMap, strategy = 'balanced') {
     const { w: fw, h: fh, d: fd, max_weight, spacing: sp } = furnaceConfig;
     const shelfThickness = placementRules.shelfThickness || 20;
     const useShelf = placementRules.useShelfLayered;
@@ -1293,78 +1294,349 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
      * 综合评分（动态重心权重 + 贴边奖励 + 对称奖励）
      * 少物料时重心权重低，多物料时逐步增加权重
      */
-    function scoreCGPlacement(testX, testZ, iw, id_, itemWeight, layerItems, layerBaseY) {
+    // function scoreCGPlacement(testX, testZ, iw, id_, itemWeight, layerItems, layerBaseY) {
+    //     const itemCX = testX + iw / 2;
+    //     const itemCZ = testZ + id_ / 2;
+    //     const totalLayerWeight = layerItems.reduce((sum, p) => sum + (p.weight || 1), 0);
+    //     const totalLayerCount = layerItems.length;
+
+    //     // 动态重心权重因子：轻载时 (< 30% 容量) 重心权重极低，满载时恢复到正常
+    //     const maxLayerWeightEstimate = 5000; // 预估该层最大承重，可根据炉膛 max_weight 调整
+    //     const weightRatio = Math.min(1, totalLayerWeight / maxLayerWeightEstimate);
+    //     // 重心权重从 0.1 线性增加到 1.0
+    //     const cgWeightFactor = 0.1 + 0.9 * weightRatio;
+
+    //     // 1. 整体重心偏差（乘以动态权重）
+    //     let sx = 0, sz = 0, sm = 0;
+    //     for (const p of layerItems) {
+    //         const wgt = p.weight || 1;
+    //         sx += wgt * (p.x + p.w / 2);
+    //         sz += wgt * (p.z + p.d / 2);
+    //         sm += wgt;
+    //     }
+    //     const effW = Math.max(itemWeight, 1);
+    //     const newMass = sm + effW;
+    //     const newCX = (sx + effW * itemCX) / newMass;
+    //     const newCZ = (sz + effW * itemCZ) / newMass;
+    //     const cgDist = Math.sqrt((newCX - centerX) ** 2 + (newCZ - centerZ) ** 2);
+    //     const maxCgDist = Math.sqrt((fw / 2) ** 2 + (fd / 2) ** 2);
+    //     const cgScore = (cgDist / maxCgDist) * 6000 * cgWeightFactor;
+
+    //     // 2. 个体中心距离（同样动态权重）
+    //     const itemDist = Math.sqrt((itemCX - centerX) ** 2 + (itemCZ - centerZ) ** 2);
+    //     const maxDist = Math.sqrt((fw / 2) ** 2 + (fd / 2) ** 2);
+    //     const centerDistScore = (itemDist / maxDist) * 2000 * cgWeightFactor;
+
+    //     // 3. 边缘/邻接奖励（始终强力鼓励）
+    //     let touchBonus = 0;
+    //     if (testX < 1) touchBonus += 500;
+    //     if (testZ < 1) touchBonus += 500;
+    //     if (testX + iw >= fw - 1) touchBonus += 500;
+    //     if (testZ + id_ >= fd - 1) touchBonus += 500;
+
+    //     for (const p of layerItems) {
+    //         const dx = Math.max(0, Math.max(p.x - (testX + iw), testX - (p.x + p.w_algo)));
+    //         const dz = Math.max(0, Math.max(p.z - (testZ + id_), testZ - (p.z + p.d_algo)));
+    //         if (dx === 0 && dz === 0) {
+    //             touchBonus += 400;
+    //         } else if (dx === 0 && dz < 50) {
+    //             touchBonus += 200;
+    //         } else if (dz === 0 && dx < 50) {
+    //             touchBonus += 200;
+    //         }
+    //     }
+    //     const tightnessBonus = -touchBonus;
+
+    //     // 4. 对称性奖励（针对少物料情况：如果当前层已有1个工件，且新工件与它关于中心对称，则奖励）
+    //     let symmetryBonus = 0;
+    //     if (layerItems.length === 1 && Math.abs(itemWeight - layerItems[0].weight) < 0.1) {
+    //         const existing = layerItems[0];
+    //         const existingCX = existing.x + existing.w / 2;
+    //         const existingCZ = existing.z + existing.d / 2;
+    //         // 理想对称位置：关于中心对称点
+    //         const idealCX = 2 * centerX - existingCX;
+    //         const idealCZ = 2 * centerZ - existingCZ;
+    //         const distToIdeal = Math.sqrt((itemCX - idealCX) ** 2 + (itemCZ - idealCZ) ** 2);
+    //         if (distToIdeal < 100) {
+    //             symmetryBonus = -800;  // 强力奖励对称放置
+    //         }
+    //     }
+    //     // 也可扩展：当层内已有多个工件时，检查候选能否形成左右/前后对称
+    //     // （简化实现，上述已覆盖最常见的对称场景）
+
+    //     return cgScore + centerDistScore + tightnessBonus + symmetryBonus;
+    // }
+
+    // ========== 策略驱动的评分函数（步骤3） ==========
+    /**
+     * 根据策略计算综合评分（越低越好）
+     * @param {number} testX, testZ - 候选位置左下角
+     * @param {number} iw, id_ - 工件尺寸（含间距）
+     * @param {number} itemWeight - 工件重量
+     * @param {Array} layerItems - 当前层已放置工件
+     * @param {number} layerBaseY - 当前层底面Y坐标
+     * @param {string} strategy - 策略键名
+     * @param {Object} furnaceConfig - 炉膛配置 { w, h, d }
+     * @returns {number} 综合评分
+     */
+    function computePlacementScore(testX, testZ, iw, id_, itemWeight, layerItems, layerBaseY, strategy, furnaceConfig) {
+        const cfg = strategyConfig[strategy] || strategyConfig[PackingStrategy.BALANCED];
+        const { w: fw, d: fd } = furnaceConfig;
+        const centerX = fw / 2;
+        const centerZ = fd / 2;
         const itemCX = testX + iw / 2;
         const itemCZ = testZ + id_ / 2;
-        const totalLayerWeight = layerItems.reduce((sum, p) => sum + (p.weight || 1), 0);
-        const totalLayerCount = layerItems.length;
 
-        // 动态重心权重因子：轻载时 (< 30% 容量) 重心权重极低，满载时恢复到正常
-        const maxLayerWeightEstimate = 5000; // 预估该层最大承重，可根据炉膛 max_weight 调整
-        const weightRatio = Math.min(1, totalLayerWeight / maxLayerWeightEstimate);
-        // 重心权重从 0.1 线性增加到 1.0
-        const cgWeightFactor = 0.1 + 0.9 * weightRatio;
+        console.log('[评分] 当前策略:', strategy);
 
-        // 1. 整体重心偏差（乘以动态权重）
-        let sx = 0, sz = 0, sm = 0;
-        for (const p of layerItems) {
-            const wgt = p.weight || 1;
-            sx += wgt * (p.x + p.w / 2);
-            sz += wgt * (p.z + p.d / 2);
-            sm += wgt;
+        // 1. 重心偏差得分（XZ平面）
+        let cgScore = 0;
+        if (cfg.weights.cgDeviation > 0) {
+            let sx = 0, sz = 0, sm = 0;
+            for (const p of layerItems) {
+                const wgt = p.weight || 1;
+                sx += wgt * (p.x + p.w / 2);
+                sz += wgt * (p.z + p.d / 2);
+                sm += wgt;
+            }
+            const effW = Math.max(itemWeight, 1);
+            const newMass = sm + effW;
+            const newCX = (sx + effW * itemCX) / newMass;
+            const newCZ = (sz + effW * itemCZ) / newMass;
+            const cgDist = Math.sqrt((newCX - centerX) ** 2 + (newCZ - centerZ) ** 2);
+            const maxCgDist = Math.sqrt((fw/2)**2 + (fd/2)**2);
+            let rawCgScore = (cgDist / Math.max(maxCgDist, 1)) * 10000;
+            
+            let cgWeight = cfg.weights.cgDeviation;
+            if (cfg.specialRules.dynamicCgWeight) {
+                const totalLayerWeight = layerItems.reduce((s,p) => s + (p.weight || 1), 0);
+                const maxLayerWeight = 5000; // 可调，或从炉膛max_weight获取
+                const ratio = Math.min(1, totalLayerWeight / maxLayerWeight);
+                const maxFactor = cfg.specialRules.maxCgWeightFactor || 0.4;
+                cgWeight = cgWeight * (0.1 + 0.9 * ratio * (maxFactor / 0.4));
+            }
+            cgScore = rawCgScore * cgWeight;
         }
-        const effW = Math.max(itemWeight, 1);
-        const newMass = sm + effW;
-        const newCX = (sx + effW * itemCX) / newMass;
-        const newCZ = (sz + effW * itemCZ) / newMass;
-        const cgDist = Math.sqrt((newCX - centerX) ** 2 + (newCZ - centerZ) ** 2);
-        const maxCgDist = Math.sqrt((fw / 2) ** 2 + (fd / 2) ** 2);
-        const cgScore = (cgDist / maxCgDist) * 6000 * cgWeightFactor;
 
-        // 2. 个体中心距离（同样动态权重）
-        const itemDist = Math.sqrt((itemCX - centerX) ** 2 + (itemCZ - centerZ) ** 2);
-        const maxDist = Math.sqrt((fw / 2) ** 2 + (fd / 2) ** 2);
-        const centerDistScore = (itemDist / maxDist) * 2000 * cgWeightFactor;
+        // 2. 个体中心距离得分
+        let centerDistScore = 0;
+        if (cfg.weights.centerDistance > 0) {
+            const itemDist = Math.sqrt((itemCX - centerX)**2 + (itemCZ - centerZ)**2);
+            const maxDist = Math.sqrt((fw/2)**2 + (fd/2)**2);
+            const rawDistScore = (itemDist / Math.max(maxDist, 1)) * 10000;
+            centerDistScore = rawDistScore * cfg.weights.centerDistance;
+        }
 
-        // 3. 边缘/邻接奖励（始终强力鼓励）
+        // 3. 边缘/邻接奖励（紧凑性）
         let touchBonus = 0;
-        if (testX < 1) touchBonus += 500;
-        if (testZ < 1) touchBonus += 500;
-        if (testX + iw >= fw - 1) touchBonus += 500;
-        if (testZ + id_ >= fd - 1) touchBonus += 500;
-
-        for (const p of layerItems) {
-            const dx = Math.max(0, Math.max(p.x - (testX + iw), testX - (p.x + p.w_algo)));
-            const dz = Math.max(0, Math.max(p.z - (testZ + id_), testZ - (p.z + p.d_algo)));
-            if (dx === 0 && dz === 0) {
-                touchBonus += 400;
-            } else if (dx === 0 && dz < 50) {
-                touchBonus += 200;
-            } else if (dz === 0 && dx < 50) {
-                touchBonus += 200;
+        if (cfg.weights.edgeTouch !== 0) {
+            // 炉壁贴合
+            if (testX < 1) touchBonus += 500;
+            if (testZ < 1) touchBonus += 500;
+            if (testX + iw >= fw - 1) touchBonus += 500;
+            if (testZ + id_ >= fd - 1) touchBonus += 500;
+            // 工件间贴合
+            for (const p of layerItems) {
+                const dx = Math.max(0, Math.max(p.x - (testX + iw), testX - (p.x + p.w_algo)));
+                const dz = Math.max(0, Math.max(p.z - (testZ + id_), testZ - (p.z + p.d_algo)));
+                if (dx === 0 && dz === 0) touchBonus += 400;
+                else if (dx === 0 && dz < 50) touchBonus += 200;
+                else if (dz === 0 && dx < 50) touchBonus += 200;
+            }
+            // 空间利用率模式特殊奖励：填充小空隙
+            if (cfg.specialRules.forceCompact) {
+                const remainX = fw - (testX + iw);
+                const remainZ = fd - (testZ + id_);
+                if (remainX < 100 && remainX > 0) touchBonus += 300;
+                if (remainZ < 100 && remainZ > 0) touchBonus += 300;
             }
         }
-        const tightnessBonus = -touchBonus;
+        const edgeScore = -touchBonus * Math.abs(cfg.weights.edgeTouch); // 奖励为负分
 
-        // 4. 对称性奖励（针对少物料情况：如果当前层已有1个工件，且新工件与它关于中心对称，则奖励）
-        let symmetryBonus = 0;
-        if (layerItems.length === 1 && Math.abs(itemWeight - layerItems[0].weight) < 0.1) {
-            const existing = layerItems[0];
-            const existingCX = existing.x + existing.w / 2;
-            const existingCZ = existing.z + existing.d / 2;
-            // 理想对称位置：关于中心对称点
-            const idealCX = 2 * centerX - existingCX;
-            const idealCZ = 2 * centerZ - existingCZ;
-            const distToIdeal = Math.sqrt((itemCX - idealCX) ** 2 + (itemCZ - idealCZ) ** 2);
-            if (distToIdeal < 100) {
-                symmetryBonus = -800;  // 强力奖励对称放置
+        // 4. 对称性奖励
+        let symmetryScore = 0;
+        if (cfg.weights.symmetry > 0 && cfg.specialRules.enableSymmetry) {
+            if (layerItems.length === 1 && Math.abs(itemWeight - (layerItems[0].weight || 1)) < 0.1) {
+                const existing = layerItems[0];
+                const existingCX = existing.x + existing.w/2;
+                const existingCZ = existing.z + existing.d/2;
+                const idealCX = 2 * centerX - existingCX;
+                const idealCZ = 2 * centerZ - existingCZ;
+                const distToIdeal = Math.sqrt((itemCX - idealCX)**2 + (itemCZ - idealCZ)**2);
+                if (distToIdeal < 100) symmetryScore = -800 * cfg.weights.symmetry;
             }
         }
-        // 也可扩展：当层内已有多个工件时，检查候选能否形成左右/前后对称
-        // （简化实现，上述已覆盖最常见的对称场景）
 
-        return cgScore + centerDistScore + tightnessBonus + symmetryBonus;
+        // 5. 孤立惩罚（正权重惩罚孤立，负权重奖励孤立）
+        let isolationScore = 0;
+        if (cfg.weights.isolation !== 0) {
+            if (layerItems.length > 0) {
+                let minDistSq = Infinity;
+                for (const p of layerItems) {
+                    const dx = Math.max(0, Math.max(p.x - (testX + iw), testX - (p.x + p.w_algo)));
+                    const dz = Math.max(0, Math.max(p.z - (testZ + id_), testZ - (p.z + p.d_algo)));
+                    const distSq = dx*dx + dz*dz;
+                    if (distSq < minDistSq) minDistSq = distSq;
+                }
+                const rawIsolation = Math.min(Math.sqrt(minDistSq) / 2, 3000);
+                isolationScore = rawIsolation * cfg.weights.isolation; // 正权重→惩罚，负权重→奖励
+            }
+        }
+
+        // 6. 热场均匀度得分
+        let thermalScore = 0;
+        if (cfg.weights.thermalEvenness > 0) {
+            let penalty = 0;
+            if (cfg.specialRules.avoidCenterClustering) {
+                const distToCenter = Math.sqrt((itemCX - centerX)**2 + (itemCZ - centerZ)**2);
+                if (distToCenter < 200) penalty += 2000;
+            }
+            // 局部密度惩罚：半径300mm内已有工件数量
+            let localDensity = 0;
+            const radius = 300;
+            for (const p of layerItems) {
+                const pCX = p.x + p.w/2;
+                const pCZ = p.z + p.d/2;
+                const dx = pCX - itemCX, dz = pCZ - itemCZ;
+                if (Math.sqrt(dx*dx+dz*dz) < radius) localDensity++;
+            }
+            const maxAllowedDensity = cfg.specialRules.maxLocalDensity || 1.0;
+            if (localDensity / (layerItems.length + 1) > maxAllowedDensity) {
+                penalty += (localDensity / (layerItems.length + 1)) * 3000;
+            }
+            thermalScore = penalty * cfg.weights.thermalEvenness;
+        }
+
+        // 7. 表面均匀性得分（暴露面积、避免遮挡）
+        let surfaceScore = 0;
+        if (cfg.weights.surfaceExposure > 0) {
+            let exposure = 0;
+            // 到四壁距离（归一化）
+            const distLeft = testX;
+            const distRight = fw - (testX + iw);
+            const distFront = testZ;
+            const distBack = fd - (testZ + id_);
+            const minDistToWall = Math.min(distLeft, distRight, distFront, distBack);
+            exposure += minDistToWall / 100; // 距离越大暴露越好
+            // 遮挡惩罚：其他工件在Z轴方向遮挡气流路径（简化）
+            for (const p of layerItems) {
+                const pCX = p.x + p.w/2;
+                const pCZ = p.z + p.d/2;
+                const dz = Math.abs(pCZ - itemCZ);
+                const dx = Math.abs(pCX - itemCX);
+                if (dz < 50 && dx > iw) {
+                    exposure -= 2;
+                }
+            }
+            // 等壁距奖励
+            if (cfg.specialRules.equalWallDistance) {
+                const meanDist = (distLeft + distRight + distFront + distBack) / 4;
+                const variance = ((distLeft-meanDist)**2 + (distRight-meanDist)**2 + (distFront-meanDist)**2 + (distBack-meanDist)**2) / 4;
+                if (variance < 1000) exposure += 2; // 距离均匀
+            }
+            surfaceScore = -exposure * 500 * cfg.weights.surfaceExposure;
+        }
+
+        // 8. 四角均衡评分（基于包围盒距离 + 工件计数）
+        let cornerScore = 0;
+        if (cfg.weights.cornerSpread > 0) {
+            const fw = furnaceConfig.w;
+            const fd = furnaceConfig.d;
+            // 定义四个角坐标（左下、右下、左上、右上）
+            const corners = [
+                { x: 0, z: 0 },          // 左下
+                { x: fw, z: 0 },         // 右下
+                { x: 0, z: fd },         // 左上
+                { x: fw, z: fd }         // 右上
+            ];
+            
+            // 统计每个角附近已有的工件数量（基于包围盒边缘到角点的最小距离）
+            const cornerCounts = [0, 0, 0, 0];
+            const radius = 250; // 影响半径(mm)，可调
+            
+            for (const p of layerItems) {
+                const pLeft = p.x;
+                const pRight = p.x + p.w;
+                const pBottom = p.z;
+                const pTop = p.z + p.d;
+                for (let c = 0; c < corners.length; c++) {
+                    const cx = corners[c].x;
+                    const cz = corners[c].z;
+                    // 计算包围盒到角点的最小距离（XZ平面）
+                    const dx = Math.max(0, pLeft - cx, cx - pRight);
+                    const dz = Math.max(0, pBottom - cz, cz - pTop);
+                    const dist = Math.sqrt(dx*dx + dz*dz);
+                    if (dist < radius) {
+                        cornerCounts[c]++;
+                    }
+                }
+            }
+            
+            // 候选位置到四个角的距离（基于工件中心）
+            const candCenterX = testX + iw / 2;
+            const candCenterZ = testZ + id_ / 2;
+            let bestCornerReward = 0;
+            for (let c = 0; c < corners.length; c++) {
+                const dx = candCenterX - corners[c].x;
+                const dz = candCenterZ - corners[c].z;
+                const dist = Math.sqrt(dx*dx + dz*dz);
+                // 距离越近越好，该角已有工件越少越好
+                const proximity = Math.max(0, 1 - dist / 350); // 350mm内有效
+                const occupancyFactor = Math.max(0, 1 - cornerCounts[c] / (layerItems.length + 1));
+                const reward = proximity * occupancyFactor;
+                if (reward > bestCornerReward) bestCornerReward = reward;
+            }
+            // 奖励为负分，乘以权重（权重可调大）
+            cornerScore = -bestCornerReward * 1000 * cfg.weights.cornerSpread;
+        }
+
+        // 9. 间距惩罚（确保工件之间保持 targetSpacing）
+        let spacingPenalty = 0;
+        if (cfg.specialRules.targetSpacing && layerItems.length > 0) {
+            const target = cfg.specialRules.targetSpacing;
+            let minDistance = Infinity;
+            for (const p of layerItems) {
+                // 计算包围盒之间的最小平面距离（XZ平面）
+                const dx = Math.max(0, Math.max(p.x - (testX + iw), testX - (p.x + p.w)));
+                const dz = Math.max(0, Math.max(p.z - (testZ + id_), testZ - (p.z + p.d)));
+                const dist = Math.sqrt(dx*dx + dz*dz);
+                if (dist < minDistance) minDistance = dist;
+            }
+            if (minDistance < target) {
+                // 距离小于目标时，线性惩罚：缺多少就罚多少分（权重可调）
+                spacingPenalty = (target - minDistance) * 15;
+            }
+        }
+
+        // 10. 外层优先评分（奖励靠近炉壁的位置）
+        let layerScore = 0;
+        if (cfg.weights.layerPriority > 0) {
+            const fw = furnaceConfig.w;
+            const fd = furnaceConfig.d;
+            // 计算候选位置到最近炉壁的距离（X 方向和 Z 方向的最小值）
+            const distToLeft = testX;
+            const distToRight = fw - (testX + iw);
+            const distToFront = testZ;
+            const distToBack = fd - (testZ + id_);
+            const minDistToWall = Math.min(distToLeft, distToRight, distToFront, distToBack);
+            // 原始奖励：距离越小，奖励越大（负分）
+            let rawLayerReward = -minDistToWall;   // 例如距离 0 → 0 分，距离 100 → -100 分
+            // 工件数量衰减：已放置工件越多，外层优先级越低
+            let layerWeight = cfg.weights.layerPriority;
+            if (cfg.specialRules.layerDecayWithItems) {
+                const totalItems = layerItems.length;
+                const decay = Math.min(1, totalItems / 12); // 12 个工件后衰减至 0
+                layerWeight = layerWeight * Math.max(0, 1 - decay);
+            }
+            layerScore = rawLayerReward * layerWeight;
+        }
+
+        // 最后将 cornerScore 加入总分
+        return cgScore + centerDistScore + edgeScore + symmetryScore + isolationScore + thermalScore +
+            surfaceScore + cornerScore + spacingPenalty + layerScore;
     }
+
+    const currentStrategy = strategy;
 
     /**
      * 在当前层内使用重心居中找最佳XZ位置
@@ -1378,6 +1650,8 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
      */
     function findCGXZPlacement(itemW, itemD, itemWeight, layerItems, layerBaseY, itemShape) {
         const allowRotate = placementRules.rotate !== false;
+
+        // 内部可以用 currentStrategy
 
         // 生成朝向候选：[{w, d}]（原始尺寸，不含间距）
         const orientCandidates = [{ w: itemW, d: itemD }];
@@ -1470,9 +1744,12 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
                 }
                 if (belowCollision) continue;
 
+                // const score = useCG
+                //     ? scoreCGPlacement(cand.x, cand.z, iw, id_, itemWeight, layerItems, currentY)
+                //     : (cand.x + cand.z); // 无重心居中时用左上优先的贪心策略
                 const score = useCG
-                    ? scoreCGPlacement(cand.x, cand.z, iw, id_, itemWeight, layerItems, currentY)
-                    : (cand.x + cand.z); // 无重心居中时用左上优先的贪心策略
+                        ? computePlacementScore(cand.x, cand.z, iw, id_, itemWeight, layerItems, currentY, currentStrategy, furnaceConfig)
+                        : (cand.x + cand.z);
 
                 if (score < bestScore) {
                     bestScore = score;
@@ -1578,7 +1855,7 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
 /**
  * 统一多炉膛入口
  */
-function solveUnifiedMultiFurnace(furnacePoolInput, itemsInput, spacing) {
+function solveUnifiedMultiFurnace(furnacePoolInput, itemsInput, spacing, strategy = 'balanced') {
     let availableFurnaceInstances = [];
     furnacePoolInput.forEach(f => {
         for (let i = 0; i < f.count; i++) {
@@ -1624,7 +1901,7 @@ function solveUnifiedMultiFurnace(furnacePoolInput, itemsInput, spacing) {
     let completedFurnaces = [];
     for (let furnace of availableFurnaceInstances) {
         if (flattenedItems.length === 0) break;
-        const result = solveUnifiedPacking(flattenedItems, furnace, itemMaterialMap, itemProcessMap);
+        const result = solveUnifiedPacking(flattenedItems, furnace, itemMaterialMap, itemProcessMap, strategy);
         furnace.packedItems = result.packedItems;
         furnace.totalWeight = result.totalWeight;
         furnace.shelvesUsed = result.shelvesUsed || [];
@@ -1662,7 +1939,7 @@ function solveUnifiedMultiFurnace(furnacePoolInput, itemsInput, spacing) {
  * @param {number} spacing - 全局安全间距 (mm)
  * @returns {{ completedFurnaces: Array, unpackedItems: Array, aggregationStats: Object, groupingInfo: Object }}
  */
-export function executePacking(furnacePoolInput, itemsInput, spacing) {
+export function executePacking(furnacePoolInput, itemsInput, spacing, strategy = 'balanced') {
     const useShelf = placementRules.useShelfLayered;
     const useCG = placementRules.centerOfGravity;
 
@@ -1683,7 +1960,7 @@ export function executePacking(furnacePoolInput, itemsInput, spacing) {
         let result;
         if (useShelf || useCG) {
             // 统一嵌套算法 — 搁板控制Y分层，重心控制XZ落子
-            result = solveUnifiedMultiFurnace(furnacePoolInput, group.items, spacing);
+            result = solveUnifiedMultiFurnace(furnacePoolInput, group.items, spacing, strategy);
         } else {
             // 两者都OFF：使用旧版异构装炉
             result = solveHeterogeneousPacking(furnacePoolInput, group.items, spacing);

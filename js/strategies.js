@@ -18,6 +18,7 @@ export const strategyConfig = {
       edgeTouch: 0.4,         // 贴边/邻接奖励
       symmetry: 0.1,          // 对称性奖励
       isolation: 0,           // 孤立惩罚（不启用）
+      layerPriority: 0.4,       // 新增：外层优先权重
       thermalEvenness: 0,     // 热场均匀（不启用）
       surfaceExposure: 0      // 表面积暴露（不启用）
     },
@@ -27,29 +28,49 @@ export const strategyConfig = {
       maxCgWeightFactor: 0.4,         // 满载时重心权重最大0.4
       avoidCenterClustering: false,
       forceCompact: false,
-      maxLocalDensity: 1.0
+      maxLocalDensity: 1.0,
+      layerDecayWithItems: true  // 新增：工件越多，外层优先级衰减
     }
   },
 
-  [PackingStrategy.SPACE_UTIL]: {
-    name: '空间利用率优先',
-    description: '塞满炉子，忽略重心，强力贴边紧凑',
+  // [PackingStrategy.SPACE_UTIL]: {
+  //   name: '空间利用率优先',
+  //   description: '塞满炉子，忽略重心，强力贴边紧凑',
+  //   weights: {
+  //     cgDeviation: 0.05,
+  //     centerDistance: 0.05,
+  //     edgeTouch: 0.8,
+  //     symmetry: 0.1,
+  //     isolation: -0.2,        // 负权重 → 奖励孤立空隙填充
+  //     thermalEvenness: 0,
+  //     surfaceExposure: 0
+  //   },
+  //   specialRules: {
+  //     enableSymmetry: false,
+  //     dynamicCgWeight: false,
+  //     forceCompact: true,             // 额外奖励填充小间隙
+  //     allowAnyStacking: true,         // 允许垂直堆叠（评分辅助）
+  //     avoidCenterClustering: false,
+  //     maxLocalDensity: 1.0
+  //   }
+  // },
+    [PackingStrategy.SPACE_UTIL]: {
     weights: {
-      cgDeviation: 0.05,
-      centerDistance: 0.05,
-      edgeTouch: 0.8,
-      symmetry: 0.1,
-      isolation: -0.2,        // 负权重 → 奖励孤立空隙填充
-      thermalEvenness: 0,
-      surfaceExposure: 0
+      cgDeviation: 0,        // 完全忽略重心
+      centerDistance: 0,     // 忽略个体中心距离
+      edgeTouch: 0.6,        // 大幅提高贴边奖励权重（原0.8）
+      symmetry: 0,     // 不考虑对称性，允许不规则堆叠  
+      isolation: -0.5,       // 奖励孤立空隙（负权重，奖励填充）
+      thermalEvenness: 0.0,  // 不考虑热场均匀
+      surfaceExposure: 0,    // 不考虑表面暴露
+      cornerSpread: 1.5     // 新增角落分散奖励，鼓励填充角落（后续实现）
     },
     specialRules: {
       enableSymmetry: false,
       dynamicCgWeight: false,
-      forceCompact: true,             // 额外奖励填充小间隙
-      allowAnyStacking: true,         // 允许垂直堆叠（评分辅助）
-      avoidCenterClustering: false,
-      maxLocalDensity: 1.0
+      forceCompact: true,
+      // 还可以增加一个特殊系数，但非必须
+      maxLocalDensity: 0.2   // 局部密度超过20%即惩罚
     }
   },
 
@@ -57,19 +78,20 @@ export const strategyConfig = {
     name: '热场均衡装载',
     description: '温度均匀 + 气流均匀，避免中心聚集，控制局部密度',
     weights: {
-      cgDeviation: 0.1,
-      centerDistance: 0.2,
-      edgeTouch: 0.1,
+      cgDeviation: 0.05,
+      centerDistance: 0.1,
+      edgeTouch: 0.05,
       symmetry: 0.2,
-      isolation: 0.1,
-      thermalEvenness: 0.4,           // 新增热场均匀维度
+      isolation: 0.2,
+      thermalEvenness: 0.6,           // 新增热场均匀维度
       surfaceExposure: 0
     },
     specialRules: {
-      enableSymmetry: true,
+      enableSymmetry: false,
       dynamicCgWeight: false,
       avoidCenterClustering: true,    // 惩罚过于靠近中心
       maxLocalDensity: 0.4,           // 局部密度超过阈值惩罚
+      equalWallDistance:false,
       forceCompact: false
     }
   },

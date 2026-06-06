@@ -19,7 +19,8 @@
  */
 
 import {
-    globalFurnacesResult
+    globalFurnacesResult,
+    placementRules      // 从 state.js 导入装炉规则配置，包含当前选择的策略和相关参数
 } from './state.js';
 
 import {
@@ -384,6 +385,11 @@ function buildPage3_AIScoring(furnace, pdfWrapper, multiLabel) {
             <div class="pdf-ai-subtitle">装炉方案综合评估 · 炉次：${escapeHtml(furnace.instanceId)}</div>
         </div>
 
+        <!-- 装炉策略信息 -->
+        <div class="pdf-strategy-info" style="margin: 6px 0 8px 0; padding: 4px 8px; background: #f0f9ff; border-left: 4px solid #0891b2; border-radius: 4px; font-size: 10px; color: #0c4a6e;">
+            <strong>📐 装炉策略：</strong>${getStrategyDisplay().name} &nbsp;|&nbsp; ${getStrategyDisplay().desc}
+        </div>
+
         <div style="margin-bottom:24px;">
             <div style="font-size:15px;font-weight:bold;color:#1a1a1a;margin-bottom:14px;">装炉方案评估表</div>
             <table class="pdf-material-table">
@@ -441,11 +447,6 @@ function buildPage3_AIScoring(furnace, pdfWrapper, multiLabel) {
                 <span class="score-item-value" style="width:50px;">${weightUtil}%</span>
             </div>
         </div>
-
-        <div style="position:absolute;bottom:50px;left:40px;font-size:9px;color:#666;">
-            联系人: 影在科技.Charles
-        </div>
-
         <div class="pdf-page-footer">第 3 页 · AI 评分</div>
     `;
 
@@ -587,4 +588,30 @@ function escapeHtml(str) {
         .replace(/>/g, '>')
         .replace(/"/g, '"')
         .replace(/'/g, '&#39;');
+}
+
+/**
+ * 根据当前策略键返回显示名称和简短描述
+ */
+function getStrategyDisplay() {
+    const strategyKey = placementRules.strategy || 'balanced';
+    const strategyMap = {
+        balanced: {
+            name: '重心稳定 + 贴边对称',
+            desc: '由外向内逐层填充，对称分布，重心居中'
+        },
+        spaceUtil: {
+            name: '空间利用率优先',
+            desc: '塞满炉子，强力贴边紧凑，忽略重心'
+        },
+        thermalBalance: {
+            name: '热场均衡装载',
+            desc: '避免中心聚集，控制局部密度，温度均匀'
+        },
+        surfaceUniform: {
+            name: '表面均匀性优先',
+            desc: '最大暴露面积，避免遮挡，气流路径一致'
+        }
+    };
+    return strategyMap[strategyKey] || strategyMap.balanced;
 }

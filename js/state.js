@@ -112,6 +112,7 @@ export let placementRules = {
     sortStrategy: 'weight-desc',
     sameMaterial: false,
     sameProcess: false,
+    strategy: 'balanced',   // 新增
     /** --- 以下为面板中的有效参数 --- */
     minSpacing: 5,
     wallSpacing: 30,
@@ -262,7 +263,9 @@ export function setMdpCollapsed(v) { mdpCollapsed = v; }
 export function setSortState(v) { sortState = v; }
 export function setImportPreviewData(v) { importPreviewData = v; }
 export function setJiParsedData(v) { jiParsedData = v; }
-export function setPlacementRules(v) { placementRules = v; }
+export function setPlacementRules(v) {
+    placementRules = { ...placementRules, ...v };
+}
 export function setAggregationStats(v) { aggregationStats = v; }
 export function setGroupingInfo(v) { groupingInfo = v; }
 export function setCurrentBasketType(v) { currentBasketType = v; }
