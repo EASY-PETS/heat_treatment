@@ -46,7 +46,7 @@ import {
     setMainDirectionalLight,
     clearFurnaceGroups, setFurnaceGroup
 } from './state.js';
-import { createBasketFrame, createShelfMesh, TOOLING_TO_BASKET } from './basket-model.js';
+import { createBasketFrame, createShelfMesh, createEmptyTooling, TOOLING_TO_BASKET } from './basket-model.js';
 import { createItemMesh, createAnimItemMesh } from './item-models.js';
 
 const COLOR_PALETTE = [
@@ -1001,10 +1001,18 @@ function buildFurnaceGroup(furnace, index, filterMaterialName) {
     const fh = furnace.h;
     const fd = furnace.d;
 
-    // 料框框架 — 在原点，底部对齐 baseY
-    const basketType = furnace.basketType || 'grid';
-    const basketGroup = createBasketFrame(fw, fh, fd, 100, basketType);
-    // 料框局部坐标：原点 (0,0,0) 在 furnaceGroup 的 baseY 处
+    // 根据工装类型创建工装模型（支持夹具、环形工装、挂具等）
+    const toolingType = furnace.toolingType || 'standard-basket';
+    const toolingParams = furnace.params || {};   // 可包含 rodDiameter、ringCount 等
+    let basketGroup;
+    try {
+        basketGroup = createEmptyTooling(toolingType, fw, fh, fd, toolingParams);
+    } catch (e) {
+        console.warn('[buildFurnaceGroup] createEmptyTooling 失败，回退到 createBasketFrame:', e);
+        const basketType = furnace.basketType || 'grid';
+        basketGroup = createBasketFrame(fw, fh, fd, 100, basketType);
+    }
+    // 工装局部坐标：原点 (0,0,0) 在 furnaceGroup 的 baseY 处
     basketGroup.position.set(-fw / 2, baseY, -fd / 2);
     furnaceGroup.add(basketGroup);
 
@@ -1306,6 +1314,15 @@ export async function playLoadingAnimation() {
     const basketGroup = createBasketFrame(furnace.w, furnace.h, furnace.d, 100, basketType);
     basketGroup.position.set(-furnace.w / 2, baseY, -furnace.d / 2);
     itemsGroup.add(basketGroup);
+
+    // 如果是环形工装，将内部搁板信息同步到 furnace.params
+    if (toolingType === 'ring-tooling' && basketGroup.userData.shelves) {
+        furnace.params = furnace.params || {};
+        furnace.params.radialRadius = basketGroup.userData.radialRadius;
+        furnace.params.shelves = basketGroup.userData.shelves;
+        furnace.params.useInternalShelves = true;
+        furnace.params.isRadialTooling = true;
+    }
 
     const containerGeo = new THREE.BoxGeometry(furnace.w, furnace.h, furnace.d);
     const containerLine = new THREE.LineSegments(

@@ -1139,6 +1139,44 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
     const centerX = fw / 2;
     const centerZ = fd / 2;
 
+    // 检测是否为环形工装，并获取内置搁板
+    const toolingType = furnaceConfig.toolingType;
+    const toolingParams = furnaceConfig.params || {};
+    const isRadialTooling = (toolingType === 'ring-tooling') && toolingParams.useInternalShelves;
+    let radialRadius = null;
+    let internalShelves = [];
+    if (isRadialTooling) {
+        radialRadius = toolingParams.radialRadius;
+        internalShelves = toolingParams.shelves || [];
+        // 按 Y 坐标排序（升序）
+        internalShelves.sort((a, b) => a.y - b.y);
+    }
+
+    // 根据工装类型生成内部障碍物（AABB）
+    const toolingObstacles = [];
+    if (toolingType === 'ring-tooling') {
+        const rodDiameter = toolingParams.rodDiameter || 40;
+        const rodRadius = rodDiameter / 2;
+        toolingObstacles.push({
+            min: { x: centerX - rodRadius, y: 0, z: centerZ - rodRadius },
+            max: { x: centerX + rodRadius, y: fh, z: centerZ + rodRadius }
+        });
+    } else if (toolingType === 'special-jig') {
+        const rodDiameter = toolingParams.rodDiameter || 10;
+        const rodRadius = rodDiameter / 2;
+        const rodPositions = [
+            { x: fw * 0.25, z: fd * 0.25 }, { x: fw * 0.5, z: fd * 0.25 }, { x: fw * 0.75, z: fd * 0.25 },
+            { x: fw * 0.25, z: fd * 0.5  }, { x: fw * 0.75, z: fd * 0.5  },
+            { x: fw * 0.25, z: fd * 0.75 }, { x: fw * 0.5, z: fd * 0.75 }, { x: fw * 0.75, z: fd * 0.75 }
+        ];
+        rodPositions.forEach(pos => {
+            toolingObstacles.push({
+                min: { x: pos.x - rodRadius, y: 0, z: pos.z - rodRadius },
+                max: { x: pos.x + rodRadius, y: fh, z: pos.z + rodRadius }
+            });
+        });
+    }
+
     // 🔧 V2.6: 全局重量降序排序 — 重物优先放在底层，确保物理稳定性
     const remainingItems = [...items].sort((a, b) => b.weight - a.weight);
 
@@ -1571,7 +1609,7 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
      * @returns {{ x: number, z: number, w: number, d: number } | null}
      *          w/d 为选中的原始尺寸（若旋转则已交换）
      */
-    function findCGXZPlacement(itemW, itemD, itemWeight, layerItems, layerBaseY, itemShape) {
+    function findCGXZPlacement(itemW, itemD, itemWeight, layerItems, layerBaseY, itemShape, itemHeightWithSpacing) {
         const allowRotate = placementRules.rotate !== false;
 
         // 内部可以用 currentStrategy
@@ -1666,6 +1704,39 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
                     }
                 }
                 if (belowCollision) continue;
+                
+                // 环形工装圆形边界检查
+                if (isRadialTooling && radialRadius) {
+                    // 检查工件四个角点是否都在圆内
+                    const corners = [
+                        { x: cand.x, z: cand.z },
+                        { x: cand.x + iw, z: cand.z },
+                        { x: cand.x, z: cand.z + id_ },
+                        { x: cand.x + iw, z: cand.z + id_ }
+                    ];
+                    let outside = false;
+                    for (const corner of corners) {
+                        const dx = corner.x - centerX;
+                        const dz = corner.z - centerZ;
+                        if (Math.hypot(dx, dz) > radialRadius) {
+                            outside = true;
+                            break;
+                        }
+                    }
+                    if (outside) continue;
+                }
+
+                // 与工装内部障碍物碰撞检测
+                let obstacleCollision = false;
+                for (const obs of toolingObstacles) {
+                    if (cand.x + iw > obs.min.x && cand.x < obs.max.x &&
+                        currentY + itemHeightWithSpacing > obs.min.y && currentY < obs.max.y &&
+                        cand.z + id_ > obs.min.z && cand.z < obs.max.z) {
+                        obstacleCollision = true;
+                        break;
+                    }
+                }
+                if (obstacleCollision) continue;
 
                 // const score = useCG
                 //     ? scoreCGPlacement(cand.x, cand.z, iw, id_, itemWeight, layerItems, currentY)
@@ -1707,7 +1778,7 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
             if (item.w > fw || item.h > fh || item.d > fd) continue;
 
             // 找最佳 XZ 位置（V4.7: 传入原始尺寸，返回含旋转后的 w/d）
-            const placement = findCGXZPlacement(item.w, item.d, item.weight, layerItems, currentY, item.shape);
+            const placement = findCGXZPlacement(item.w, item.d, item.weight, layerItems, currentY, item.shape, ih);
             if (placement !== null) {
                 // V4.7: 使用 placement 返回的旋转后尺寸
                 const finalW = placement.w;
@@ -1744,22 +1815,46 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
         }
 
         // ===== 搁板逻辑（仅当开启搁板分层时）=====
-        if (useShelf) {
-            const effectiveHeight = maxItemHeight > 0 ? maxItemHeight : 1;
-            const shelfY = currentY + effectiveHeight;
-
-            if (shelfY + shelfThickness < fh) {
-                shelvesUsed.push({ y: shelfY, thickness: shelfThickness });
-                currentY = shelfY + shelfThickness;
+        // ===== 搁板逻辑（环形工装使用内置搁板，否则使用通用逻辑）=====
+        if (isRadialTooling && internalShelves.length > 0) {
+            // 找到第一个未使用的搁板（Y 坐标大于当前 currentY）
+            let nextShelf = null;
+            for (let s of internalShelves) {
+                if (s.y > currentY) {
+                    nextShelf = s;
+                    break;
+                }
+            }
+            if (nextShelf) {
+                // 直接跳转到该搁板的上表面（工件放置在该高度）
+                currentY = nextShelf.y;
+                // 记录已使用的搁板（用于输出）
+                if (!shelvesUsed.find(s => Math.abs(s.y - nextShelf.y) < 0.5)) {
+                    shelvesUsed.push({ y: nextShelf.y, thickness: nextShelf.thickness });
+                }
             } else {
-                currentY = shelfY;
+                // 没有更多搁板，停止装料
+                unpacked.push(...remainingItems);
+                remainingItems.length = 0;
+                break;
             }
         } else {
-            // 未开启搁板分层：仅允许底面平铺一层，不允许多层堆叠
-            // 将剩余工件标记为未装炉并退出主循环
-            unpacked.push(...remainingItems);
-            remainingItems.length = 0;
-            break;
+            // 通用搁板逻辑
+            if (useShelf) {
+                const effectiveHeight = maxItemHeight > 0 ? maxItemHeight : 1;
+                const shelfY = currentY + effectiveHeight;
+                if (shelfY + shelfThickness < fh) {
+                    shelvesUsed.push({ y: shelfY, thickness: shelfThickness });
+                    currentY = shelfY + shelfThickness;
+                } else {
+                    currentY = shelfY;
+                }
+            } else {
+                // 未开启搁板分层：仅允许底面平铺一层
+                unpacked.push(...remainingItems);
+                remainingItems.length = 0;
+                break;
+            }
         }
 
         // 重量上限检查
@@ -1870,6 +1965,9 @@ function solveUnifiedMultiFurnace(furnacePoolInput, itemsInput, spacing, strateg
 export function executePacking(furnacePoolInput, itemsInput, spacing, strategy = 'balanced') {
     const useShelf = placementRules.useShelfLayered;
     const useCG = placementRules.centerOfGravity;
+
+    // 确保 strategy 有效
+    if (!strategy || !strategyConfig[strategy]) strategy = 'balanced';
 
     // Step 1: 读取分组规则配置
     const groupingRules = getGroupingRules();

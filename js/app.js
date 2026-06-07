@@ -20,6 +20,7 @@ import {
     defaultToolingType, furnaceTooling, toolingTemplates,
     setAnimPaused, setAnimStopped, setCurrentFurnaceIndex,
     setFdpCollapsed, setMdpCollapsed,
+    placementRules,   // 新增导入
     setGlobalFurnacesResult, setGlobalUnpackedItems, setGlobalSpacingValue,
     setCurrentBasketType, setDisplaySettings, setDefaultToolingType,
     clearFurnaceGroups
@@ -64,6 +65,29 @@ function executeAndRender() {
     let furnacePoolInput = [];
     document.querySelectorAll(".furnace-card").forEach(card => {
         const d = getFurnaceDataFromCard(card);
+        // 从卡片读取工装参数
+        const extrasStr = card.getAttribute('data-extras');
+        const toolingParams = extrasStr ? JSON.parse(extrasStr) : {};        
+
+        // ========== 环形工装：自动生成半径和搁板信息 ==========
+        if (d.toolingType === 'ring-tooling') {
+            const outerRadius = Math.min(d.width, d.depth) / 2 - 30;
+            const discCount = toolingParams.ringCount || 3;
+            const shelves = [];
+            // 底部圆盘（Y=0）
+            shelves.push({ y: 0, thickness: 5, radius: outerRadius });
+            // 上方圆盘
+            for (let i = 0; i < discCount; i++) {
+                const discY = d.height * (i + 1) / (discCount + 1);
+                shelves.push({ y: discY, thickness: 5, radius: outerRadius });
+            }
+            toolingParams.radialRadius = outerRadius;
+            toolingParams.shelves = shelves;
+            toolingParams.useInternalShelves = true;
+            toolingParams.isRadialTooling = true;
+        }
+        // ====================================================
+
         furnacePoolInput.push({
             name: d.name, count: d.count,
             width: d.width, height: d.height, depth: d.depth,
@@ -73,7 +97,8 @@ function executeAndRender() {
             toolingType: d.toolingType || defaultToolingType,
             maxLayers: d.maxLayers || 5,
             allowedProcesses: d.allowedProcesses || "",
-            placementMode: d.placementMode || "free"
+            placementMode: d.placementMode || "free",
+            params: toolingParams   // 新增
         });
     });
     let itemsInput = [];
@@ -96,7 +121,8 @@ function executeAndRender() {
      * V2.7: 执行装炉算法
      * 移除 xOffset 计算 — 所有炉膛在原点渲染
      */
-    const result = executePacking(furnacePoolInput, itemsInput, spacing);
+    const strategy = placementRules.strategy || 'balanced';
+    const result = executePacking(furnacePoolInput, itemsInput, spacing, strategy);
 
     setGlobalFurnacesResult(result.completedFurnaces);
     setGlobalUnpackedItems(result.unpackedItems);
@@ -191,9 +217,14 @@ function hideExplodeBOMButtons() {
  */
 function navigateFurnace(direction) {
     if (!globalFurnacesResult || globalFurnacesResult.length === 0) return;
-    const newIndex = (currentFurnaceIndex + direction + globalFurnacesResult.length) %
-        globalFurnacesResult.length;
+    const newIndex = (currentFurnaceIndex + direction + globalFurnacesResult.length) % globalFurnacesResult.length;
     setCurrentFurnaceIndex(newIndex);
+    // 移动相机到对应炉膛的位置
+    const group = furnaceGroups.get(newIndex);
+    if (group) {
+        controls.target.copy(group.position);
+        controls.update();
+    }
     const filterName = getSelectedMaterialName();
     renderSingleFurnace(newIndex, filterName);
     updateFurnaceNav();
@@ -256,9 +287,6 @@ function hideMasterView() {
  */
 function init() {
     initThree();
-
-    createFurnaceCard("标准料框（小型）", 600, 900, 600, 500, 1, 0, null, "grid");
-    createFurnaceCard("标准料框（大型）", 900, 1200, 900, 1000, 1, 0, null, "grid");
     updateTopSummary();
     hideExplodeBOMButtons();
 
@@ -720,12 +748,12 @@ const TOOLING_ICONS = {
  * 工装类型对应的默认尺寸预设
  */
 const TOOLING_DEFAULT_DIMS = {
-    'standard-basket': { name: '标准料框', width: 900, height: 1200, depth: 900, maxWeight: 1000 },
-    'mesh-basket': { name: '网篮', width: 800, height: 1000, depth: 800, maxWeight: 500 },
-    'special-jig': { name: '专用夹具', width: 600, height: 600, depth: 600, maxWeight: 800 },
-    'material-tray': { name: '料盘', width: 1000, height: 200, depth: 800, maxWeight: 300 },
-    'hanger': { name: '挂具', width: 600, height: 1500, depth: 600, maxWeight: 200 },
-    'ring-tooling': { name: '环形工装', width: 900, height: 900, depth: 900, maxWeight: 600 }
+    'standard-basket': { name: '标准料框', width: 900, height: 900, depth: 1200, maxWeight: 1000 },
+    'mesh-basket': { name: '网篮', width: 800, height: 300, depth: 800, maxWeight: 500 },
+    'special-jig': { name: '专用夹具', width: 600, height: 400, depth: 900, maxWeight: 500 },
+    'material-tray': { name: '料盘', width: 900, height: 900, depth: 1200, maxWeight: 1000 },
+    'hanger': { name: '挂具', width: 600, height: 600, depth: 900, maxWeight: 500 },
+    'ring-tooling': { name: '环形工装', width: 900, height: 900, depth: 900, maxWeight: 500 }
 };
 
 /**

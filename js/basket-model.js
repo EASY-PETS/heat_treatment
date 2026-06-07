@@ -894,3 +894,297 @@ export function createShelfMesh(w, d, thickness) {
     mesh.userData = { isShelfMesh: true };
     return mesh;
 }
+
+// ==================== TOOLING: STANDARD BASKET (V5.0) ====================
+
+function createStandardBasketTooling(w, h, d, extras = {}) {
+    const group = new THREE.Group();
+    const frameRadius = 5;
+    const gridRadius = 2;
+    const gridSize = 100;
+
+    const frameMaterial = new THREE.MeshStandardMaterial({
+        color: 0x445566,
+        roughness: 0.5,
+        metalness: 0.85,
+        transparent: true,
+        opacity: 0.75,
+        depthWrite: true
+    });
+
+    const gridMaterial = new THREE.MeshStandardMaterial({
+        color: 0x334455,
+        roughness: 0.55,
+        metalness: 0.8,
+        transparent: true,
+        opacity: 0.55,
+        depthWrite: true
+    });
+
+    // 使用已存在的 createGridFacePanel（需要您确认该函数在文件内已定义，根据您的文件内容，它确实存在）
+    group.add(createGridFacePanel('bottom', w, h, d, gridSize, frameRadius, frameMaterial, gridRadius, gridMaterial));
+    group.add(createGridFacePanel('front', w, h, d, gridSize, frameRadius, frameMaterial, gridRadius, gridMaterial));
+    group.add(createGridFacePanel('back', w, h, d, gridSize, frameRadius, frameMaterial, gridRadius, gridMaterial));
+    group.add(createGridFacePanel('left', w, h, d, gridSize, frameRadius, frameMaterial, gridRadius, gridMaterial));
+    group.add(createGridFacePanel('right', w, h, d, gridSize, frameRadius, frameMaterial, gridRadius, gridMaterial));
+
+    const topCorners = [
+        new THREE.Vector3(0, h, 0), new THREE.Vector3(w, h, 0),
+        new THREE.Vector3(w, h, d), new THREE.Vector3(0, h, d)
+    ];
+    for (let i = 0; i < 4; i++) {
+        group.add(createBar(topCorners[i], topCorners[(i + 1) % 4], frameRadius, frameMaterial));
+    }
+
+    function edge(x1, y1, z1, x2, y2, z2) {
+        return createBar(new THREE.Vector3(x1, y1, z1), new THREE.Vector3(x2, y2, z2), frameRadius, frameMaterial);
+    }
+    group.add(edge(0, 0, 0, 0, h, 0));
+    group.add(edge(w, 0, 0, w, h, 0));
+    group.add(edge(w, 0, d, w, h, d));
+    group.add(edge(0, 0, d, 0, h, d));
+
+    group.userData = { toolingType: 'standard-basket', isTooling: true };
+    return group;
+}
+
+function createGridBasketTooling(w, h, d, extras = {}) {
+    return createHoneycombBasketFrame(w, h, d);
+}
+
+function createMaterialTrayTooling(w, h, d, extras = {}) {
+    const group = new THREE.Group();
+    const baseThickness = 8;
+    const trayMaterial = new THREE.MeshStandardMaterial({ color: 0x667788, roughness: 0.45, metalness: 0.8, transparent: true, opacity: 0.7, depthWrite: true });
+    const lipMaterial = new THREE.MeshStandardMaterial({ color: 0x556677, roughness: 0.5, metalness: 0.85, transparent: true, opacity: 0.75, depthWrite: true });
+    const hexMaterial = new THREE.MeshStandardMaterial({ color: 0x556677, roughness: 0.55, metalness: 0.7, transparent: true, opacity: 0.6, depthWrite: true });
+
+    const bottomGeo = new THREE.BoxGeometry(w, baseThickness, d);
+    const bottomMesh = new THREE.Mesh(bottomGeo, trayMaterial);
+    bottomMesh.position.set(w / 2, baseThickness / 2, d / 2);
+    group.add(bottomMesh);
+    group.add(createHoneycombPanel('bottom', w, baseThickness, d, hexMaterial));
+
+    const lipRadius = 4;
+    group.add(createBar(new THREE.Vector3(0, baseThickness, d), new THREE.Vector3(w, baseThickness, d), lipRadius, lipMaterial));
+    group.add(createBar(new THREE.Vector3(0, baseThickness, 0), new THREE.Vector3(w, baseThickness, 0), lipRadius, lipMaterial));
+    group.add(createBar(new THREE.Vector3(0, baseThickness, 0), new THREE.Vector3(0, baseThickness, d), lipRadius, lipMaterial));
+    group.add(createBar(new THREE.Vector3(w, baseThickness, 0), new THREE.Vector3(w, baseThickness, d), lipRadius, lipMaterial));
+
+    const baseFrameR = 3;
+    group.add(createBar(new THREE.Vector3(0, 0, 0), new THREE.Vector3(w, 0, 0), baseFrameR, lipMaterial));
+    group.add(createBar(new THREE.Vector3(w, 0, 0), new THREE.Vector3(w, 0, d), baseFrameR, lipMaterial));
+    group.add(createBar(new THREE.Vector3(w, 0, d), new THREE.Vector3(0, 0, d), baseFrameR, lipMaterial));
+    group.add(createBar(new THREE.Vector3(0, 0, d), new THREE.Vector3(0, 0, 0), baseFrameR, lipMaterial));
+
+    group.userData = { toolingType: 'material-tray', isTooling: true };
+    return group;
+}
+
+function createSpecialJigTooling(w, h, d, extras = {}) {
+    const group = new THREE.Group();
+    const frameRadius = 5;
+    const rodDiameter = extras.rodDiameter || 10;
+    const rodRadius = rodDiameter / 2;
+    const frameMaterial = new THREE.MeshStandardMaterial({ color: 0x445566, roughness: 0.5, metalness: 0.85, transparent: true, opacity: 0.75, depthWrite: true });
+    const rodMaterial = new THREE.MeshStandardMaterial({ color: 0x556677, roughness: 0.45, metalness: 0.8, transparent: true, opacity: 0.7, depthWrite: true });
+    const hexMaterial = new THREE.MeshStandardMaterial({ color: 0x556677, roughness: 0.55, metalness: 0.7, transparent: true, opacity: 0.6, depthWrite: true });
+
+    function edge(x1, y1, z1, x2, y2, z2) {
+        return createBar(new THREE.Vector3(x1, y1, z1), new THREE.Vector3(x2, y2, z2), frameRadius, frameMaterial);
+    }
+    group.add(edge(0, 0, 0, w, 0, 0));
+    group.add(edge(w, 0, 0, w, 0, d));
+    group.add(edge(w, 0, d, 0, 0, d));
+    group.add(edge(0, 0, d, 0, 0, 0));
+    group.add(edge(0, h, 0, w, h, 0));
+    group.add(edge(w, h, 0, w, h, d));
+    group.add(edge(w, h, d, 0, h, d));
+    group.add(edge(0, h, d, 0, h, 0));
+    group.add(edge(0, 0, 0, 0, h, 0));
+    group.add(edge(w, 0, 0, w, h, 0));
+    group.add(edge(w, 0, d, w, h, d));
+    group.add(edge(0, 0, d, 0, h, d));
+    group.add(createHoneycombPanel('bottom', w, h, d, hexMaterial));
+
+    const rodPositions = [
+        { x: w * 0.25, z: d * 0.25 }, { x: w * 0.5, z: d * 0.25 }, { x: w * 0.75, z: d * 0.25 },
+        { x: w * 0.25, z: d * 0.5  }, { x: w * 0.75, z: d * 0.5  },
+        { x: w * 0.25, z: d * 0.75 }, { x: w * 0.5, z: d * 0.75 }, { x: w * 0.75, z: d * 0.75 }
+    ];
+    rodPositions.forEach(pos => {
+        const rodGeo = new THREE.CylinderGeometry(rodRadius, rodRadius, h, 16);
+        const rodMesh = new THREE.Mesh(rodGeo, rodMaterial);
+        rodMesh.position.set(pos.x, h / 2, pos.z);
+        group.add(rodMesh);
+    });
+
+    group.userData = { toolingType: 'special-jig', isTooling: true };
+    return group;
+}
+
+function createRingToolingTooling(w, h, d, extras = {}) {
+    const group = new THREE.Group();
+    const centerX = w / 2;
+    const centerZ = d / 2;
+    const outerRadius = Math.min(w, d) / 2 - 30;
+    const tubeRadius = 8;
+    const rodDiameter = extras.rodDiameter || 40;
+    const rodRadius = rodDiameter / 2;
+    const discCount = extras.ringCount || 3;
+
+    const ringMaterial = new THREE.MeshStandardMaterial({ color: 0x667788, roughness: 0.5, metalness: 0.75, transparent: true, opacity: 0.7, depthWrite: true });
+    const rodMaterial = new THREE.MeshStandardMaterial({ color: 0x556677, roughness: 0.45, metalness: 0.8, transparent: true, opacity: 0.7, depthWrite: true });
+    const hexMaterial = new THREE.MeshStandardMaterial({ color: 0x556677, roughness: 0.55, metalness: 0.7, transparent: true, opacity: 0.6, depthWrite: true });
+
+    const hexGeo = getHollowHexagonGeometry();
+    const outerR = HEX_OUTER_RADIUS;
+    const colSpacing = (outerR * 2) * 0.75;
+    const rowSpacing = outerR * Math.sqrt(3);
+
+    const safetyMargin = outerR + 5;
+    const availSize = outerRadius * 2 - 2 * safetyMargin;
+    let cols = Math.floor(availSize / colSpacing) + 1;
+    let rows = Math.floor((availSize - (cols > 1 ? rowSpacing / 2 : 0)) / rowSpacing) + 1;
+    cols = Math.max(1, cols); rows = Math.max(1, rows);
+    const totalGridW = (cols - 1) * colSpacing;
+    const totalGridH = (rows - 1) * rowSpacing + (cols > 1 ? rowSpacing / 2 : 0);
+
+    const hexMesh = new THREE.InstancedMesh(hexGeo.clone(), hexMaterial, cols * rows);
+    const dummy = new THREE.Object3D();
+    let idx = 0;
+    const clipRadius = outerRadius - safetyMargin;
+    for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+            const u = -totalGridW / 2 + col * colSpacing;
+            const v = -totalGridH / 2 + row * rowSpacing + (col % 2) * rowSpacing / 2;
+            if (Math.hypot(u, v) > clipRadius) continue;
+            dummy.position.set(centerX + u, 0, centerZ + v);
+            dummy.rotation.set(-Math.PI / 2, 0, 0);
+            dummy.updateMatrix();
+            hexMesh.setMatrixAt(idx++, dummy.matrix);
+        }
+    }
+    hexMesh.count = idx;
+    group.add(hexMesh);
+
+    const rodGeo = new THREE.CylinderGeometry(rodRadius, rodRadius, h, 16);
+    const rodMesh = new THREE.Mesh(rodGeo, rodMaterial);
+    rodMesh.position.set(centerX, h / 2, centerZ);
+    group.add(rodMesh);
+
+    for (let i = 0; i < discCount; i++) {
+        const discY = h * (i + 1) / (discCount + 1);
+        const discHexMesh = new THREE.InstancedMesh(hexGeo.clone(), hexMaterial, cols * rows);
+        let discIdx = 0;
+        for (let row = 0; row < rows; row++) {
+            for (let col = 0; col < cols; col++) {
+                const u = -totalGridW / 2 + col * colSpacing;
+                const v = -totalGridH / 2 + row * rowSpacing + (col % 2) * rowSpacing / 2;
+                if (Math.hypot(u, v) > clipRadius) continue;
+                dummy.position.set(centerX + u, discY, centerZ + v);
+                dummy.rotation.set(-Math.PI / 2, 0, 0);
+                dummy.updateMatrix();
+                discHexMesh.setMatrixAt(discIdx++, dummy.matrix);
+            }
+        }
+        discHexMesh.count = discIdx;
+        group.add(discHexMesh);
+        const outerRing = new THREE.Mesh(new THREE.TorusGeometry(outerRadius, tubeRadius, 16, 64), ringMaterial);
+        outerRing.position.set(centerX, discY, centerZ);
+        outerRing.rotation.x = Math.PI / 2;
+        group.add(outerRing);
+    }
+
+    const bottomRing = new THREE.Mesh(new THREE.TorusGeometry(outerRadius, 3, 8, 64), ringMaterial);
+    bottomRing.position.set(centerX, 5, centerZ);
+    bottomRing.rotation.x = Math.PI / 2;
+    group.add(bottomRing);
+
+    // group.userData = { toolingType: 'ring-tooling', isTooling: true };
+    // 收集圆盘搁板信息
+    const shelves = [];
+    // 底部圆盘（Y=0）也视为一个搁板
+    shelves.push({ y: 0, thickness: 5, radius: outerRadius });
+    for (let i = 0; i < discCount; i++) {
+        const discY = h * (i + 1) / (discCount + 1);
+        shelves.push({ y: discY, thickness: 5, radius: outerRadius });
+    }
+    group.userData = {
+        toolingType: 'ring-tooling',
+        isTooling: true,
+        radialRadius: outerRadius,      // 有效半径
+        shelves: shelves,               // 内置搁板列表
+        useInternalShelves: true        // 标记使用内置搁板
+    };
+    return group;
+}
+
+function createMeshBasketTooling(w, h, d, extras = {}) {
+    const group = createHoneycombBasketFrame(w, h, d);
+    group.userData = { toolingType: 'mesh-basket', isTooling: true };
+    return group;
+}
+
+function createHangerTooling(w, h, d, extras = {}) {
+    const group = new THREE.Group();
+    const frameMaterial = new THREE.MeshStandardMaterial({ color: 0x886644, roughness: 0.5, metalness: 0.7, transparent: true, opacity: 0.6 });
+    const hookMaterial = new THREE.MeshStandardMaterial({ color: 0x665533, roughness: 0.55, metalness: 0.75, transparent: true, opacity: 0.5 });
+    const hexMaterial = new THREE.MeshStandardMaterial({ color: 0x887766, roughness: 0.55, metalness: 0.65, transparent: true, opacity: 0.5, depthWrite: true });
+
+    group.add(createBar(new THREE.Vector3(0, h, d / 2), new THREE.Vector3(w, h, d / 2), 6, frameMaterial));
+    group.add(createBar(new THREE.Vector3(0, 0, d / 2), new THREE.Vector3(w, 0, d / 2), 6, frameMaterial));
+    const hookSpacing = extras.hookSpacing || 80;
+    for (let x = hookSpacing; x < w; x += hookSpacing) {
+        group.add(createBar(new THREE.Vector3(x, h, d / 2), new THREE.Vector3(x, 0, d / 2), 3, hookMaterial));
+    }
+    group.add(createHoneycombPanel('bottom', w, h, d, hexMaterial));
+    group.userData = { toolingType: 'hanger', isTooling: true };
+    return group;
+}
+
+function createStackedBasket(type, w, h, d, count, extras = {}) {
+    const group = new THREE.Group();
+    const layers = Math.min(Math.max(1, count), 6);
+    const createSingle = () => createHoneycombBasketFrame(w, h, d);
+    for (let i = 0; i < layers; i++) {
+        const basket = createSingle();
+        basket.position.y = i * h;
+        group.add(basket);
+    }
+    group.userData = { toolingType: type, isTooling: true, stacked: true, layerCount: layers, singleHeight: h, totalHeight: layers * h };
+    return group;
+}
+
+/**
+ * 工装空壳模型工厂方法 — 根据工装类型创建空工装 3D 模型
+ * @param {string} type - 工装类型标识符
+ * @param {number} width - 宽度 (mm)
+ * @param {number} height - 高度 (mm)
+ * @param {number} depth - 深度 (mm)
+ * @param {Object} [extras={}] - 工装专属参数
+ * @returns {THREE.Group}
+ */
+export function createEmptyTooling(type, width, height, depth, extras = {}) {
+    switch (type) {
+        case 'standard-basket':
+            return createStandardBasketTooling(width, height, depth, extras);
+        case 'grid-basket':
+            if (extras.basketCount && extras.basketCount > 1) return createStackedBasket(type, width, height, depth, extras.basketCount, extras);
+            return createGridBasketTooling(width, height, depth, extras);
+        case 'mesh-basket':
+            if (extras.basketCount && extras.basketCount > 1) return createStackedBasket(type, width, height, depth, extras.basketCount, extras);
+            return createGridBasketTooling(width, height, depth, extras);
+        case 'material-tray':
+            return createMaterialTrayTooling(width, height, depth, extras);
+        case 'special-jig':
+            return createSpecialJigTooling(width, height, depth, extras);
+        case 'ring-tooling':
+            return createRingToolingTooling(width, height, depth, extras);
+        case 'hanger':
+            return createHangerTooling(width, height, depth, extras);
+        default:
+            console.warn(`[createEmptyTooling] 未知工装类型 "${type}"，回退到标准料框`);
+            return createStandardBasketTooling(width, height, depth, extras);
+    }
+}
