@@ -895,6 +895,111 @@ export function createShelfMesh(w, d, thickness) {
     return mesh;
 }
 
+// ==================== GRID FACE PANEL HELPER ====================
+
+/**
+ * 创建单个网格面板 — 用于标准料框的五个面（底、前、后、左、右）
+ * @param {string} faceType - 'bottom'|'front'|'back'|'left'|'right'
+ * @param {number} w - 宽度
+ * @param {number} h - 高度
+ * @param {number} d - 深度
+ * @param {number} gridSize - 网格间距 (mm)
+ * @param {number} frameRadius - 边框钢筋半径
+ * @param {THREE.Material} frameMaterial - 边框材质
+ * @param {number} gridRadius - 内部网格钢筋半径
+ * @param {THREE.Material} gridMaterial - 网格材质
+ * @returns {THREE.Group}
+ */
+function createGridFacePanel(faceType, w, h, d, gridSize, frameRadius, frameMaterial, gridRadius, gridMaterial) {
+    const group = new THREE.Group();
+
+    // 定义每个面的四个角点
+    let corners;
+    switch (faceType) {
+        case 'bottom':
+            corners = [
+                new THREE.Vector3(0, 0, 0),
+                new THREE.Vector3(w, 0, 0),
+                new THREE.Vector3(w, 0, d),
+                new THREE.Vector3(0, 0, d)
+            ];
+            break;
+        case 'front':
+            corners = [
+                new THREE.Vector3(0, 0, 0),
+                new THREE.Vector3(w, 0, 0),
+                new THREE.Vector3(w, h, 0),
+                new THREE.Vector3(0, h, 0)
+            ];
+            break;
+        case 'back':
+            corners = [
+                new THREE.Vector3(0, 0, d),
+                new THREE.Vector3(w, 0, d),
+                new THREE.Vector3(w, h, d),
+                new THREE.Vector3(0, h, d)
+            ];
+            break;
+        case 'left':
+            corners = [
+                new THREE.Vector3(0, 0, 0),
+                new THREE.Vector3(0, 0, d),
+                new THREE.Vector3(0, h, d),
+                new THREE.Vector3(0, h, 0)
+            ];
+            break;
+        case 'right':
+            corners = [
+                new THREE.Vector3(w, 0, 0),
+                new THREE.Vector3(w, 0, d),
+                new THREE.Vector3(w, h, d),
+                new THREE.Vector3(w, h, 0)
+            ];
+            break;
+        default:
+            return group;
+    }
+
+    // 四边外框
+    for (let i = 0; i < 4; i++) {
+        group.add(createBar(corners[i], corners[(i + 1) % 4], frameRadius, frameMaterial));
+    }
+
+    // 计算面内方向向量
+    const uDir = new THREE.Vector3().subVectors(corners[1], corners[0]); // 水平方向 (c0→c1)
+    const vDir = new THREE.Vector3().subVectors(corners[3], corners[0]); // 垂直方向 (c0→c3)
+    const uLen = uDir.length();
+    const vLen = vDir.length();
+    uDir.normalize();
+    vDir.normalize();
+
+    const origin = corners[0];
+
+    // 沿 v 方向的水平网格线
+    {
+        let v = gridSize;
+        while (v < vLen) {
+            const start = origin.clone().add(vDir.clone().multiplyScalar(v));
+            const end = start.clone().add(uDir.clone().multiplyScalar(uLen));
+            group.add(createBar(start, end, gridRadius, gridMaterial));
+            v += gridSize;
+        }
+    }
+
+    // 沿 u 方向的垂直网格线
+    {
+        let u = gridSize;
+        while (u < uLen) {
+            const start = origin.clone().add(uDir.clone().multiplyScalar(u));
+            const end = start.clone().add(vDir.clone().multiplyScalar(vLen));
+            group.add(createBar(start, end, gridRadius, gridMaterial));
+            u += gridSize;
+        }
+    }
+
+    return group;
+}
+
 // ==================== TOOLING: STANDARD BASKET (V5.0) ====================
 
 function createStandardBasketTooling(w, h, d, extras = {}) {

@@ -1275,6 +1275,29 @@ body {
     font-size: 11px;
 }
 
+/* 空料框 3D 预览区 */
+.tooling-add-preview-3d {
+    width: 100%;
+    height: 220px;
+    background: #0d0d14;
+    border: 1px solid #333344;
+    border-radius: 6px;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: grab;
+}
+.tooling-add-preview-3d:active {
+    cursor: grabbing;
+}
+.tooling-add-preview-3d canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
 /* 底部操作按钮 */
 .tooling-add-actions {
     display: flex;

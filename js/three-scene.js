@@ -994,7 +994,7 @@ export function showLayeredBOM() {
  * @param {string|null} filterMaterialName - 物料筛选
  * @returns {THREE.Group} furnaceGroup
  */
-function buildFurnaceGroup(furnace, index, filterMaterialName) {
+export function buildFurnaceGroup(furnace, index, filterMaterialName) {
     const furnaceGroup = new THREE.Group();
     const baseY = -120;
     const fw = furnace.w;

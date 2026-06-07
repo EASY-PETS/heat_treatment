@@ -1,5 +1,30 @@
-// strategies.js
-// 四种装炉策略的配置定义
+/**
+ * strategies.js — 四种装炉策略的配置定义
+ *
+ * 每种策略通过 `weights`（权重）和 `specialRules`（特殊规则）控制装炉算法评分函数的行为。
+ * 评分函数 `computePlacementScore()` 根据权重计算候选位置的优劣（分数越低越好）。
+ *
+ * ## 评分维度说明：
+ *   - cgDeviation:      放置后 XZ 平面整体重心偏离炉膛中心的惩罚
+ *   - centerDistance:   工件个体距炉膛 XZ 中心的距离（推动 center-out 分布）
+ *   - edgeTouch:        贴边/邻接奖励（鼓励紧凑排列）
+ *   - symmetry:         对称性奖励（鼓励工件关于中心对称放置）
+ *   - isolation:        孤立惩罚（正权重惩罚孤立，负权重奖励填充空隙）
+ *   - layerPriority:    外层优先（优先使用靠近炉壁的位置）
+ *   - cornerSpread:     四角均衡（鼓励填充四个角落）
+ *   - thermalEvenness:  热场均匀度（避免中心聚集、控制局部密度）
+ *   - surfaceExposure:  表面暴露面积（最大化暴露、避免遮挡）
+ *
+ * ## 特殊规则说明：
+ *   - enableSymmetry:      启用对称性检测
+ *   - dynamicCgWeight:     少物料时动态降低重心权重
+ *   - forceCompact:        填充小空隙额外奖励
+ *   - avoidCenterClustering: 惩罚过于靠近中心
+ *   - equalWallDistance:   奖励距各壁面等距
+ *   - layerDecayWithItems: 工件越多外层优先级衰减越快
+ *
+ * Dependencies: furnace-engine.js (computePlacementScore 引用)
+ */
 
 export const PackingStrategy = {
   BALANCED: 'balanced',               // 重心稳定 + 贴边对称
@@ -33,27 +58,6 @@ export const strategyConfig = {
     }
   },
 
-  // [PackingStrategy.SPACE_UTIL]: {
-  //   name: '空间利用率优先',
-  //   description: '塞满炉子，忽略重心，强力贴边紧凑',
-  //   weights: {
-  //     cgDeviation: 0.05,
-  //     centerDistance: 0.05,
-  //     edgeTouch: 0.8,
-  //     symmetry: 0.1,
-  //     isolation: -0.2,        // 负权重 → 奖励孤立空隙填充
-  //     thermalEvenness: 0,
-  //     surfaceExposure: 0
-  //   },
-  //   specialRules: {
-  //     enableSymmetry: false,
-  //     dynamicCgWeight: false,
-  //     forceCompact: true,             // 额外奖励填充小间隙
-  //     allowAnyStacking: true,         // 允许垂直堆叠（评分辅助）
-  //     avoidCenterClustering: false,
-  //     maxLocalDensity: 1.0
-  //   }
-  // },
     [PackingStrategy.SPACE_UTIL]: {
     weights: {
       cgDeviation: 0,        // 完全忽略重心
