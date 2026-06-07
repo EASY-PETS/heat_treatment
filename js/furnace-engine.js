@@ -27,86 +27,7 @@
 import { placementRules, setAggregationStats, setGroupingInfo } from './state.js';
 import { groupMaterials, getGroupingSummary, getGroupingRules } from './PackingRuleEngine.js';
 import { strategyConfig, PackingStrategy } from './strategies.js'
-
-// ==================== 摆放姿态优化（Task 3） ====================
-
-/**
- * 为工件计算最佳摆放姿态。
- * 原则：最小面积面朝下 → 单层可放更多工件，提高利用率，减少空隙。
- * 适用于长方体(cuboid)、圆柱体(cylinder)和轴类(shaft)。
- *
- * @param {Object} item - { shape, w, d, h }
- * @param {boolean} allowOptimization - 是否启用姿态优化
- * @returns {{ w: number, d: number, h: number, rotationInfo: string }}
- */
-/**
- * 为工件计算最佳摆放姿态。
- * 原则：最小面积面朝下 → 单层可放更多工件，提高利用率，减少空隙。
- * 适用于长方体(cuboid)，对圆柱体根据高径比决策：
- *   - 圆柱（厚度 > 直径）：保持直立
- *   - 圆盘（直径 > 厚度）：翻转平放（高度 = 直径，底面直径 = 厚度）
- *
- * @param {Object} item - { shape, w, d, h }
- * @param {boolean} allowOptimization - 是否启用姿态优化
- * @returns {{ w: number, d: number, h: number, rotationInfo: string }}
- */
-/**
- * 为工件计算最佳摆放姿态。
- * 原则：最小面积面朝下 → 单层可放更多工件，提高利用率，减少空隙。
- * 适用于长方体(cuboid)，对圆柱体根据高径比决策：
- *   - 圆柱（厚度 > 直径）：保持直立
- *   - 圆盘（直径 > 厚度）：翻转平放（高度 = 直径，底面直径 = 厚度）
- *
- * @param {Object} item - { shape, w, d, h }
- * @param {boolean} allowOptimization - 是否启用姿态优化
- * @returns {{ w: number, d: number, h: number, rotationInfo: string }}
- */
-/**
- * 为工件计算最佳摆放姿态。
- * 原则：
- *   - 长方体：最小面积面朝下
- *   - 圆柱体：根据高径比决策
- *     * 细长圆柱（h > d）：保持直立（底面为圆，高度不变）
- *     * 扁平圆盘（d >= h）：侧放（交换高度与直径），使圆盘边缘（线接触）搁板
- *
- * @param {Object} item - { shape, w, d, h }
- * @param {boolean} allowOptimization - 是否启用姿态优化
- * @returns {{ w: number, d: number, h: number, rotationInfo: string }}
- */
-function optimizePosture(item, allowOptimization) {
-    if (!allowOptimization) {
-        return { w: item.w, d: item.d, h: item.h, rotationInfo: '保持原姿态', needsRotation: false };
-    }
-    
-    // 圆柱体特殊处理
-    if (item.shape === 'cylinder') {
-        const diameter = item.w;   // w = d = 直径
-        const height = item.h;
-        // V4.5: 使用 discFlipRatio 阈值 — height/diameter < ratio 时才翻转
-        const ratio = placementRules.discFlipRatio != null ? placementRules.discFlipRatio : 1.0;
-        if (height / diameter >= ratio) {
-            // 细长圆柱（或未达翻转阈值），保持直立
-            return { w: diameter, d: diameter, h: height, rotationInfo: '圆柱保持直立（底面圆）', needsRotation: false };
-        } else {
-            // 扁平圆盘，侧放：交换直径和高度 → 新高度 = 原直径，新底面 = 厚度×直径
-            // 修正：侧放后 d 应为 diameter（几何体沿Z方向物理占据），避免碰撞检测误判导致重叠
-            return { w: height, d: diameter, h: diameter, rotationInfo: '圆盘侧放（边缘线接触搁板）', needsRotation: true };
-        }
-    }
-    
-    // 长方体：最小面积面朝下
-    const dims = [
-        { label: 'L', value: item.w },
-        { label: 'W', value: item.d },
-        { label: 'H', value: item.h }
-    ];
-    dims.sort((a, b) => a.value - b.value);
-    const newW = dims[0].value;
-    const newD = dims[1].value;
-    const newH = dims[2].value;
-    const rotationInfo = `底面: ${newW}×${newD}mm, 高度: ${newH}mm（最小面积面朝下）`;
-    return { w: newW, d: newD, h: newH, rotationInfo, needsRotation: false };
-}
+import { optimizePosture } from './geometry-utils.js';
 
 // ==================== 聚集规则辅助函数（Task 2） ====================
 
@@ -229,7 +150,8 @@ export function solveHeterogeneousPacking(furnacePoolInput, itemsInput, spacing)
         else { w = item.dim1; d = item.dim2; h = item.dim3; }
 
         const allowOpt = placementRules.allowPostureOptimization !== false;
-        const optimized = optimizePosture({ shape: item.shape, w, d, h }, allowOpt);
+        const discRatio = placementRules.discFlipRatio != null ? placementRules.discFlipRatio : 1.0;
+        const optimized = optimizePosture({ shape: item.shape, w, d, h }, allowOpt, discRatio);
 
         let singleWeight = item.count > 0 ? (item.weight / item.count) : 0;
         for (let i = 0; i < item.count; i++) {
@@ -555,7 +477,8 @@ export function solveShelfLayeredMultiFurnace(furnacePoolInput, itemsInput, spac
         if (item.shape === 'cylinder') { w = item.dim1; d = item.dim1; h = item.dim3; }
         else { w = item.dim1; d = item.dim2; h = item.dim3; }
          const allowOpt = placementRules.allowPostureOptimization !== false;
-         const optimized = optimizePosture({ shape: item.shape, w, d, h }, allowOpt);
+         const discRatio = placementRules.discFlipRatio != null ? placementRules.discFlipRatio : 1.0;
+         const optimized = optimizePosture({ shape: item.shape, w, d, h }, allowOpt, discRatio);
         let singleWeight = item.count > 0 ? (item.weight / item.count) : 0;
         for (let i = 0; i < item.count; i++) {
             const itemId = `${item.name}_${i}`;
