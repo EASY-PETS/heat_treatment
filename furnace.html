@@ -45,7 +45,10 @@
             <div class="panel-header">
                 <h3>🏭 工装配置</h3>
                 <div class="panel-header-actions">
+                    <span class="panel-expand-btn-left" id="panel-expand-btn-left" title="展开面板" style="display:none;">▶</span>
+                    <button class="btn-sm btn-toggle-panel" id="btn-toggle-left-panel" title="折叠/展开面板">◀</button>
                     <button class="btn-sm" id="btn-add-furnace">+ 增加工装</button>
+                    <button class="btn-sm btn-reset-danger" id="btn-clear-all-furnaces" title="清空所有料盘和物料">🗑️ 清空料盘</button>
                 </div>
             </div>
             <div class="sort-bar">
@@ -87,6 +90,7 @@
                 <div class="csp-header">
                     <span>📊 方案统计</span>
                     <span id="csp-summary" style="font-size:10px;color:#888;"></span>
+                    <button class="csp-toggle-btn" id="btn-toggle-center-stats" title="折叠/展开">▲</button>
                 </div>
                 <div class="csp-body" id="csp-body"></div>
                 <div id="center-stats-unpacked" style="display:none;"></div>
@@ -140,8 +144,11 @@
             <div class="panel-header">
                 <h3>📋 待处理物料明细</h3>
                 <div class="panel-header-actions">
-                    <button class="btn-sm" id="btn-import-excel" title="导入Excel">📥 导入</button>
+                    <button class="btn-sm btn-reset-danger" id="btn-clear-all-materials" title="清空所有待摆放物料">🗑️ 清空物料</button>
                     <button class="btn-sm" id="btn-add-item">+ 增加工件</button>
+                    <button class="btn-sm" id="btn-import-excel" title="导入Excel">📥 导入</button>
+                    <button class="btn-sm btn-toggle-panel" id="btn-toggle-right-panel" title="折叠/展开面板">▶</button>
+                    <span class="panel-expand-btn-right" id="panel-expand-btn-right" title="展开面板" style="display:none;">◀</span>
                 </div>
             </div>
             <div class="panel-scroll" id="material-cards-container"></div>

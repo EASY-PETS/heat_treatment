@@ -137,6 +137,49 @@ body {
 }
 .btn-sm:hover { background-color: #4e4e66; }
 
+/* ==================== RESET DANGER BUTTON ==================== */
+.btn-reset-danger {
+    background: rgba(179,36,36,0.2) !important;
+    border: 1px solid rgba(179,36,36,0.35) !important;
+    color: #ff6666 !important;
+}
+.btn-reset-danger:hover {
+    background: rgba(179,36,36,0.45) !important;
+    border-color: rgba(179,36,36,0.6) !important;
+}
+
+/* ==================== PANEL TOGGLE BUTTON ==================== */
+.btn-toggle-panel {
+    padding: 3px 6px !important;
+    font-size: 10px !important;
+    background: rgba(255,255,255,0.05) !important;
+    border: 1px solid var(--border-color) !important;
+    color: #888 !important;
+    transition: all 0.2s;
+    min-width: 22px;
+}
+.btn-toggle-panel:hover {
+    color: #fff !important;
+    background: rgba(255,255,255,0.12) !important;
+}
+
+/* ==================== PANEL EXPAND BUTTONS (collapsed state) ==================== */
+.panel-expand-btn-left,
+.panel-expand-btn-right {
+    cursor: pointer;
+    font-size: 14px;
+    color: #888;
+    padding: 4px 6px;
+    border-radius: 3px;
+    transition: all 0.2s;
+    user-select: none;
+}
+.panel-expand-btn-left:hover,
+.panel-expand-btn-right:hover {
+    color: #fff;
+    background: rgba(255,255,255,0.1);
+}
+
 /* ==================== FURNACE CARD ==================== */
 .furnace-card {
     background: var(--card-bg); border-left: 4px solid var(--furnace-accent);
@@ -1343,4 +1386,134 @@ body {
     color: #666;
     cursor: not-allowed;
     box-shadow: none;
+}
+
+/* ==================== PANEL COLLAPSED STATES ==================== */
+#left-panel.collapsed,
+#right-panel.collapsed {
+    transition: width 0.3s ease, min-width 0.3s ease, max-width 0.3s ease;
+}
+
+#left-panel.collapsed {
+    width: 36px;
+    min-width: 36px;
+    max-width: 36px;
+    position: relative;
+}
+
+#left-panel.collapsed > *:not(.panel-header) {
+    display: none;
+}
+
+#left-panel.collapsed .panel-header {
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 8px 4px;
+    height: 100%;
+}
+
+#left-panel.collapsed .panel-header h3,
+#left-panel.collapsed .panel-header-actions .btn-sm,
+#left-panel.collapsed .panel-header-actions .btn-toggle-panel {
+    display: none;
+}
+
+#left-panel.collapsed .panel-expand-btn-left {
+    display: flex !important;
+    writing-mode: vertical-lr;
+    text-orientation: upright;
+    font-size: 16px;
+}
+
+#right-panel.collapsed {
+    width: 36px;
+    min-width: 36px;
+    max-width: 36px;
+    position: relative;
+}
+
+#right-panel.collapsed > *:not(.panel-header) {
+    display: none;
+}
+
+#right-panel.collapsed .panel-header {
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 8px 4px;
+    height: 100%;
+}
+
+#right-panel.collapsed .panel-header h3,
+#right-panel.collapsed .panel-header-actions .btn-sm,
+#right-panel.collapsed .panel-header-actions .btn-toggle-panel {
+    display: none;
+}
+
+#right-panel.collapsed .panel-expand-btn-right {
+    display: flex !important;
+    writing-mode: vertical-lr;
+    text-orientation: upright;
+    font-size: 16px;
+}
+
+/* ==================== CSP TOGGLE BUTTON ==================== */
+.csp-toggle-btn {
+    background: transparent;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    font-size: 12px;
+    padding: 0 4px;
+    transition: all 0.2s;
+    margin-left: 8px;
+    flex-shrink: 0;
+}
+.csp-toggle-btn:hover {
+    color: #fff;
+}
+
+#center-stats-panel.collapsed {
+    max-height: 32px;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+}
+
+#center-stats-panel.collapsed .csp-body,
+#center-stats-panel.collapsed #center-stats-unpacked {
+    display: none;
+}
+
+/* ==================== 3D STATS PANEL TOGGLE ==================== */
+.ssp-header-wrapper {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.ssp-toggle-btn {
+    background: transparent;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    font-size: 11px;
+    padding: 0 4px;
+    transition: all 0.2s;
+    flex-shrink: 0;
+}
+.ssp-toggle-btn:hover {
+    color: #fff;
+}
+
+#stats-3d-panel.collapsed {
+    padding: 6px 10px;
+    min-width: auto;
+}
+#stats-3d-panel.collapsed .ssp-body,
+#stats-3d-panel.collapsed .ssp-stat-row,
+#stats-3d-panel.collapsed .ssp-divider,
+#stats-3d-panel.collapsed .ssp-list-title,
+#stats-3d-panel.collapsed .ssp-item-row {
+    display: none;
 }

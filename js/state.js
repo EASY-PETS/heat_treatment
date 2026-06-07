@@ -224,6 +224,11 @@ export let groupingInfo = {
 /** Set of colors already assigned to materials, to avoid duplicates */
 export const usedColors = new Set();
 
+/**
+ * 清空已使用颜色集合 — 用于重置所有物料数据时调用
+ */
+export function clearUsedColors() { usedColors.clear(); }
+
 // ==================== BASKET TYPE STATE (V2.2) ====================
 /**
  * 料框类型配置 — 支持普通网格、蜂窝料框、托盘式搁板、节点料框四种

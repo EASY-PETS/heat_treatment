@@ -23,7 +23,10 @@ import {
     setGlobalFurnacesResult, setGlobalUnpackedItems, setGlobalSpacingValue,
     setCurrentBasketType, setDisplaySettings, setDefaultToolingType,
     clearFurnaceGroups,
-    furnaceGroups, controls, camera
+    furnaceGroups, controls, camera,
+    setFurnaceCounter, setMaterialCounter,
+    setSelectedFurnaceCardId, setSelectedMaterialCardId,
+    clearUsedColors
 } from './state.js';
 import {
     initThree, initMasterThree, renderSingleFurnace,
@@ -1000,7 +1003,219 @@ function renderEmptyToolingOnly() {
     }
 }
 
+// ==================== 重置 & 折叠功能 ====================
+
+/**
+ * 右按钮 — 清空所有待摆放物料（保留料框）
+ */
+function clearAllMaterials() {
+    if (!confirm('确定要清空所有待摆放物料吗？\n这将清除方案统计和 3D 工件，但料框将保留。')) return;
+
+    // 1. 移除所有物料卡片
+    document.querySelectorAll('.material-card').forEach(c => c.remove());
+
+    // 2. 重置物料状态
+    setSelectedMaterialCardId(null);
+    setMaterialCounter(0);
+    clearUsedColors();
+
+    // 3. 清空装炉结果
+    setGlobalFurnacesResult(null);
+    setGlobalUnpackedItems([]);
+    clearFurnaceGroups();
+
+    // 4. 清空 3D 场景
+    if (itemsGroup) {
+        while (itemsGroup.children.length > 0) itemsGroup.remove(itemsGroup.children[0]);
+    }
+    document.getElementById('stats-3d-panel').style.display = 'none';
+
+    // 5. 隐藏方案相关 UI
+    document.getElementById('btn-export-pdf').style.display = 'none';
+    document.getElementById('btn-animate').style.display = 'none';
+    document.getElementById('furnace-nav').style.display = 'none';
+    document.getElementById('center-stats-panel').style.display = 'none';
+    document.getElementById('center-stats-panel').classList.remove('collapsed');
+    hideExplodeBOMButtons();
+
+    // 6. 显示空状态
+    document.getElementById('empty-state').style.display = 'block';
+
+    // 7. 重置物料详情面板
+    document.getElementById('mdp-placeholder').style.display = 'block';
+    document.getElementById('mdp-body').style.display = 'none';
+    document.getElementById('mdp-title').textContent = '📋 工件详情';
+
+    // 8. 如果还有料框，渲染空料框
+    const hasFurnaces = document.querySelectorAll('.furnace-card').length > 0;
+    if (hasFurnaces) {
+        renderEmptyToolingOnly();
+    }
+
+    // 9. 更新顶部摘要
+    setCurrentFurnaceIndex(0);
+    updateTopSummary();
+}
+
+/**
+ * 左按钮 — 清空所有料盘和物料（完全重置）
+ */
+function clearAllFurnaces() {
+    if (!confirm('确定要清空所有料盘吗？\n这将清除所有料框、物料、方案统计和 3D 场景。')) return;
+
+    // 1. 移除所有炉膛卡片
+    document.querySelectorAll('.furnace-card').forEach(c => c.remove());
+
+    // 2. 移除所有物料卡片
+    document.querySelectorAll('.material-card').forEach(c => c.remove());
+
+    // 3. 重置所有状态
+    setSelectedFurnaceCardId(null);
+    setSelectedMaterialCardId(null);
+    setFurnaceCounter(0);
+    setMaterialCounter(0);
+    clearUsedColors();
+
+    // 4. 清空装炉结果
+    setGlobalFurnacesResult(null);
+    setGlobalUnpackedItems([]);
+    clearFurnaceGroups();
+
+    // 5. 清空 3D 场景所有内容
+    if (itemsGroup) {
+        while (itemsGroup.children.length > 0) itemsGroup.remove(itemsGroup.children[0]);
+    }
+    document.getElementById('stats-3d-panel').style.display = 'none';
+    document.getElementById('stats-3d-panel').classList.remove('collapsed');
+
+    // 6. 隐藏所有方案相关 UI
+    document.getElementById('btn-export-pdf').style.display = 'none';
+    document.getElementById('btn-animate').style.display = 'none';
+    document.getElementById('furnace-nav').style.display = 'none';
+    document.getElementById('center-stats-panel').style.display = 'none';
+    document.getElementById('center-stats-panel').classList.remove('collapsed');
+    hideExplodeBOMButtons();
+
+    // 7. 显示空状态
+    document.getElementById('empty-state').style.display = 'block';
+
+    // 8. 重置详情面板
+    document.getElementById('fdp-placeholder').style.display = 'block';
+    document.getElementById('fdp-body').style.display = 'none';
+    document.getElementById('fdp-title').textContent = '📋 炉膛详情';
+    document.getElementById('mdp-placeholder').style.display = 'block';
+    document.getElementById('mdp-body').style.display = 'none';
+    document.getElementById('mdp-title').textContent = '📋 工件详情';
+
+    // 9. 更新顶部摘要
+    setCurrentFurnaceIndex(0);
+    updateTopSummary();
+}
+
+/**
+ * 折叠/展开左面板
+ */
+function toggleLeftPanel() {
+    const panel = document.getElementById('left-panel');
+    const btn = document.getElementById('btn-toggle-left-panel');
+    const expandBtn = document.getElementById('panel-expand-btn-left');
+
+    if (panel.classList.contains('collapsed')) {
+        // 展开
+        panel.classList.remove('collapsed');
+        if (btn) btn.textContent = '◀';
+        if (expandBtn) expandBtn.style.display = 'none';
+    } else {
+        // 折叠
+        panel.classList.add('collapsed');
+        if (btn) btn.textContent = '▶';
+        if (expandBtn) expandBtn.style.display = 'flex';
+    }
+}
+
+/**
+ * 折叠/展开右面板
+ */
+function toggleRightPanel() {
+    const panel = document.getElementById('right-panel');
+    const btn = document.getElementById('btn-toggle-right-panel');
+    const expandBtn = document.getElementById('panel-expand-btn-right');
+
+    if (panel.classList.contains('collapsed')) {
+        // 展开
+        panel.classList.remove('collapsed');
+        if (btn) btn.textContent = '▶';
+        if (expandBtn) expandBtn.style.display = 'none';
+    } else {
+        // 折叠
+        panel.classList.add('collapsed');
+        if (btn) btn.textContent = '◀';
+        if (expandBtn) expandBtn.style.display = 'flex';
+    }
+}
+
+/**
+ * 折叠/展开中心方案统计面板
+ */
+function toggleCenterStats() {
+    const panel = document.getElementById('center-stats-panel');
+    const btn = document.getElementById('btn-toggle-center-stats');
+
+    if (panel.classList.contains('collapsed')) {
+        panel.classList.remove('collapsed');
+        if (btn) btn.textContent = '▲';
+    } else {
+        panel.classList.add('collapsed');
+        if (btn) btn.textContent = '▼';
+    }
+}
+
+/**
+ * 折叠/展开 3D 右下角炉次清单面板
+ */
+function toggle3DStats() {
+    const panel = document.getElementById('stats-3d-panel');
+    if (!panel) return;
+
+    if (panel.classList.contains('collapsed')) {
+        panel.classList.remove('collapsed');
+    } else {
+        panel.classList.add('collapsed');
+    }
+}
+
 // 暴露全局函数供 onclick 调用
 window._selectAddToolingType = selectAddToolingType;
+window._toggle3DStats = toggle3DStats;
+window._toggleCenterStats = toggleCenterStats;
 
+// 初始化 & 绑定新事件
 init();
+
+// ==================== 新增事件绑定 ====================
+(function bindNewEvents() {
+    // 重置按钮
+    const btnClearFurnaces = document.getElementById('btn-clear-all-furnaces');
+    if (btnClearFurnaces) btnClearFurnaces.addEventListener('click', clearAllFurnaces);
+
+    const btnClearMaterials = document.getElementById('btn-clear-all-materials');
+    if (btnClearMaterials) btnClearMaterials.addEventListener('click', clearAllMaterials);
+
+    // 面板折叠按钮
+    const btnToggleLeft = document.getElementById('btn-toggle-left-panel');
+    if (btnToggleLeft) btnToggleLeft.addEventListener('click', toggleLeftPanel);
+
+    const btnToggleRight = document.getElementById('btn-toggle-right-panel');
+    if (btnToggleRight) btnToggleRight.addEventListener('click', toggleRightPanel);
+
+    // 折叠面板展开按钮
+    const expandLeft = document.getElementById('panel-expand-btn-left');
+    if (expandLeft) expandLeft.addEventListener('click', toggleLeftPanel);
+
+    const expandRight = document.getElementById('panel-expand-btn-right');
+    if (expandRight) expandRight.addEventListener('click', toggleRightPanel);
+
+    // 方案统计折叠
+    const btnToggleCenterStats = document.getElementById('btn-toggle-center-stats');
+    if (btnToggleCenterStats) btnToggleCenterStats.addEventListener('click', toggleCenterStats);
+})();

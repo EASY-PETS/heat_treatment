@@ -1236,7 +1236,10 @@ function update3DStatsPanel(furnace) {
 
     const furnaceName = furnace.instanceId || ('炉膛 #' + (globalFurnacesResult.indexOf(furnace) + 1));
     panel.innerHTML =
+        '<div class="ssp-header-wrapper">' +
         '<div class="ssp-header">📊 ' + furnaceName + '</div>' +
+        '<button class="ssp-toggle-btn" id="btn-toggle-3d-stats" title="折叠/展开" onclick="window._toggle3DStats && window._toggle3DStats()">▲</button>' +
+        '</div>' +
         '<div class="ssp-body">' +
         '<div class="ssp-stat-row"><span class="ssp-label">利用率</span><span class="ssp-value">' + volUtilization + '% (体积)</span></div>' +
         '<div class="ssp-stat-row"><span class="ssp-label">重量利用率</span><span class="ssp-value">' + weightUtilization + '%</span></div>' +
@@ -1311,6 +1314,7 @@ export async function playLoadingAnimation() {
 
     // 为动画创建当前炉膛 Group（在原点）
     const basketType = furnace.basketType || 'grid';
+    const toolingType = furnace.toolingType || 'standard-basket';
     const basketGroup = createBasketFrame(furnace.w, furnace.h, furnace.d, 100, basketType);
     basketGroup.position.set(-furnace.w / 2, baseY, -furnace.d / 2);
     itemsGroup.add(basketGroup);
