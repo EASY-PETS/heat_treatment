@@ -13,20 +13,21 @@
 import {
     isAnimating, animPaused, animStopped,
     globalFurnacesResult, globalUnpackedItems, aggregationStats,
-    groupingInfo,
     currentFurnaceIndex, selectedFurnaceCardId,
     masterRenderer, itemsGroup, usedColors,
     currentBasketType, displaySettings,
     defaultToolingType, furnaceTooling, toolingTemplates,
     setAnimPaused, setAnimStopped, setCurrentFurnaceIndex,
     setFdpCollapsed, setMdpCollapsed,
-    placementRules,   // 新增导入
+    placementRules,
     setGlobalFurnacesResult, setGlobalUnpackedItems, setGlobalSpacingValue,
     setCurrentBasketType, setDisplaySettings, setDefaultToolingType,
-    clearFurnaceGroups
+    clearFurnaceGroups,
+    furnaceGroups, controls, camera
 } from './state.js';
 import {
     initThree, initMasterThree, renderSingleFurnace,
+    buildFurnaceGroup,
     getSelectedMaterialName,
     playLoadingAnimation, renderMasterPlan,
     findResultIndexByFid, generateUniqueColor,
@@ -338,9 +339,51 @@ function init() {
     });
     document.getElementById("furnace-cards-container").addEventListener("click", (e) => {
         const btn = e.target.closest("[data-action=\"delete-furnace\"]");
-        if (!btn) return;
-        e.stopPropagation();
-        deleteFurnaceCard(parseInt(btn.getAttribute("data-fid")));
+        if (btn) {
+            e.stopPropagation();
+            deleteFurnaceCard(parseInt(btn.getAttribute("data-fid")));
+            return;
+        }
+        // 拖拽手柄不触发 3D 切换
+        if (e.target.closest(".f-drag-handle")) return;
+        // 炉膛卡片点击 → 同步切换 3D 视图
+        const card = e.target.closest(".furnace-card");
+        if (!card) return;
+        const fid = parseInt(card.getAttribute("data-fid"));
+        if (globalFurnacesResult && globalFurnacesResult.length > 0) {
+            const idx = findResultIndexByFid(fid);
+            if (idx >= 0) {
+                setCurrentFurnaceIndex(idx);
+                const filterName = getSelectedMaterialName();
+                renderSingleFurnace(idx, filterName);
+                updateFurnaceNav();
+                updateLeftPanelActiveForIndex(idx);
+                updateCenterStats(onCenterFurnaceClick);
+            }
+        } else {
+            // 无装炉结果时（仅空工装），切换 furnaceGroups 可见性
+            const cards = document.querySelectorAll(".furnace-card");
+            let targetIdx = 0;
+            cards.forEach((c, i) => {
+                if (parseInt(c.getAttribute("data-fid")) === fid) targetIdx = i;
+            });
+            setCurrentFurnaceIndex(targetIdx);
+            furnaceGroups.forEach((group, grpIdx) => {
+                group.visible = (grpIdx === targetIdx);
+            });
+            // 更新相机对准选中的料框
+            const targetCard = document.getElementById(card.id);
+            if (targetCard && controls) {
+                const fd = getFurnaceDataFromCard(targetCard);
+                const w = fd.width || 900;
+                const h = fd.height || 900;
+                const d = fd.depth || 1200;
+                const baseY = -120;
+                controls.target.set(0, h / 2 + baseY, 0);
+                camera.position.set(w * 1.5, h * 1.8 + baseY, d * 2.5);
+                controls.update();
+            }
+        }
     });
     document.getElementById("material-cards-container").addEventListener("click", (e) => {
         const btn = e.target.closest("[data-action=\"delete-material\"]");
@@ -385,21 +428,6 @@ function init() {
             }
         });
     }
-    // document.getElementById("global-spacing").addEventListener("change", () => {
-    //     setGlobalFurnacesResult(null);
-    //     setGlobalUnpackedItems([]);
-    //     setCurrentFurnaceIndex(0);
-    //     clearFurnaceGroups();
-    //     document.getElementById("btn-export-pdf").style.display = "none";
-    //     document.getElementById("btn-animate").style.display = "none";
-    //     document.getElementById("furnace-nav").style.display = "none";
-    //     document.getElementById("empty-state").style.display = "block";
-    //     document.getElementById("center-stats-panel").style.display = "none";
-    //     hideExplodeBOMButtons();
-    //     if (itemsGroup) {
-    //         while (itemsGroup.children.length > 0) itemsGroup.remove(itemsGroup.children[0]);
-    //     }
-    // });
     document.getElementById("btn-anim-pause").addEventListener("click", () => {
         if (!isAnimating) return;
         const paused = !animPaused;
@@ -518,13 +546,6 @@ function init() {
         reader.readAsText(file, "utf-8");
     }
 
-    // // V2.3: 全局料框类型选择器 — 仅影响新建炉膛的默认值
-    // const basketTypeSelect = document.getElementById("basket-type-select");
-    // if (basketTypeSelect) {
-    //     basketTypeSelect.addEventListener("change", () => {
-    //         setCurrentBasketType(basketTypeSelect.value);
-    //     });
-    // }
 
     // ==================== V2.2: 3D显示设置 ====================
     const dsGrid = document.getElementById("ds-show-grid");
@@ -544,78 +565,10 @@ function init() {
     if (dsAxes) dsAxes.addEventListener("change", applyDisplaySettings);
     if (dsRulers) dsRulers.addEventListener("change", applyDisplaySettings);
 
-    // ==================== V4.8: 工装类型管理面板事件 ====================
-    // initToolingManagement();
 
     // ==================== 生成模式选择弹窗事件 ====================
     initGenerationOptions();
 }
-
-// /** V4.8: 工装类型管理面板 — 初始化折叠开关、模板列表渲染 */
-// function initToolingManagement() {
-//     const toggle = document.getElementById('tooling-mgmt-toggle');
-//     const body = document.getElementById('tooling-mgmt-body');
-//     const icon = document.getElementById('tooling-mgmt-icon');
-
-//     if (toggle) {
-//         toggle.addEventListener('click', () => {
-//             const isVisible = body.style.display === 'block';
-//             body.style.display = isVisible ? 'none' : 'block';
-//             icon.textContent = isVisible ? '▼' : '▲';
-//         });
-//     }
-
-//     /**
-//      * 渲染工装模板列表（furnaceTooling 注册表 + toolingTemplates 自定义模板）
-//      */
-//     function renderToolingTemplateList() {
-//         const listEl = document.getElementById('tooling-template-list');
-//         if (!listEl) return;
-
-//         let html = '';
-
-//         // 内置模板
-//         Object.entries(furnaceTooling).forEach(([key, cfg]) => {
-//             const procStr = cfg.allowedProcesses.length > 0
-//                 ? cfg.allowedProcesses.join(', ')
-//                 : '全部允许';
-//             html += '<div class="tooling-tpl-item" style="padding:4px 6px;margin:2px 0;background:rgba(8,145,178,0.06);border:1px solid rgba(8,145,178,0.15);border-radius:4px;font-size:10px;">';
-//             html += '<span style="font-weight:600;color:#67e8f9;">' + cfg.label + '</span>';
-//             html += '<span style="color:#888;margin-left:4px;">| 模式:' + cfg.placementMode + ' | 层数:' + cfg.maxLayers + ' | 工艺:' + procStr + '</span>';
-//             html += '<button class="tooling-tpl-select" data-tooling="' + key + '" style="margin-left:4px;font-size:9px;padding:1px 6px;background:#0891b2;color:#fff;border:none;border-radius:3px;cursor:pointer;">设为默认</button>';
-//             html += '</div>';
-//         });
-
-//         // 自定义模板
-//         const templates = toolingTemplates;
-//         if (templates && templates.length > 0) {
-//             html += '<div style="font-size:10px;color:#888;margin-top:6px;padding:2px 0;">📋 自定义模板：</div>';
-//             templates.forEach((tpl, idx) => {
-//                 html += '<div class="tooling-tpl-item" style="padding:4px 6px;margin:2px 0;background:rgba(124,58,237,0.08);border:1px solid rgba(124,58,237,0.15);border-radius:4px;font-size:10px;">';
-//                 html += '<span style="font-weight:600;color:#c4b5fd;">' + (tpl.label || '自定义模板') + '</span>';
-//                 html += '<span style="color:#888;margin-left:4px;">| 模式:' + tpl.placementMode + ' | 层数:' + tpl.maxLayers + '</span>';
-//                 html += '</div>';
-//             });
-//         }
-
-//         listEl.innerHTML = html;
-
-//         // 绑定"设为默认"按钮
-//         listEl.querySelectorAll('.tooling-tpl-select').forEach(btn => {
-//             btn.addEventListener('click', (e) => {
-//                 e.stopPropagation();
-//                 const key = btn.getAttribute('data-tooling');
-//                 if (key && furnaceTooling[key]) {
-//                     setDefaultToolingType(key);
-//                     btn.textContent = '✅ 已设为默认';
-//                     setTimeout(() => { btn.textContent = '设为默认'; }, 1200);
-//                 }
-//             });
-//         });
-//     }
-
-//     renderToolingTemplateList();
-// }
 
 /**
  * 初始化生成模式选择弹窗的事件监听器，处理卡片选择和取消操作。
@@ -757,6 +710,18 @@ const TOOLING_DEFAULT_DIMS = {
 };
 
 /**
+ * 工装类型对应的实拍图映射（路径相对于 furnace.html）
+ */
+const TOOLING_IMAGES = {
+    'standard-basket': 'images/tooling/standard-basket.jpg',
+    'mesh-basket': 'images/tooling/mesh-basket.jpg',
+    'special-jig': 'images/tooling/special-jig.jpg',
+    'material-tray': 'images/tooling/material-tray.jpg',
+    'hanger': 'images/tooling/hanger.jpg',
+    'ring-tooling': 'images/tooling/ring-tooling.jpg'
+};
+
+/**
  * 打开工装类型选择 + 尺寸配置弹窗
  */
 function openToolingAddModal() {
@@ -871,6 +836,44 @@ function selectAddToolingType(toolingKey) {
     // 启用确认按钮
     const confirmBtn = document.getElementById('btn-ta-confirm');
     if (confirmBtn) confirmBtn.disabled = false;
+
+    // 更新工装实拍图
+    const imgEl = document.getElementById('ta-preview-img');
+    const placeholder = document.getElementById('ta-preview-img-placeholder');
+    const imgSrc = TOOLING_IMAGES[toolingKey] || '';
+    const icon = TOOLING_ICONS[toolingKey] || '🔧';
+
+    // 生成默认 SVG 占位图
+    const defaultSvgSrc = 'data:image/svg+xml,' + encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="280" viewBox="0 0 400 280">' +
+        '<rect width="400" height="280" fill="#1e1e2e" rx="8"/>' +
+        '<rect x="2" y="2" width="396" height="276" fill="none" stroke="#3e3e52" stroke-width="2" stroke-dasharray="8,4" rx="7"/>' +
+        '<text x="200" y="120" text-anchor="middle" font-size="64">' + icon + '</text>' +
+        '<text x="200" y="180" text-anchor="middle" font-size="20" fill="#888" font-family="sans-serif">' + cfg.label + '</text>' +
+        '<text x="200" y="210" text-anchor="middle" font-size="13" fill="#555" font-family="sans-serif">暂无实拍图</text>' +
+        '</svg>'
+    );
+
+    if (imgEl) {
+        if (imgSrc) {
+            imgEl.src = imgSrc;
+            imgEl.style.display = 'block';
+            if (placeholder) placeholder.style.display = 'none';
+            // 图片加载失败时显示默认占位图
+            imgEl.onerror = () => {
+                imgEl.src = defaultSvgSrc;
+                imgEl.style.display = 'block';
+                imgEl.onerror = null; // 防止 SVG 也失败导致无限循环
+                if (placeholder) placeholder.style.display = 'none';
+            };
+        } else {
+            // 无图片路径时直接显示默认占位图
+            imgEl.src = defaultSvgSrc;
+            imgEl.style.display = 'block';
+            imgEl.onerror = null;
+            if (placeholder) placeholder.style.display = 'none';
+        }
+    }
 }
 
 /**
@@ -895,10 +898,106 @@ function confirmAddTooling() {
     const cfg = furnaceTooling[selectedAddToolingType];
     const basketType = cfg ? cfg.basketType : 'grid';
 
-    createFurnaceCard(name, depth, width, height, maxWeight, count, plannedHeats, actualSpacing,
+    const result = createFurnaceCard(name, depth, width, height, maxWeight, count, plannedHeats, actualSpacing,
         basketType, selectedAddToolingType);
     updateTopSummary();
+
+    // 自动选中新添加的料框，确保 3D 视图展示新料框
+    selectFurnaceCard(result.cardId);
+
+    // 刷新主 3D 场景，渲染空料框
+    const hasMaterials = document.querySelectorAll(".material-card").length > 0;
+    if (hasMaterials) {
+        // 有物料时：执行装炉算法 + 渲染
+        executeAndRender();
+    } else {
+        // 无物料时：仅渲染空料框（手动构建 furnaceGroups）
+        renderEmptyToolingOnly();
+    }
+
     closeToolingAddModal();
+}
+
+/**
+ * 仅渲染空工装料框到主 3D 场景（不执行装炉算法）
+ */
+function renderEmptyToolingOnly() {
+    if (!itemsGroup) return;
+
+    // 清理旧内容
+    clearFurnaceGroups();
+    while (itemsGroup.children.length > 0) itemsGroup.remove(itemsGroup.children[0]);
+
+    const cards = document.querySelectorAll(".furnace-card");
+    if (cards.length === 0) return;
+
+    document.getElementById("empty-state").style.display = "none";
+
+    let idx = 0;
+    cards.forEach(card => {
+        const d = getFurnaceDataFromCard(card);
+        const fid = parseInt(card.getAttribute("data-fid")) || idx;
+        // 读取工装参数（环形工装等需要）
+        const extrasStr = card.getAttribute('data-extras');
+        const params = extrasStr ? JSON.parse(extrasStr) : {};
+        // 只渲染空工装，无工件
+        // 注意：getFurnaceDataFromCard 返回 width/height/depth，
+        // 但 buildFurnaceGroup 期望 w/h/d，需要显式映射
+        const emptyFurnace = {
+            w: d.width,
+            h: d.height,
+            d: d.depth,
+            name: d.name,
+            basketType: d.basketType,
+            toolingType: d.toolingType,
+            maxLayers: d.maxLayers,
+            allowedProcesses: d.allowedProcesses,
+            placementMode: d.placementMode,
+            maxWeight: d.maxWeight,
+            actualSpacing: d.actualSpacing,
+            id: fid,
+            fid: fid,
+            packedItems: [],
+            shelvesUsed: [],
+            params: params
+        };
+        const group = buildFurnaceGroup(emptyFurnace, idx, null);
+        group.visible = false;
+        itemsGroup.add(group);
+        furnaceGroups.set(idx, group);
+        idx++;
+    });
+
+    // 确定要显示的料框索引：优先选中的料框，否则显示最后一个（最新添加的）
+    let visibleIdx = cards.length - 1; // 默认最后一个
+    if (selectedFurnaceCardId) {
+        const selectedCard = document.getElementById(selectedFurnaceCardId);
+        if (selectedCard) {
+            const selFid = parseInt(selectedCard.getAttribute("data-fid"));
+            cards.forEach((c, i) => {
+                if (parseInt(c.getAttribute("data-fid")) === selFid) visibleIdx = i;
+            });
+        }
+    }
+    setCurrentFurnaceIndex(visibleIdx);
+    const visibleGroup = furnaceGroups.get(visibleIdx);
+    if (visibleGroup) visibleGroup.visible = true;
+
+    document.getElementById("furnace-nav").style.display = "none";
+    hideExplodeBOMButtons();
+
+    // 更新相机位置，以选中/最新料框尺寸为参考
+    const targetCard = cards[visibleIdx];
+    if (targetCard && controls) {
+        const fd = getFurnaceDataFromCard(targetCard);
+        const w = fd.width || 900;
+        const h = fd.height || 900;
+        const d = fd.depth || 1200;
+        const baseY = -120;
+        controls.target.set(0, h / 2 + baseY, 0);
+        camera.position.set(w * 1.5, h * 1.8 + baseY, d * 2.5);
+        controls.update();
+    }
 }
 
 // 暴露全局函数供 onclick 调用
