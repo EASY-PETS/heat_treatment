@@ -1864,7 +1864,12 @@ function solveUnifiedMultiFurnace(furnacePoolInput, itemsInput, spacing, strateg
                 w: f.width, h: f.height, d: f.depth, max_weight: f.maxWeight,
                 spacing: f.actualSpacing != null ? f.actualSpacing : spacing,
                 packedItems: [], totalWeight: 0,
-                basketType: f.basketType || 'grid'
+                basketType: f.basketType || 'grid',
+                /** V4.8: 工装类型字段附加 */
+                toolingType: f.toolingType || 'standard-basket',
+                maxLayers: f.maxLayers || 5,
+                allowedProcesses: f.allowedProcesses || '',
+                placementMode: f.placementMode || 'free'
             });
         }
     });

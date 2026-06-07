@@ -134,6 +134,85 @@ export let aggregationStats = {
     processRate: null     // 工艺聚集率 (0-100)
 };
 
+// ==================== TOOLING TYPE EXTENSION (V4.8) ====================
+/**
+ * 工装类型注册表 — 每种工装类型的完整元数据
+ *
+ * 字段说明:
+ *   - toolingType:     唯一标识符
+ *   - label:           中文显示名
+ *   - maxLayers:       最大堆叠层数
+ *   - allowedProcesses: 允许的工艺列表（空数组 = 全部允许）
+ *   - placementMode:   摆放模式 — 'free' | 'fixed' | 'vertical' | 'radial'
+ *   - basketType:      映射到 3D 建模类型（grid|honeycomb|tray|ringnode|hanger|radial）
+ *   - params:          工装专属参数
+ */
+export const furnaceTooling = {
+    'standard-basket': {
+        toolingType: 'standard-basket',
+        label: '标准料框',
+        maxLayers: 5,
+        allowedProcesses: [],
+        placementMode: 'free',
+        basketType: 'grid',
+        params: { gridSize: 100, shelfThickness: 20 }
+    },
+    'mesh-basket': {
+        toolingType: 'mesh-basket',
+        label: '网篮',
+        maxLayers: 3,
+        allowedProcesses: ['渗碳', '碳氮共渗'],
+        placementMode: 'free',
+        basketType: 'honeycomb',
+        params: { gridSize: 80 }
+    },
+    'special-jig': {
+        toolingType: 'special-jig',
+        label: '专用夹具',
+        maxLayers: 2,
+        allowedProcesses: [],
+        placementMode: 'fixed',
+        basketType: 'tray',
+        params: { slotWidth: 60, slotSpacing: 20 }
+    },
+    'material-tray': {
+        toolingType: 'material-tray',
+        label: '料盘',
+        maxLayers: 10,
+        allowedProcesses: ['氮化'],
+        placementMode: 'free',
+        basketType: 'tray',
+        params: { shelfThickness: 15 }
+    },
+    'hanger': {
+        toolingType: 'hanger',
+        label: '挂具',
+        maxLayers: 1,
+        allowedProcesses: ['淬火', '回火'],
+        placementMode: 'vertical',
+        basketType: 'hanger',
+        params: { hookSpacing: 80, maxHangWeight: 200 }
+    },
+    'ring-tooling': {
+        toolingType: 'ring-tooling',
+        label: '环形工装',
+        maxLayers: 3,
+        allowedProcesses: ['渗碳'],
+        placementMode: 'radial',
+        basketType: 'ringnode',
+        params: { innerRadius: 200, outerRadius: 400, angleStep: 30 }
+    }
+};
+
+/**
+ * 用户自定义工装模板列表
+ * @type {Array<Object>}
+ */
+export let toolingTemplates = [];
+
+/** 默认工装类型（新建炉膛时使用） */
+export let defaultToolingType = 'standard-basket';
+
 /** V3.0: 分组规则信息 — 用于方案统计面板展示 */
 export let groupingInfo = {
     rulesText: [],        // 启用的规则文本列表 ['✓ 同工艺优先', '✓ 同材质优先']
@@ -269,6 +348,8 @@ export function setPlacementRules(v) {
 export function setAggregationStats(v) { aggregationStats = v; }
 export function setGroupingInfo(v) { groupingInfo = v; }
 export function setCurrentBasketType(v) { currentBasketType = v; }
+export function setToolingTemplates(v) { toolingTemplates = v; }
+export function setDefaultToolingType(v) { defaultToolingType = v; }
 export function setDisplaySettings(v) { displaySettings = v; }
 export function setExplodedView(v) { explodedView = v; }
 export function setExplodeMode(v) { explodeMode = v; }

@@ -1072,3 +1072,252 @@ body {
     letter-spacing: 0.5px;
     transition: opacity 0.6s ease;
 }
+
+/* ==================== TOOLING ADD OVERLAY ==================== */
+#tooling-add-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(10, 10, 20, 0.85);
+    z-index: 950;
+    display: none;
+    justify-content: center;
+    align-items: center;
+    backdrop-filter: blur(4px);
+}
+#tooling-add-overlay.active {
+    display: flex;
+}
+
+#tooling-add-modal {
+    background: #1e1e2e;
+    border: 1px solid #3a3a52;
+    border-radius: 12px;
+    width: 820px;
+    max-width: 95vw;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+#tooling-add-modal h3 {
+    margin: 0;
+    font-size: 18px;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.tooling-add-subtitle {
+    margin: 0;
+    font-size: 12px;
+    color: #888;
+}
+
+.tooling-add-body {
+    display: flex;
+    gap: 20px;
+    flex: 1;
+    min-height: 0;
+}
+
+/* 左侧：工装类型卡片列表 */
+.tooling-add-left {
+    flex: 0 0 320px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.tooling-type-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #ccc;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #333;
+}
+.tooling-type-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow-y: auto;
+    max-height: 420px;
+    padding-right: 4px;
+}
+
+/* 单个工装类型卡片 */
+.tooling-type-card {
+    background: #252535;
+    border: 2px solid #333344;
+    border-radius: 8px;
+    padding: 12px 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.tooling-type-card:hover {
+    border-color: #0891b2;
+    background: #2a2a3e;
+}
+.tooling-type-card.selected {
+    border-color: #0891b2;
+    background: rgba(8,145,178,0.12);
+    box-shadow: 0 0 12px rgba(8,145,178,0.25);
+}
+.tooling-type-card .ttc-icon {
+    font-size: 22px;
+}
+.tooling-type-card .ttc-name {
+    font-size: 14px;
+    font-weight: 700;
+    color: #e0e0e8;
+}
+.tooling-type-card .ttc-info {
+    font-size: 10px;
+    color: #888;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.tooling-type-card .ttc-info span {
+    background: rgba(255,255,255,0.06);
+    padding: 1px 6px;
+    border-radius: 3px;
+    white-space: nowrap;
+}
+.tooling-type-card .ttc-desc {
+    font-size: 10px;
+    color: #777;
+    margin-top: 2px;
+}
+
+/* 右侧：尺寸配置 */
+.tooling-add-right {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+}
+.tooling-add-section {
+    background: #222234;
+    border: 1px solid #333344;
+    border-radius: 8px;
+    padding: 14px;
+}
+.tooling-add-section-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #ccc;
+    margin-bottom: 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #333;
+}
+.tooling-add-dim-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+.tooling-add-dim-row:last-child {
+    margin-bottom: 0;
+}
+.tooling-add-field {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.tooling-add-field label {
+    font-size: 10px;
+    color: #888;
+    font-weight: 600;
+    text-transform: none;
+}
+.tooling-add-field input {
+    padding: 7px 10px;
+    background: #161620;
+    border: 1px solid #3a3a52;
+    border-radius: 5px;
+    color: #e0e0e8;
+    font-size: 12px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s;
+}
+.tooling-add-field input:focus {
+    border-color: #0891b2;
+}
+
+/* 工装参数预览区 */
+.tooling-add-preview {
+    font-size: 11px;
+    color: #aaa;
+    line-height: 1.6;
+    min-height: 40px;
+}
+.tooling-add-preview .tap-row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    padding: 2px 0;
+}
+.tooling-add-preview .tap-label {
+    color: #67e8f9;
+    font-weight: 600;
+    min-width: 70px;
+    font-size: 10px;
+}
+.tooling-add-preview .tap-value {
+    color: #ccc;
+    font-size: 11px;
+}
+
+/* 底部操作按钮 */
+.tooling-add-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    padding-top: 8px;
+    border-top: 1px solid #333;
+}
+.tooling-add-btn-cancel {
+    flex: 0 0 100px;
+    padding: 9px 16px;
+    background: #3e3e52;
+    color: #ccc;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+.tooling-add-btn-cancel:hover {
+    background: #4e4e62;
+    color: #fff;
+}
+.tooling-add-btn-confirm {
+    flex: 1;
+    padding: 9px 16px;
+    background: linear-gradient(135deg, #0891b2 0%, #0e7490 100%);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 700;
+    transition: all 0.2s;
+}
+.tooling-add-btn-confirm:hover {
+    background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
+    box-shadow: 0 0 18px rgba(8,145,178,0.3);
+}
+.tooling-add-btn-confirm:disabled {
+    background: #3e3e52;
+    color: #666;
+    cursor: not-allowed;
+    box-shadow: none;
+}

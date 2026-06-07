@@ -23,12 +23,14 @@ import {
     placementRules, aggregationStats,
     groupingInfo,
     usedColors, masterPlans,
+    furnaceTooling, toolingTemplates, defaultToolingType,
     setFurnaceCounter, setMaterialCounter,
     setSelectedFurnaceCardId, setSelectedMaterialCardId,
     setFdpCollapsed, setMdpCollapsed,
     setSortState, setImportPreviewData,
     setPlacementRules, setCurrentFurnaceIndex,
-    setGlobalFurnacesResult, setGlobalUnpackedItems, setGlobalSpacingValue
+    setGlobalFurnacesResult, setGlobalUnpackedItems, setGlobalSpacingValue,
+    setToolingTemplates, setDefaultToolingType
 } from './state.js';
 import {
     generateUniqueColor,
@@ -56,7 +58,12 @@ export function getFurnaceDataFromCard(card) {
      * 从 data-basket-type 属性读取，默认为 'grid'
      */
     const basketType = card.getAttribute('data-basket-type') || 'grid';
-    return { fid, name, width: parseFloat(dims[0]) || 0, height: parseFloat(dims[1]) || 0, depth: parseFloat(dims[2]) || 0, maxWeight, count, plannedHeats, actualSpacing, basketType };
+    /** V4.8: 工装类型扩展 — 读取 toolingType、maxLayers、allowedProcesses、placementMode */
+    const toolingType = card.getAttribute('data-tooling-type') || 'standard-basket';
+    const maxLayers = parseInt(card.getAttribute('data-max-layers')) || 5;
+    const allowedProcesses = card.getAttribute('data-allowed-processes') || '';
+    const placementMode = card.getAttribute('data-placement-mode') || 'free';
+    return { fid, name, width: parseFloat(dims[0]) || 0, height: parseFloat(dims[1]) || 0, depth: parseFloat(dims[2]) || 0, maxWeight, count, plannedHeats, actualSpacing, basketType, toolingType, maxLayers, allowedProcesses, placementMode };
 }
 
 export function getMaterialDataFromCard(card) {
@@ -85,8 +92,8 @@ export function getMaterialDataFromCard(card) {
 // ==================== FURNACE CARD CREATION ====================
 
 /**
- * V2.3: createFurnaceCard 新增 basketType 参数
- * 每个炉膛独立存储自己的料框类型，互不影响
+ * V4.8: createFurnaceCard 新增 toolingType 参数
+ * 每个炉膛独立存储工装类型和料框类型，互不影响
  *
  * @param {string} name - 炉膛名称
  * @param {number} depth - 纵深 Z (mm)
@@ -97,44 +104,190 @@ export function getMaterialDataFromCard(card) {
  * @param {number} plannedHeats - 计划装载炉次
  * @param {number|null} actualSpacing - 实际安全间距
  * @param {string} basketType - 料框类型 ('grid'|'honeycomb'|'tray'|'solid')，默认 'grid'
+ * @param {string} toolingType - 工装类型 ('standard-basket'|'mesh-basket'|'special-jig'|'material-tray'|'hanger'|'ring-tooling')，默认 'standard-basket'
  */
-export function createFurnaceCard(name, depth, width, height, maxWeight, count, plannedHeats, actualSpacing, basketType) {
+export function createFurnaceCard(name, depth, width, height, maxWeight, count, plannedHeats, actualSpacing, basketType, toolingType) {
     const newFC = furnaceCounter + 1; setFurnaceCounter(newFC);
     const cardId = 'furnace-card-' + newFC;
     const card = document.createElement('div');
     card.className = 'furnace-card'; card.id = cardId;
     card.setAttribute('data-fid', newFC);
     if (actualSpacing !== undefined && actualSpacing !== null) card.setAttribute('data-spacing', actualSpacing);
-    /**
-     * V2.3: 存储料框类型到 data-basket-type 属性
-     * 默认为 'grid'（普通网格料框）
-     */
     card.setAttribute('data-basket-type', basketType || 'grid');
+    /** V4.8: 存储工装类型及相关参数 */
+    const tt = toolingType || defaultToolingType;
+    const ttConfig = furnaceTooling[tt] || furnaceTooling['standard-basket'];
+    card.setAttribute('data-tooling-type', tt);
+    card.setAttribute('data-max-layers', ttConfig.maxLayers);
+    card.setAttribute('data-allowed-processes', (ttConfig.allowedProcesses || []).join(','));
+    card.setAttribute('data-placement-mode', ttConfig.placementMode);
     const ph = plannedHeats || 0;
-    card.innerHTML = '<span class="f-drag-handle" draggable="true" title="拖拽排序">⠿</span><button class="f-card-delete" data-action="delete-furnace" data-fid="' + newFC + '">✕</button><div class="f-card-name">' + name + '</div><div class="f-card-meta"><span>📐 ' + width + '×' + height + '×' + depth + '</span><span>📦 ×' + count + '台</span><span>⚖ ' + maxWeight + 'kg</span><span>计划' + ph + '炉</span></div><div class="f-card-status">点击查看详情 · 双击编辑</div>';
-    card.addEventListener('click', (e) => { if (e.target.closest('[data-action="delete-furnace"]')) return; if (e.target.closest('.f-drag-handle')) return; selectFurnaceCard(cardId); showFurnaceDetail(cardId); });
+    card.innerHTML = '<span class="f-drag-handle" draggable="true" title="拖拽排序">⠿</span><button class="f-card-delete" data-action="delete-furnace" data-fid="' + newFC + '">✕</button><div class="f-card-name">' + name + '</div><div class="f-card-meta"><span>📐 ' + width + '×' + height + '×' + depth + '</span><span>📦 ×' + count + '台</span><span>⚖ ' + maxWeight + 'kg</span><span>计划' + ph + '炉</span></div><div class="f-card-status">' + ttConfig.label + ' · 点击查看详情 · 双击编辑</div>';
+    // card.addEventListener('click', (e) => { if (e.target.closest('[data-action="delete-furnace"]')) return; if (e.target.closest('.f-drag-handle')) return; selectFurnaceCard(cardId); showFurnaceDetail(cardId); });
+    card.addEventListener('click', (e) => { 
+            if (e.target.closest('[data-action="delete-furnace"]')) return; 
+            if (e.target.closest('.f-drag-handle')) return; 
+            
+            // 记录点击前的状态
+            const wasSelected = card.classList.contains('active'); 
+            // 执行选中/取消选中切换
+            selectFurnaceCard(cardId); 
+            
+            if (!wasSelected) { 
+                // 原本未选中，现在选中了，展示详情
+                showFurnaceDetail(cardId); 
+            } else { 
+                // 原本已选中，现在取消选中了，隐藏详情并恢复默认提示
+                document.getElementById('fdp-placeholder').style.display = 'block'; 
+                document.getElementById('fdp-body').style.display = 'none'; 
+                document.getElementById('fdp-title').textContent = '📋 炉膛详情'; 
+            } 
+        });
     setupFurnaceDrag(card);
     document.getElementById('furnace-cards-container').appendChild(card);
-    return { cardId, furnaceCounter: newFC, name, depth, width, height, maxWeight, count, plannedHeats: ph, basketType: basketType || 'grid' };
+    return { cardId, furnaceCounter: newFC, name, depth, width, height, maxWeight, count, plannedHeats: ph, basketType: basketType || 'grid', toolingType: tt };
 }
 
-export function selectFurnaceCard(cardId) { document.querySelectorAll('.furnace-card').forEach(c => c.classList.remove('active')); const card = document.getElementById(cardId); if (card) { card.classList.add('active'); setSelectedFurnaceCardId(cardId); } }
+// export function selectFurnaceCard(cardId) { document.querySelectorAll('.furnace-card').forEach(c => c.classList.remove('active')); const card = document.getElementById(cardId); if (card) { card.classList.add('active'); setSelectedFurnaceCardId(cardId); } }
+export function selectFurnaceCard(cardId) { 
+    const card = document.getElementById(cardId); 
+    // 如果当前已经被选中，则取消选中
+    if (card && card.classList.contains('active')) { 
+        card.classList.remove('active'); 
+        setSelectedFurnaceCardId(null); 
+    } else { 
+        // 否则，清除其他卡片的选中状态，并选中当前卡片
+        document.querySelectorAll('.furnace-card').forEach(c => c.classList.remove('active')); 
+        if (card) { 
+            card.classList.add('active'); 
+            setSelectedFurnaceCardId(cardId); 
+        } 
+    } 
+}
 
+// export function showFurnaceDetail(cardId) {
+//     const card = document.getElementById(cardId); if (!card) return;
+//     const d = getFurnaceDataFromCard(card);
+//     document.getElementById('fdp-title').textContent = '📋 ' + d.name;
+//     document.getElementById('fdp-placeholder').style.display = 'none';
+//     const body = document.getElementById('fdp-body'); body.style.display = 'block';
+
+//     /** V4.8: 工装类型详情面板 — toolingType 选择联动 maxLayers/placementMode/basketType */
+//     const currentToolingType = card.getAttribute('data-tooling-type') || d.toolingType || 'standard-basket';
+//     const currentBasketType = card.getAttribute('data-basket-type') || d.basketType || 'grid';
+//     const currentMaxLayers = card.getAttribute('data-max-layers') || d.maxLayers;
+//     const currentAllowedProcesses = card.getAttribute('data-allowed-processes') || d.allowedProcesses || '';
+//     const currentPlacementMode = card.getAttribute('data-placement-mode') || d.placementMode || 'free';
+
+//     // 构建工装类型下拉选项
+//     const toolingOptions = Object.entries(furnaceTooling).map(([key, cfg]) =>
+//         '<option value="' + key + '"' + (currentToolingType === key ? ' selected' : '') + '>' + cfg.label + '</option>'
+//     ).join('');
+
+//     // 构建料框类型下拉选项
+//     const basketOptions = [
+//         '<option value="grid"' + (currentBasketType === 'grid' ? ' selected' : '') + '>普通网格料框</option>',
+//         '<option value="honeycomb"' + (currentBasketType === 'honeycomb' ? ' selected' : '') + '>蜂窝料框</option>',
+//         '<option value="tray"' + (currentBasketType === 'tray' ? ' selected' : '') + '>托盘式料框</option>',
+//         '<option value="ringnode"' + (currentBasketType === 'ringnode' ? ' selected' : '') + '>圆环节点料框</option>'
+//     ].join('');
+
+//     body.innerHTML =
+//         '<div class="fdp-row"><div class="fdp-field"><label>名称</label><input type="text" id="fdp-name" value="' + d.name + '"></div></div>' +
+//         '<div class="fdp-row"><div class="fdp-field"><label>宽度 X (mm)</label><input type="number" id="fdp-width" value="' + d.width + '"></div><div class="fdp-field"><label>高度 Y (mm)</label><input type="number" id="fdp-height" value="' + d.height + '"></div><div class="fdp-field"><label>纵深 Z (mm)</label><input type="number" id="fdp-depth" value="' + d.depth + '"></div></div>' +
+//         '<div class="fdp-row"><div class="fdp-field"><label>承重上限 (kg)</label><input type="number" id="fdp-weight" value="' + d.maxWeight + '"></div><div class="fdp-field"><label>台数</label><input type="number" id="fdp-count" value="' + d.count + '" min="1"></div></div>' +
+//         '<div class="fdp-row"><div class="fdp-field"><label>计划装载炉次</label><input type="number" id="fdp-planned" value="' + d.plannedHeats + '" min="0"></div><div class="fdp-field"><label>实际安全间距 (mm) <span style="color:#666;font-size:9px;">留空=用默认</span></label><input type="number" id="fdp-spacing" value="' + (d.actualSpacing != null ? d.actualSpacing : '') + '" placeholder="默认' + (document.getElementById('global-spacing') ? document.getElementById('global-spacing').value : '5') + 'mm"></div></div>' +
+//         '<!-- V4.8: 工装类型区域 -->' +
+//         '<div class="fdp-row" style="background:rgba(8,145,178,0.08);border:1px solid rgba(8,145,178,0.2);border-radius:6px;padding:8px 6px;margin-top:4px;">' +
+//             '<div class="fdp-field"><label>🔧 工装类型 <span style="color:#0891b2;font-size:9px;">V4.8</span></label><select id="fdp-tooling-type">' + toolingOptions + '</select></div>' +
+//         '</div>' +
+//         '<div class="fdp-row">' +
+//             '<div class="fdp-field"><label>最大堆叠层数</label><input type="number" id="fdp-max-layers" value="' + currentMaxLayers + '" min="1" max="20"></div>' +
+//             '<div class="fdp-field"><label>摆放模式</label><select id="fdp-placement-mode"><option value="free"' + (currentPlacementMode === 'free' ? ' selected' : '') + '>自由摆放</option><option value="fixed"' + (currentPlacementMode === 'fixed' ? ' selected' : '') + '>固定卡位</option><option value="vertical"' + (currentPlacementMode === 'vertical' ? ' selected' : '') + '>垂直悬挂</option><option value="radial"' + (currentPlacementMode === 'radial' ? ' selected' : '') + '>径向排列</option></select></div>' +
+//         '</div>' +
+//         '<div class="fdp-row">' +
+//             '<div class="fdp-field"><label>允许工艺 (逗号分隔)</label><input type="text" id="fdp-allowed-processes" value="' + currentAllowedProcesses + '" placeholder="留空=全部允许"></div>' +
+//         '</div>' +
+//         '<div class="fdp-row"><div class="fdp-field"><label>📦 料框类型 (3D建模) <span style="color:#666;font-size:9px;">V2.3</span></label><select id="fdp-basket-type">' + basketOptions + '</select></div></div>' +
+//         '<button class="fdp-save-btn" id="fdp-save-btn">💾 保存炉膛参数</button>';
+
+//     // 工装类型切换联动
+//     const toolingSelect = document.getElementById('fdp-tooling-type');
+//     if (toolingSelect) {
+//         toolingSelect.addEventListener('change', function() {
+//             const cfg = furnaceTooling[this.value];
+//             if (!cfg) return;
+//             document.getElementById('fdp-max-layers').value = cfg.maxLayers;
+//             document.getElementById('fdp-placement-mode').value = cfg.placementMode;
+//             document.getElementById('fdp-allowed-processes').value = (cfg.allowedProcesses || []).join(',');
+//             const basketSel = document.getElementById('fdp-basket-type');
+//             if (basketSel && cfg.basketType) basketSel.value = cfg.basketType;
+//         });
+//     }
+
+//     document.getElementById('fdp-save-btn').addEventListener('click', () => { saveFurnaceDetail(cardId); });
+//     if (fdpCollapsed) { setFdpCollapsed(false); document.getElementById('furnace-detail-panel').classList.remove('collapsed'); document.getElementById('fdp-toggle-icon').textContent = '▲'; }
+// }
 export function showFurnaceDetail(cardId) {
     const card = document.getElementById(cardId); if (!card) return;
     const d = getFurnaceDataFromCard(card);
     document.getElementById('fdp-title').textContent = '📋 ' + d.name;
     document.getElementById('fdp-placeholder').style.display = 'none';
     const body = document.getElementById('fdp-body'); body.style.display = 'block';
-    /**
-     * V2.3: 炉膛详情面板新增料框类型下拉框
-     * 每个炉膛独立选择料框类型，切换后保存到 data-basket-type 属性
-     */
-    const basketType = card.getAttribute('data-basket-type') || d.basketType || 'grid';
-    body.innerHTML = '<div class="fdp-row"><div class="fdp-field"><label>名称</label><input type="text" id="fdp-name" value="' + d.name + '"></div></div><div class="fdp-row"><div class="fdp-field"><label>宽度 X (mm)</label><input type="number" id="fdp-width" value="' + d.width + '"></div><div class="fdp-field"><label>高度 Y (mm)</label><input type="number" id="fdp-height" value="' + d.height + '"></div><div class="fdp-field"><label>纵深 Z (mm)</label><input type="number" id="fdp-depth" value="' + d.depth + '"></div></div><div class="fdp-row"><div class="fdp-field"><label>承重上限 (kg)</label><input type="number" id="fdp-weight" value="' + d.maxWeight + '"></div><div class="fdp-field"><label>台数</label><input type="number" id="fdp-count" value="' + d.count + '" min="1"></div></div><div class="fdp-row"><div class="fdp-field"><label>计划装载炉次</label><input type="number" id="fdp-planned" value="' + d.plannedHeats + '" min="0"></div><div class="fdp-field"><label>实际安全间距 (mm) <span style="color:#666;font-size:9px;">留空=用默认</span></label><input type="number" id="fdp-spacing" value="' + (d.actualSpacing != null ? d.actualSpacing : '') + '" placeholder="默认' + (document.getElementById('global-spacing') ? document.getElementById('global-spacing').value : '5') + 'mm"></div></div><div class="fdp-row"><div class="fdp-field"><label>📦 料框类型 <span style="color:#666;font-size:9px;">V2.3</span></label><select id="fdp-basket-type"><option value="grid"' + (basketType === 'grid' ? ' selected' : '') + '>普通网格料框</option><option value="honeycomb"' + (basketType === 'honeycomb' ? ' selected' : '') + '>蜂窝料框</option><option value="tray"' + (basketType === 'tray' ? ' selected' : '') + '>托盘式料框</option><option value="solid"' + (basketType === 'solid' ? ' selected' : '') + '>圆环节点料框</option></select></div></div><button class="fdp-save-btn" id="fdp-save-btn">💾 保存炉膛参数</button>';
+
+    // 净化后的面板：只展示基础物理属性和状态
+    body.innerHTML =
+        '<div class="fdp-row"><div class="fdp-field"><label>名称</label><input type="text" id="fdp-name" value="' + d.name + '"></div></div>' +
+        '<div class="fdp-row"><div class="fdp-field"><label>宽度 X (mm)</label><input type="number" id="fdp-width" value="' + d.width + '"></div><div class="fdp-field"><label>高度 Y (mm)</label><input type="number" id="fdp-height" value="' + d.height + '"></div><div class="fdp-field"><label>纵深 Z (mm)</label><input type="number" id="fdp-depth" value="' + d.depth + '"></div></div>' +
+        '<div class="fdp-row"><div class="fdp-field"><label>承重上限 (kg)</label><input type="number" id="fdp-weight" value="' + d.maxWeight + '"></div><div class="fdp-field"><label>台数</label><input type="number" id="fdp-count" value="' + d.count + '" min="1"></div></div>' +
+        '<div class="fdp-row"><div class="fdp-field"><label>计划装载炉次</label><input type="number" id="fdp-planned" value="' + d.plannedHeats + '" min="0"></div><div class="fdp-field"><label>实际安全间距 (mm) <span style="color:#666;font-size:9px;">留空=用默认</span></label><input type="number" id="fdp-spacing" value="' + (d.actualSpacing != null ? d.actualSpacing : '') + '" placeholder="默认' + (document.getElementById('global-spacing') ? document.getElementById('global-spacing').value : '5') + 'mm"></div></div>' +
+        '<button class="fdp-save-btn" id="fdp-save-btn">💾 保存基础参数</button>';
+
     document.getElementById('fdp-save-btn').addEventListener('click', () => { saveFurnaceDetail(cardId); });
     if (fdpCollapsed) { setFdpCollapsed(false); document.getElementById('furnace-detail-panel').classList.remove('collapsed'); document.getElementById('fdp-toggle-icon').textContent = '▲'; }
 }
+
+// export function saveFurnaceDetail(cardId) {
+//     const card = document.getElementById(cardId); if (!card) return;
+//     const name = document.getElementById('fdp-name').value.trim() || '炉膛';
+//     const width = parseFloat(document.getElementById('fdp-width').value) || 0;
+//     const height = parseFloat(document.getElementById('fdp-height').value) || 0;
+//     const depth = parseFloat(document.getElementById('fdp-depth').value) || 0;
+//     const maxWeight = parseFloat(document.getElementById('fdp-weight').value) || 0;
+//     const count = parseInt(document.getElementById('fdp-count').value) || 1;
+//     const plannedHeats = parseInt(document.getElementById('fdp-planned').value) || 0;
+//     const spacingVal = document.getElementById('fdp-spacing').value;
+//     const actualSpacing = spacingVal !== '' ? parseFloat(spacingVal) : null;
+
+//     /** V4.8: 保存工装类型到 data-* 属性 */
+//     const toolingSelect = document.getElementById('fdp-tooling-type');
+//     if (toolingSelect) card.setAttribute('data-tooling-type', toolingSelect.value);
+
+//     const maxLayersInput = document.getElementById('fdp-max-layers');
+//     if (maxLayersInput) card.setAttribute('data-max-layers', maxLayersInput.value);
+
+//     const allowedProcInput = document.getElementById('fdp-allowed-processes');
+//     if (allowedProcInput) card.setAttribute('data-allowed-processes', allowedProcInput.value);
+
+//     const placementModeSelect = document.getElementById('fdp-placement-mode');
+//     if (placementModeSelect) card.setAttribute('data-placement-mode', placementModeSelect.value);
+
+//     /** V2.3: 保存料框类型到 data-basket-type 属性 */
+//     const basketSelect = document.getElementById('fdp-basket-type');
+//     if (basketSelect) {
+//         card.setAttribute('data-basket-type', basketSelect.value);
+//     }
+
+//     card.querySelector('.f-card-name').textContent = name;
+//     card.querySelector('.f-card-meta').innerHTML = '<span>📐 ' + width + '×' + height + '×' + depth + '</span><span>📦 ×' + count + '台</span><span>⚖ ' + maxWeight + 'kg</span><span>计划' + plannedHeats + '炉</span>';
+//     /** V4.8: 卡片状态行显示工装类型标签 */
+//     const tt = card.getAttribute('data-tooling-type') || 'standard-basket';
+//     const ttCfg = furnaceTooling[tt] || { label: '标准料框' };
+//     card.querySelector('.f-card-status').textContent = ttCfg.label + ' · 点击查看详情 · 双击编辑';
+//     if (actualSpacing !== null) card.setAttribute('data-spacing', actualSpacing); else card.removeAttribute('data-spacing');
+//     document.getElementById('fdp-title').textContent = '📋 ' + name; updateTopSummary();
+//     const btn = document.getElementById('fdp-save-btn'); if (btn) { btn.textContent = '✅ 已保存'; setTimeout(() => { btn.textContent = '💾 保存炉膛参数'; }, 1500); }
+// }
 
 export function saveFurnaceDetail(cardId) {
     const card = document.getElementById(cardId); if (!card) return;
@@ -147,18 +300,20 @@ export function saveFurnaceDetail(cardId) {
     const plannedHeats = parseInt(document.getElementById('fdp-planned').value) || 0;
     const spacingVal = document.getElementById('fdp-spacing').value;
     const actualSpacing = spacingVal !== '' ? parseFloat(spacingVal) : null;
-    /**
-     * V2.3: 保存料框类型到 data-basket-type 属性
-     */
-    const basketSelect = document.getElementById('fdp-basket-type');
-    if (basketSelect) {
-        card.setAttribute('data-basket-type', basketSelect.value);
-    }
+
+    // 删除原本在这里读取 fdp-tooling-type、fdp-max-layers、fdp-basket-type 等等赋值给 setAttribute 的几十行代码
+    
     card.querySelector('.f-card-name').textContent = name;
     card.querySelector('.f-card-meta').innerHTML = '<span>📐 ' + width + '×' + height + '×' + depth + '</span><span>📦 ×' + count + '台</span><span>⚖ ' + maxWeight + 'kg</span><span>计划' + plannedHeats + '炉</span>';
+    
+    // 卡片底部标签依然从原始的 data 属性读取（由添加工装时决定）
+    const tt = card.getAttribute('data-tooling-type') || 'standard-basket';
+    const ttCfg = furnaceTooling[tt] || { label: '标准料框' };
+    card.querySelector('.f-card-status').textContent = ttCfg.label + ' · 点击查看详情 · 双击编辑';
+    
     if (actualSpacing !== null) card.setAttribute('data-spacing', actualSpacing); else card.removeAttribute('data-spacing');
     document.getElementById('fdp-title').textContent = '📋 ' + name; updateTopSummary();
-    const btn = document.getElementById('fdp-save-btn'); if (btn) { btn.textContent = '✅ 已保存'; setTimeout(() => { btn.textContent = '💾 保存炉膛参数'; }, 1500); }
+    const btn = document.getElementById('fdp-save-btn'); if (btn) { btn.textContent = '✅ 已保存'; setTimeout(() => { btn.textContent = '💾 保存基础参数'; }, 1500); }
 }
 
 export function deleteFurnaceCard(fid) {

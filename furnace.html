@@ -26,6 +26,7 @@
         <h2>🔥 热处理预装炉智能体</h2>
         <button class="btn btn-master" id="btn-master">🏆 装料大师</button>
         <button class="btn btn-rules" id="btn-rules">📐 摆放规则</button>
+        <button class="btn btn-rules" id="btn-tooling-mgmt" style="background: linear-gradient(135deg, #4f46e5 0%, #3730a3 100%); box-shadow: 0 0 14px rgba(79,70,229,0.35);">🔧 工装模板</button>
         <button class="btn btn-generate" id="btn-generate-plan">⚡ 生成方案</button>
         <button class="btn btn-animate-top" id="btn-animate">🎬 逐步模拟装框</button>
         <button class="btn btn-pdf-top" id="btn-export-pdf">📄 导出 PDF</button>
@@ -42,9 +43,9 @@
         <!-- LEFT PANEL: Furnace Config -->
         <div id="left-panel">
             <div class="panel-header">
-                <h3>🏭 炉膛资产配置</h3>
+                <h3>🏭 工装配置</h3>
                 <div class="panel-header-actions">
-                    <button class="btn-sm" id="btn-add-furnace">+ 增加料框</button>
+                    <button class="btn-sm" id="btn-add-furnace">+ 增加工装</button>
                 </div>
             </div>
             <div class="sort-bar">
@@ -66,15 +67,6 @@
                 </div>
             </div>
             <!-- V4.0: 车间选择器 -->
-            <div class="basket-type-line">
-                <label>默认车间：</label>
-                <select id="basket-type-select">
-                    <option value="grid">标准车间</option>
-                    <option value="honeycomb">真空车间</option>
-                    <option value="tray">氮化车间</option>
-                    <option value="solid">多用炉车间</option>
-                </select>
-            </div>
             <div class="spacing-line">
                 默认安全间距 <input type="number" id="global-spacing" value="5" min="0"> mm
             </div>
@@ -350,6 +342,80 @@
                 </div>
             </div>
             <button class="gen-option-cancel" id="btn-gen-option-cancel">取消</button>
+        </div>
+    </div>
+
+    <!-- Tooling Add Overlay - 工装类型选择 + 尺寸配置 -->
+    <div id="tooling-add-overlay">
+        <div id="tooling-add-modal">
+            <h3>🔧 选择工装类型并配置尺寸</h3>
+            <p class="tooling-add-subtitle">先选择工装类型，再配置尺寸参数，确认后添加料框</p>
+            <div class="tooling-add-body">
+                <!-- 左侧：工装类型选择 -->
+                <div class="tooling-add-left">
+                    <div class="tooling-type-label">选择工装类型</div>
+                    <div class="tooling-type-cards" id="tooling-type-cards">
+                        <!-- 动态渲染工装类型卡片 -->
+                    </div>
+                </div>
+                <!-- 右侧：尺寸配置 -->
+                <div class="tooling-add-right">
+                    <div class="tooling-add-section">
+                        <div class="tooling-add-section-title">📐 尺寸参数</div>
+                        <div class="tooling-add-dim-row">
+                            <div class="tooling-add-field">
+                                <label>名称</label>
+                                <input type="text" id="ta-name" value="">
+                            </div>
+                        </div>
+                        <div class="tooling-add-dim-row">
+                            <div class="tooling-add-field">
+                                <label>宽度 X (mm)</label>
+                                <input type="number" id="ta-width" value="900" min="100" max="5000">
+                            </div>
+                            <div class="tooling-add-field">
+                                <label>高度 Y (mm)</label>
+                                <input type="number" id="ta-height" value="1200" min="100" max="5000">
+                            </div>
+                            <div class="tooling-add-field">
+                                <label>纵深 Z (mm)</label>
+                                <input type="number" id="ta-depth" value="900" min="100" max="5000">
+                            </div>
+                        </div>
+                        <div class="tooling-add-dim-row">
+                            <div class="tooling-add-field">
+                                <label>承重上限 (kg)</label>
+                                <input type="number" id="ta-weight" value="1000" min="1" max="50000">
+                            </div>
+                            <div class="tooling-add-field">
+                                <label>台数</label>
+                                <input type="number" id="ta-count" value="1" min="1" max="100">
+                            </div>
+                        </div>
+                        <div class="tooling-add-dim-row">
+                            <div class="tooling-add-field">
+                                <label>计划装载炉次</label>
+                                <input type="number" id="ta-planned" value="0" min="0" max="1000">
+                            </div>
+                            <div class="tooling-add-field">
+                                <label>安全间距 (mm) <span style="color:#666;font-size:9px;">留空=用默认</span></label>
+                                <input type="number" id="ta-spacing" value="" placeholder="默认5mm">
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 工装预览信息 -->
+                    <div class="tooling-add-section">
+                        <div class="tooling-add-section-title">📋 工装参数预览</div>
+                        <div class="tooling-add-preview" id="ta-preview">
+                            <span style="color:#666;">请先在左侧选择工装类型</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="tooling-add-actions">
+                <button class="tooling-add-btn-cancel" id="btn-ta-cancel">取消</button>
+                <button class="tooling-add-btn-confirm" id="btn-ta-confirm">✅ 确认添加</button>
+            </div>
         </div>
     </div>
 

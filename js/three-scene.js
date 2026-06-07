@@ -478,6 +478,21 @@ function createHoneycombPanel(faceType, w, h, d, material) {
     return mesh;
 }
 
+// ==================== TOOLING-TO-BASKET MAPPING (V4.8) ====================
+
+/**
+ * 工装类型 → 料框 3D 建模类型映射
+ * 用于 createBasketFrame 根据 furnace.toolingType 选择正确的建模函数
+ */
+export const TOOLING_TO_BASKET = {
+    'standard-basket': 'grid',
+    'mesh-basket': 'honeycomb',
+    'special-jig': 'tray',
+    'material-tray': 'tray',
+    'hanger': 'hanger',
+    'ring-tooling': 'ringnode'
+};
+
 // ==================== BASKET FRAME MODELING ====================
 
 function createGridBasketFrame(w, h, d, gridSize) {
@@ -845,6 +860,148 @@ export function createRingNodeBasketFrame(w, h, d) {
     return group;
 }
 /**
+ * V4.8: 挂具工装 3D 占位模型 — 顶部横梁 + 垂直挂钩
+ *
+ * @param {number} w - 宽度 (mm)
+ * @param {number} h - 高度 (mm)
+ * @param {number} d - 深度 (mm)
+ * @param {Object} [params={}] - 工装参数 { hookSpacing, maxHangWeight }
+ * @returns {THREE.Group}
+ */
+function createHangerFrame(w, h, d, params = {}) {
+    const group = new THREE.Group();
+
+    const frameMaterial = new THREE.MeshStandardMaterial({
+        color: 0x886644,
+        roughness: 0.5,
+        metalness: 0.7,
+        transparent: true,
+        opacity: 0.6,
+        depthWrite: false
+    });
+
+    const hookMaterial = new THREE.MeshStandardMaterial({
+        color: 0x665533,
+        roughness: 0.55,
+        metalness: 0.75,
+        transparent: true,
+        opacity: 0.5,
+        depthWrite: false
+    });
+
+    // 顶部横梁
+    group.add(createBar(
+        new THREE.Vector3(0, h, d / 2),
+        new THREE.Vector3(w, h, d / 2),
+        6, frameMaterial
+    ));
+
+    // 底部横梁
+    group.add(createBar(
+        new THREE.Vector3(0, 0, d / 2),
+        new THREE.Vector3(w, 0, d / 2),
+        6, frameMaterial
+    ));
+
+    // 垂直挂钩
+    const hookSpacing = params.hookSpacing || 80;
+    for (let x = hookSpacing; x < w; x += hookSpacing) {
+        group.add(createBar(
+            new THREE.Vector3(x, h, d / 2),
+            new THREE.Vector3(x, 0, d / 2),
+            3, hookMaterial
+        ));
+    }
+
+    group.userData = { isBasketFrame: true, basketType: 'hanger' };
+    return group;
+}
+
+/**
+ * V4.8: 环形工装 3D 占位模型 — 圆环轨道 + 径向支撑臂
+ *
+ * @param {number} w - 宽度 (mm)
+ * @param {number} h - 高度 (mm)
+ * @param {number} d - 深度 (mm)
+ * @param {Object} [params={}] - 工装参数 { innerRadius, outerRadius, angleStep }
+ * @returns {THREE.Group}
+ */
+function createRadialFrame(w, h, d, params = {}) {
+    const group = new THREE.Group();
+
+    const frameMaterial = new THREE.MeshStandardMaterial({
+        color: 0x667788,
+        roughness: 0.5,
+        metalness: 0.75,
+        transparent: true,
+        opacity: 0.6,
+        depthWrite: false
+    });
+
+    const armMaterial = new THREE.MeshStandardMaterial({
+        color: 0x556677,
+        roughness: 0.55,
+        metalness: 0.7,
+        transparent: true,
+        opacity: 0.5,
+        depthWrite: false
+    });
+
+    const centerX = w / 2;
+    const centerZ = d / 2;
+    const outerR = params.outerRadius || Math.min(w, d) / 2 - 50;
+    const innerR = params.innerRadius || outerR * 0.5;
+    const angleStep = params.angleStep || 30;
+
+    // 环形轨道（Torus）
+    const torusGeo = new THREE.TorusGeometry(outerR, 5, 8, 48);
+    const torus = new THREE.Mesh(torusGeo, frameMaterial);
+    torus.position.set(centerX, h / 2, centerZ);
+    torus.rotation.x = Math.PI / 2;
+    group.add(torus);
+
+    // 径向支撑臂
+    for (let angle = 0; angle < 360; angle += angleStep) {
+        const rad = (angle * Math.PI) / 180;
+        const innerX = centerX + innerR * Math.cos(rad);
+        const innerZ = centerZ + innerR * Math.sin(rad);
+        const outerX = centerX + outerR * Math.cos(rad);
+        const outerZ = centerZ + outerR * Math.sin(rad);
+
+        group.add(createBar(
+            new THREE.Vector3(innerX, h / 2, innerZ),
+            new THREE.Vector3(outerX, h / 2, outerZ),
+            3, armMaterial
+        ));
+    }
+
+    // 边框钢筋
+    function createEdgeBar(x1, y1, z1, x2, y2, z2) {
+        return createBar(
+            new THREE.Vector3(x1, y1, z1),
+            new THREE.Vector3(x2, y2, z2),
+            4, frameMaterial
+        );
+    }
+
+    group.add(createEdgeBar(0, 0, 0, w, 0, 0));
+    group.add(createEdgeBar(w, 0, 0, w, 0, d));
+    group.add(createEdgeBar(w, 0, d, 0, 0, d));
+    group.add(createEdgeBar(0, 0, d, 0, 0, 0));
+    group.add(createEdgeBar(0, 0, 0, 0, h, 0));
+    group.add(createEdgeBar(w, 0, 0, w, h, 0));
+    group.add(createEdgeBar(w, 0, d, w, h, d));
+    group.add(createEdgeBar(0, 0, d, 0, h, d));
+    group.add(createEdgeBar(0, h, 0, w, h, 0));
+    group.add(createEdgeBar(w, h, 0, w, h, d));
+    group.add(createEdgeBar(w, h, d, 0, h, d));
+    group.add(createEdgeBar(0, h, d, 0, h, 0));
+
+    group.userData = { isBasketFrame: true, basketType: 'radial' };
+    return group;
+}
+
+/**
  * 统一料框创建入口 — 根据 basketType 参数选择对应类型
  */
 function createBasketFrame(w, h, d, gridSize, basketType) {
@@ -859,6 +1016,10 @@ function createBasketFrame(w, h, d, gridSize, basketType) {
             return createRingNodeBasketFrame(w, h, d); // 固体框改为密集网格，视觉上更清晰
         case 'ringnode':
             return createRingNodeBasketFrame(w, h, d);
+        case 'hanger':
+            return createHangerFrame(w, h, d);
+        case 'radial':
+            return createRadialFrame(w, h, d);
         case 'grid':
         default:
             return createGridBasketFrame(w, h, d, gridSize || 100);

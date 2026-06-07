@@ -17,10 +17,11 @@ import {
     currentFurnaceIndex, selectedFurnaceCardId,
     masterRenderer, itemsGroup, usedColors,
     currentBasketType, displaySettings,
+    defaultToolingType, furnaceTooling, toolingTemplates,
     setAnimPaused, setAnimStopped, setCurrentFurnaceIndex,
     setFdpCollapsed, setMdpCollapsed,
     setGlobalFurnacesResult, setGlobalUnpackedItems, setGlobalSpacingValue,
-    setCurrentBasketType, setDisplaySettings,
+    setCurrentBasketType, setDisplaySettings, setDefaultToolingType,
     clearFurnaceGroups
 } from './state.js';
 import {
@@ -67,7 +68,12 @@ function executeAndRender() {
             name: d.name, count: d.count,
             width: d.width, height: d.height, depth: d.depth,
             maxWeight: d.maxWeight, actualSpacing: d.actualSpacing,
-            basketType: d.basketType || "grid"
+            basketType: d.basketType || "grid",
+            /** V4.8: 工装类型字段透传 */
+            toolingType: d.toolingType || defaultToolingType,
+            maxLayers: d.maxLayers || 5,
+            allowedProcesses: d.allowedProcesses || "",
+            placementMode: d.placementMode || "free"
         });
     });
     let itemsInput = [];
@@ -286,10 +292,7 @@ function init() {
         btnBOM.addEventListener("click", showLayeredBOM);
     }
 
-    document.getElementById("btn-add-furnace").addEventListener("click", () => {
-        createFurnaceCard("自定义料框", 1200, 900, 900, 1000, 1, 0, null, "grid");
-        updateTopSummary();
-    });
+    document.getElementById("btn-add-furnace").addEventListener("click", openToolingAddModal);
     document.querySelectorAll(".sort-btn").forEach(btn => {
         btn.addEventListener("click", () => sortFurnaceCards(btn.getAttribute("data-field")));
     });
@@ -336,21 +339,39 @@ function init() {
     });
     document.getElementById("nav-prev").addEventListener("click", () => navigateFurnace(-1));
     document.getElementById("nav-next").addEventListener("click", () => navigateFurnace(1));
-    document.getElementById("global-spacing").addEventListener("change", () => {
-        setGlobalFurnacesResult(null);
-        setGlobalUnpackedItems([]);
-        setCurrentFurnaceIndex(0);
-        clearFurnaceGroups();
-        document.getElementById("btn-export-pdf").style.display = "none";
-        document.getElementById("btn-animate").style.display = "none";
-        document.getElementById("furnace-nav").style.display = "none";
-        document.getElementById("empty-state").style.display = "block";
-        document.getElementById("center-stats-panel").style.display = "none";
-        hideExplodeBOMButtons();
-        if (itemsGroup) {
-            while (itemsGroup.children.length > 0) itemsGroup.remove(itemsGroup.children[0]);
-        }
-    });
+    const spacingEL = document.getElementById("global-spacing");
+    if (spacingEL) {
+        spacingEL.addEventListener("change", () => {
+            setGlobalFurnacesResult(null);
+            setGlobalUnpackedItems([]);
+            setCurrentFurnaceIndex(0);
+            clearFurnaceGroups();
+            document.getElementById("btn-export-pdf").style.display = "none";
+            document.getElementById("btn-animate").style.display = "none";
+            document.getElementById("furnace-nav").style.display = "none";
+            document.getElementById("empty-state").style.display = "block";
+            document.getElementById("center-stats-panel").style.display = "none";
+            hideExplodeBOMButtons();
+            if (itemsGroup) {
+                while (itemsGroup.children.length > 0) itemsGroup.remove(itemsGroup.children[0]);
+            }
+        });
+    }
+    // document.getElementById("global-spacing").addEventListener("change", () => {
+    //     setGlobalFurnacesResult(null);
+    //     setGlobalUnpackedItems([]);
+    //     setCurrentFurnaceIndex(0);
+    //     clearFurnaceGroups();
+    //     document.getElementById("btn-export-pdf").style.display = "none";
+    //     document.getElementById("btn-animate").style.display = "none";
+    //     document.getElementById("furnace-nav").style.display = "none";
+    //     document.getElementById("empty-state").style.display = "block";
+    //     document.getElementById("center-stats-panel").style.display = "none";
+    //     hideExplodeBOMButtons();
+    //     if (itemsGroup) {
+    //         while (itemsGroup.children.length > 0) itemsGroup.remove(itemsGroup.children[0]);
+    //     }
+    // });
     document.getElementById("btn-anim-pause").addEventListener("click", () => {
         if (!isAnimating) return;
         const paused = !animPaused;
@@ -469,13 +490,13 @@ function init() {
         reader.readAsText(file, "utf-8");
     }
 
-    // V2.3: 全局料框类型选择器 — 仅影响新建炉膛的默认值
-    const basketTypeSelect = document.getElementById("basket-type-select");
-    if (basketTypeSelect) {
-        basketTypeSelect.addEventListener("change", () => {
-            setCurrentBasketType(basketTypeSelect.value);
-        });
-    }
+    // // V2.3: 全局料框类型选择器 — 仅影响新建炉膛的默认值
+    // const basketTypeSelect = document.getElementById("basket-type-select");
+    // if (basketTypeSelect) {
+    //     basketTypeSelect.addEventListener("change", () => {
+    //         setCurrentBasketType(basketTypeSelect.value);
+    //     });
+    // }
 
     // ==================== V2.2: 3D显示设置 ====================
     const dsGrid = document.getElementById("ds-show-grid");
@@ -495,9 +516,78 @@ function init() {
     if (dsAxes) dsAxes.addEventListener("change", applyDisplaySettings);
     if (dsRulers) dsRulers.addEventListener("change", applyDisplaySettings);
 
+    // ==================== V4.8: 工装类型管理面板事件 ====================
+    // initToolingManagement();
+
     // ==================== 生成模式选择弹窗事件 ====================
     initGenerationOptions();
 }
+
+// /** V4.8: 工装类型管理面板 — 初始化折叠开关、模板列表渲染 */
+// function initToolingManagement() {
+//     const toggle = document.getElementById('tooling-mgmt-toggle');
+//     const body = document.getElementById('tooling-mgmt-body');
+//     const icon = document.getElementById('tooling-mgmt-icon');
+
+//     if (toggle) {
+//         toggle.addEventListener('click', () => {
+//             const isVisible = body.style.display === 'block';
+//             body.style.display = isVisible ? 'none' : 'block';
+//             icon.textContent = isVisible ? '▼' : '▲';
+//         });
+//     }
+
+//     /**
+//      * 渲染工装模板列表（furnaceTooling 注册表 + toolingTemplates 自定义模板）
+//      */
+//     function renderToolingTemplateList() {
+//         const listEl = document.getElementById('tooling-template-list');
+//         if (!listEl) return;
+
+//         let html = '';
+
+//         // 内置模板
+//         Object.entries(furnaceTooling).forEach(([key, cfg]) => {
+//             const procStr = cfg.allowedProcesses.length > 0
+//                 ? cfg.allowedProcesses.join(', ')
+//                 : '全部允许';
+//             html += '<div class="tooling-tpl-item" style="padding:4px 6px;margin:2px 0;background:rgba(8,145,178,0.06);border:1px solid rgba(8,145,178,0.15);border-radius:4px;font-size:10px;">';
+//             html += '<span style="font-weight:600;color:#67e8f9;">' + cfg.label + '</span>';
+//             html += '<span style="color:#888;margin-left:4px;">| 模式:' + cfg.placementMode + ' | 层数:' + cfg.maxLayers + ' | 工艺:' + procStr + '</span>';
+//             html += '<button class="tooling-tpl-select" data-tooling="' + key + '" style="margin-left:4px;font-size:9px;padding:1px 6px;background:#0891b2;color:#fff;border:none;border-radius:3px;cursor:pointer;">设为默认</button>';
+//             html += '</div>';
+//         });
+
+//         // 自定义模板
+//         const templates = toolingTemplates;
+//         if (templates && templates.length > 0) {
+//             html += '<div style="font-size:10px;color:#888;margin-top:6px;padding:2px 0;">📋 自定义模板：</div>';
+//             templates.forEach((tpl, idx) => {
+//                 html += '<div class="tooling-tpl-item" style="padding:4px 6px;margin:2px 0;background:rgba(124,58,237,0.08);border:1px solid rgba(124,58,237,0.15);border-radius:4px;font-size:10px;">';
+//                 html += '<span style="font-weight:600;color:#c4b5fd;">' + (tpl.label || '自定义模板') + '</span>';
+//                 html += '<span style="color:#888;margin-left:4px;">| 模式:' + tpl.placementMode + ' | 层数:' + tpl.maxLayers + '</span>';
+//                 html += '</div>';
+//             });
+//         }
+
+//         listEl.innerHTML = html;
+
+//         // 绑定"设为默认"按钮
+//         listEl.querySelectorAll('.tooling-tpl-select').forEach(btn => {
+//             btn.addEventListener('click', (e) => {
+//                 e.stopPropagation();
+//                 const key = btn.getAttribute('data-tooling');
+//                 if (key && furnaceTooling[key]) {
+//                     setDefaultToolingType(key);
+//                     btn.textContent = '✅ 已设为默认';
+//                     setTimeout(() => { btn.textContent = '设为默认'; }, 1200);
+//                 }
+//             });
+//         });
+//     }
+
+//     renderToolingTemplateList();
+// }
 
 /**
  * 初始化生成模式选择弹窗的事件监听器，处理卡片选择和取消操作。
@@ -609,4 +699,181 @@ async function executeWithAILoading() {
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
+// ==================== 工装添加弹窗逻辑 ====================
+
+/** 当前在弹窗中选中的工装类型 key */
+let selectedAddToolingType = null;
+
+/**
+ * 工装类型对应的图标映射
+ */
+const TOOLING_ICONS = {
+    'standard-basket': '📦',
+    'mesh-basket': '🧺',
+    'special-jig': '🔩',
+    'material-tray': '🍽️',
+    'hanger': '🪝',
+    'ring-tooling': '🔄'
+};
+
+/**
+ * 工装类型对应的默认尺寸预设
+ */
+const TOOLING_DEFAULT_DIMS = {
+    'standard-basket': { name: '标准料框', width: 900, height: 1200, depth: 900, maxWeight: 1000 },
+    'mesh-basket': { name: '网篮', width: 800, height: 1000, depth: 800, maxWeight: 500 },
+    'special-jig': { name: '专用夹具', width: 600, height: 600, depth: 600, maxWeight: 800 },
+    'material-tray': { name: '料盘', width: 1000, height: 200, depth: 800, maxWeight: 300 },
+    'hanger': { name: '挂具', width: 600, height: 1500, depth: 600, maxWeight: 200 },
+    'ring-tooling': { name: '环形工装', width: 900, height: 900, depth: 900, maxWeight: 600 }
+};
+
+/**
+ * 打开工装类型选择 + 尺寸配置弹窗
+ */
+function openToolingAddModal() {
+    const overlay = document.getElementById('tooling-add-overlay');
+    if (!overlay) return;
+
+    // 渲染工装类型卡片
+    renderToolingTypeCards();
+
+    // 默认选中 defaultToolingType
+    selectAddToolingType(defaultToolingType);
+
+    overlay.classList.add('active');
+
+    // 绑定事件（使用 once 模拟，先移除旧监听器再添加新的）
+    const btnConfirm = document.getElementById('btn-ta-confirm');
+    const btnCancel = document.getElementById('btn-ta-cancel');
+    const newConfirm = btnConfirm.cloneNode(true);
+    const newCancel = btnCancel.cloneNode(true);
+    btnConfirm.parentNode.replaceChild(newConfirm, btnConfirm);
+    btnCancel.parentNode.replaceChild(newCancel, btnCancel);
+
+    newConfirm.addEventListener('click', confirmAddTooling);
+    newCancel.addEventListener('click', closeToolingAddModal);
+
+    // 点击遮罩关闭
+    overlay.onclick = (e) => {
+        if (e.target === overlay) closeToolingAddModal();
+    };
+}
+
+/**
+ * 关闭工装添加弹窗
+ */
+function closeToolingAddModal() {
+    const overlay = document.getElementById('tooling-add-overlay');
+    if (overlay) overlay.classList.remove('active');
+    selectedAddToolingType = null;
+}
+
+/**
+ * 渲染工装类型卡片列表
+ */
+function renderToolingTypeCards() {
+    const container = document.getElementById('tooling-type-cards');
+    if (!container) return;
+
+    let html = '';
+    Object.entries(furnaceTooling).forEach(([key, cfg]) => {
+        const icon = TOOLING_ICONS[key] || '🔧';
+        const procStr = cfg.allowedProcesses.length > 0
+            ? cfg.allowedProcesses.join('、')
+            : '全部工艺';
+        const placementLabels = { 'free': '自由摆放', 'fixed': '固定卡位', 'vertical': '垂直悬挂', 'radial': '径向排列' };
+        const placementLabel = placementLabels[cfg.placementMode] || cfg.placementMode;
+
+        html += '<div class="tooling-type-card" data-tooling="' + key + '" onclick="window._selectAddToolingType(\'' + key + '\')">';
+        html += '<span class="ttc-icon">' + icon + '</span>';
+        html += '<span class="ttc-name">' + cfg.label + '</span>';
+        html += '<div class="ttc-info">';
+        html += '<span>📐 最大' + cfg.maxLayers + '层</span>';
+        html += '<span>📌 ' + placementLabel + '</span>';
+        html += '<span>🏭 ' + procStr + '</span>';
+        html += '</div>';
+        html += '</div>';
+    });
+
+    container.innerHTML = html;
+}
+
+/**
+ * 选中工装类型，更新右侧尺寸默认值和预览
+ * @param {string} toolingKey - 工装类型 key
+ */
+function selectAddToolingType(toolingKey) {
+    selectedAddToolingType = toolingKey;
+    const cfg = furnaceTooling[toolingKey];
+    if (!cfg) return;
+
+    // 更新卡片选中状态
+    document.querySelectorAll('.tooling-type-card').forEach(card => {
+        card.classList.toggle('selected', card.getAttribute('data-tooling') === toolingKey);
+    });
+
+    // 填充默认尺寸
+    const dims = TOOLING_DEFAULT_DIMS[toolingKey] || TOOLING_DEFAULT_DIMS['standard-basket'];
+    document.getElementById('ta-name').value = cfg.label;
+    document.getElementById('ta-width').value = dims.width;
+    document.getElementById('ta-height').value = dims.height;
+    document.getElementById('ta-depth').value = dims.depth;
+    document.getElementById('ta-weight').value = dims.maxWeight;
+    document.getElementById('ta-count').value = 1;
+    document.getElementById('ta-planned').value = 0;
+    document.getElementById('ta-spacing').value = '';
+
+    // 更新预览区
+    const placementLabels = { 'free': '自由摆放', 'fixed': '固定卡位', 'vertical': '垂直悬挂', 'radial': '径向排列' };
+    const placementLabel = placementLabels[cfg.placementMode] || cfg.placementMode;
+    const procStr = cfg.allowedProcesses.length > 0
+        ? cfg.allowedProcesses.join('、')
+        : '全部允许';
+    const preview = document.getElementById('ta-preview');
+    if (preview) {
+        preview.innerHTML =
+            '<div class="tap-row"><span class="tap-label">工装类型</span><span class="tap-value">' + cfg.label + '</span></div>' +
+            '<div class="tap-row"><span class="tap-label">摆放模式</span><span class="tap-value">' + placementLabel + '</span></div>' +
+            '<div class="tap-row"><span class="tap-label">最大层数</span><span class="tap-value">' + cfg.maxLayers + ' 层</span></div>' +
+            '<div class="tap-row"><span class="tap-label">允许工艺</span><span class="tap-value">' + procStr + '</span></div>' +
+            '<div class="tap-row"><span class="tap-label">3D 料框</span><span class="tap-value">' + (cfg.basketType || 'grid') + '</span></div>';
+    }
+
+    // 启用确认按钮
+    const confirmBtn = document.getElementById('btn-ta-confirm');
+    if (confirmBtn) confirmBtn.disabled = false;
+}
+
+/**
+ * 确认添加：读取配置 → 调用 createFurnaceCard → 关闭弹窗
+ */
+function confirmAddTooling() {
+    if (!selectedAddToolingType) {
+        alert('请先在左侧选择工装类型');
+        return;
+    }
+
+    const name = document.getElementById('ta-name').value.trim() || '料框';
+    const width = parseFloat(document.getElementById('ta-width').value) || 900;
+    const height = parseFloat(document.getElementById('ta-height').value) || 1200;
+    const depth = parseFloat(document.getElementById('ta-depth').value) || 900;
+    const maxWeight = parseFloat(document.getElementById('ta-weight').value) || 1000;
+    const count = parseInt(document.getElementById('ta-count').value) || 1;
+    const plannedHeats = parseInt(document.getElementById('ta-planned').value) || 0;
+    const spacingVal = document.getElementById('ta-spacing').value;
+    const actualSpacing = spacingVal !== '' ? parseFloat(spacingVal) : null;
+
+    const cfg = furnaceTooling[selectedAddToolingType];
+    const basketType = cfg ? cfg.basketType : 'grid';
+
+    createFurnaceCard(name, depth, width, height, maxWeight, count, plannedHeats, actualSpacing,
+        basketType, selectedAddToolingType);
+    updateTopSummary();
+    closeToolingAddModal();
+}
+
+// 暴露全局函数供 onclick 调用
+window._selectAddToolingType = selectAddToolingType;
+
 init();
