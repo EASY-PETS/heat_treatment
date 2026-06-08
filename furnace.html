@@ -27,10 +27,10 @@
             <div class="top-logo-title">AI热处理装炉智能体</div>
             <div class="top-logo-subtitle">AI Furnace Loading Agent</div>
         </div>
-        <button class="btn top-nav-btn" id="btn-master">方案</button>
-        <button class="btn top-nav-btn" id="btn-tooling-mgmt">工装</button>
-        <button class="btn top-nav-btn" id="btn-material-nav">物料</button>
-        <button class="btn top-nav-btn" id="btn-rules">规则</button>
+        <button class="btn top-nav-btn" id="btn-master">历史方案</button>
+        <button class="btn top-nav-btn" id="btn-tooling-mgmt">料框料盘</button>
+        <button class="btn top-nav-btn" id="btn-material-nav">产品/模具</button>
+        <button class="btn top-nav-btn" id="btn-rules">装炉规则</button>
         <div class="top-spacer"></div>
         <button class="btn top-tool-btn" id="btn-animate">模拟装炉</button>
         <button class="btn top-tool-btn" id="btn-export-pdf">导出PDF</button>
@@ -48,29 +48,29 @@
         <!-- LEFT PANEL: Furnace Config -->
         <div id="left-panel">
             <div class="panel-header">
-                <h3>🏭 工装配置</h3>
+                <h3>料框配置</h3>
                 <div class="panel-header-actions">
                     <span class="panel-expand-btn-left" id="panel-expand-btn-left" title="展开面板" style="display:none;">▶</span>
                     <button class="btn-sm btn-toggle-panel" id="btn-toggle-left-panel" title="折叠/展开面板">◀</button>
-                    <button class="btn-sm" id="btn-add-furnace">+ 增加工装</button>
-                    <button class="btn-sm btn-reset-danger" id="btn-clear-all-furnaces" title="清空所有料盘和物料">🗑️ 清空料盘</button>
+                    <button class="btn-sm" id="btn-add-furnace">增加</button>
+                    <button class="btn-sm btn-reset-danger" id="btn-clear-all-furnaces" title="清空所有料盘和物料">🗑️ 清空</button>
                 </div>
             </div>
             <div class="sort-bar">
-                <span style="font-size:10px;color:#666;margin-right:2px;">排序:</span>
+                <span style="font-size:10px;color:#666;margin-right:2px;"></span>
                 <button class="sort-btn" id="sort-name" data-field="name">名称</button>
                 <button class="sort-btn" id="sort-volume" data-field="volume">容积</button>
                 <button class="sort-btn" id="sort-weight" data-field="weight">承重</button>
-                <button class="sort-btn" id="sort-count" data-field="count">台数</button>
+                <button class="sort-btn" id="sort-count" data-field="count">数量</button>
             </div>
             <div class="panel-scroll" id="furnace-cards-container"></div>
             <div id="furnace-detail-panel">
                 <div class="fdp-header" id="fdp-toggle-btn">
-                    <span id="fdp-title">📋 炉膛详情</span>
+                    <span id="fdp-title">进炉方向</span>
                     <span class="fdp-toggle" id="fdp-toggle-icon">▲</span>
                 </div>
                 <div id="fdp-body-wrapper">
-                    <div class="fdp-placeholder" id="fdp-placeholder">点击左侧炉膛卡片查看详情</div>
+                    <div class="fdp-placeholder" id="fdp-placeholder">料框进出炉膛方向预，待开发</div>
                     <div class="fdp-body" id="fdp-body" style="display:none;"></div>
                 </div>
             </div>
@@ -91,7 +91,7 @@
         <div id="canvas-area">
             <!-- AI 推荐方案水平信息条（V6.0：移出3D场景，置于顶部） -->
             <div id="ai-summary-bar" class="ai-summary-bar">
-                <div class="ai-bar-empty" id="ai-bar-empty">点击顶部 <b>⚡ 生成方案</b> 查看AI推荐</div>
+                <div class="ai-bar-empty" id="ai-bar-empty">点击顶部 <b>生成方案</b> 查看AI推荐</div>
                 <div class="ai-bar-content" id="ai-bar-content" style="display:none;"></div>
                 <div class="ai-bar-toggle" id="ai-bar-toggle" style="display:none;" title="展开炉次明细">📋</div>
             </div>
@@ -171,11 +171,11 @@
         <!-- RIGHT PANEL: Materials -->
         <div id="right-panel">
             <div class="panel-header">
-                <h3>📋 待处理物料明细</h3>
+                <h3>物料清单</h3>
                 <div class="panel-header-actions">
-                    <button class="btn-sm btn-reset-danger" id="btn-clear-all-materials" title="清空所有待摆放物料">🗑️ 清空物料</button>
-                    <button class="btn-sm" id="btn-add-item">+ 增加工件</button>
-                    <button class="btn-sm" id="btn-import-excel" title="导入Excel">📥 导入</button>
+                    <button class="btn-sm btn-reset-danger" id="btn-clear-all-materials" title="清空所有待摆放物料">清空</button>
+                    <button class="btn-sm" id="btn-add-item">增加</button>
+                    <button class="btn-sm" id="btn-import-excel" title="导入Excel">导入</button>
                     <button class="btn-sm btn-toggle-panel" id="btn-toggle-right-panel" title="折叠/展开面板">▶</button>
                     <span class="panel-expand-btn-right" id="panel-expand-btn-right" title="展开面板" style="display:none;">◀</span>
                 </div>
@@ -260,12 +260,12 @@
                 <div class="rule-group-title">🔀 装炉分组规则 (V3.0 新增)</div>
                 <div class="rule-item">
                     <input type="checkbox" id="rule-same-process" checked>
-                    <label for="rule-same-process">同工艺</label>
+                    <label for="rule-same-process">工艺</label>
                     <span class="rule-desc">启用后，系统优先将渗碳、调质、退火、氮化、真空淬火等不同工艺分别分组，再进行装炉。</span>
                 </div>
                 <div class="rule-item">
                     <input type="checkbox" id="rule-same-material">
-                    <label for="rule-same-material">同材质</label>
+                    <label for="rule-same-material">材质</label>
                     <span class="rule-desc">启用后，系统优先将45#、40Cr、20CrMnTi、304等不同材质分别分组，再进行装炉。</span>
                 </div>
             </div>
@@ -292,7 +292,7 @@
     <!-- PDF Select Modal -->
     <div id="pdf-select-overlay">
         <div id="pdf-select-modal">
-            <h3>📄 导出六页式标准化 PDF</h3>
+            <h3>📄 导出热处理装炉 PDF</h3>
             <p style="font-size:11px;color:#888;margin:0 0 14px 0;">勾选一个或多个炉膛方案，每个炉膛将生成 6 页标准化文档（总览 · 3D视图 · 步骤图 · AI评分）</p>
             <div id="pdf-unpacked-warning" class="pdf-unpacked-badge" style="display:none;"></div>
             <div id="pdf-furnace-list"></div>
