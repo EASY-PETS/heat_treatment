@@ -134,7 +134,7 @@ body {
 
 /* ==================== LEFT PANEL - Furnace Config ==================== */
 #left-panel {
-    width: 300px; min-width: 300px; max-width: 300px;
+    width: 260px; min-width: 260px; max-width: 260px;
     background-color: var(--panel-bg);
     border-right: 1px solid var(--border-color);
     display: flex; flex-direction: column;
@@ -426,7 +426,7 @@ body {
 
 /* ==================== RIGHT PANEL - Materials ==================== */
 #right-panel {
-    width: 320px; min-width: 320px; max-width: 320px;
+    width: 280px; min-width: 280px; max-width: 280px;
     background-color: var(--panel-bg);
     border-left: 1px solid var(--border-color);
     display: flex; flex-direction: column;
@@ -798,88 +798,7 @@ body {
 .pdf-signature-box .sig-title { font-size: 14px; color: #64748b; margin-bottom: 40px; }
 .pdf-signature-box .sig-line { border-top: 1px solid #94a3b8; padding-top: 6px; font-size: 12px; color: #94a3b8; }
 
-/* ==================== 3D SCENE STATS OVERLAY PANEL ==================== */
-.stats-3d-panel {
-    position: absolute;
-    bottom: 12px;
-    right: 12px;
-    z-index: 30;
-    display: none;
-    min-width: 220px;
-    max-width: 300px;
-    max-height: 340px;
-    overflow-y: auto;
-    background: rgba(255, 255, 255, 0.95);
-    border: 1px solid var(--border-color);
-    border-radius: 16px;
-    padding: 10px 12px;
-    font-size: 12px;
-    color: var(--text-color);
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
-    pointer-events: auto;
-    backdrop-filter: blur(4px);
-}
-.stats-3d-panel .ssp-header {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--furnace-accent);
-    margin-bottom: 8px;
-    padding-bottom: 6px;
-    border-bottom: 1px solid #FEF3C7;
-    text-transform: none;
-    letter-spacing: normal;
-}
-.stats-3d-panel .ssp-body {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-}
-.stats-3d-panel .ssp-stat-row {
-    display: flex;
-    justify-content: space-between;
-    padding: 2px 0;
-    border-bottom: 1px solid #F1F5F9;
-}
-.stats-3d-panel .ssp-label {
-    color: var(--text-muted);
-    white-space: nowrap;
-}
-.stats-3d-panel .ssp-value {
-    color: var(--text-color);
-    font-weight: 600;
-    text-align: right;
-    white-space: nowrap;
-}
-.stats-3d-panel .ssp-divider {
-    height: 1px;
-    background: #FEF3C7;
-    margin: 4px 0;
-}
-.stats-3d-panel .ssp-list-title {
-    font-size: 12px;
-    color: var(--text-muted);
-    margin: 4px 0 2px 0;
-    text-transform: none;
-    letter-spacing: normal;
-}
-.stats-3d-panel .ssp-item-row {
-    display: flex;
-    justify-content: space-between;
-    padding: 1px 0;
-    border-bottom: 1px solid #F1F5F9;
-}
-.stats-3d-panel .ssp-item-name {
-    color: var(--text-secondary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 140px;
-}
-.stats-3d-panel .ssp-item-count {
-    color: var(--furnace-accent);
-    font-weight: 600;
-    white-space: nowrap;
-}
+/* ==================== 3D SCENE STATS OVERLAY PANEL (REMOVED in V6.0) ==================== */
 
 /* ==================== BOM PANEL (V2.7) ==================== */
 .bom-panel {
@@ -1544,35 +1463,186 @@ body {
     display: none;
 }
 
-/* ==================== 3D STATS PANEL TOGGLE ==================== */
-.ssp-header-wrapper {
+/* ==================== 3D STATS PANEL TOGGLE (REMOVED in V6.0) ==================== */
+
+/* ==================== AI SUMMARY BAR (V6.0) ==================== */
+.ai-summary-bar {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 16px;
+    background: #FFFFFF;
+    border-bottom: 1px solid var(--border-color);
+    min-height: 44px;
+    z-index: 10;
+}
+.ai-bar-empty {
+    font-size: 13px;
+    color: var(--text-muted);
+    flex: 1;
+}
+.ai-bar-empty b {
+    color: var(--accent-color);
+}
+.ai-bar-content {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex: 1;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+.ai-bar-score {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: linear-gradient(135deg, #FEF3C7 0%, #FFFBEB 100%);
+    border: 1px solid #FDE68A;
+    border-radius: 8px;
+    padding: 3px 10px;
+    white-space: nowrap;
+}
+.ai-bar-score-num {
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--furnace-accent);
+    line-height: 1;
+}
+.ai-bar-score-label {
+    font-size: 10px;
+    color: #B45309;
+    font-weight: 600;
+}
+.ai-bar-metric {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+.ai-bar-metric-icon {
+    font-size: 13px;
+}
+.ai-bar-metric-value {
+    font-weight: 700;
+    color: var(--text-color);
+}
+.ai-bar-metric-value.good {
+    color: var(--success-color);
+}
+.ai-bar-metric-value.warn {
+    color: var(--warning-color);
+}
+.ai-bar-separator {
+    width: 1px;
+    height: 20px;
+    background: var(--border-color);
+}
+.ai-bar-summary {
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+.ai-bar-summary strong {
+    color: var(--accent-color);
+    font-weight: 700;
+}
+.ai-bar-unpacked {
+    font-size: 11px;
+    color: var(--danger-color);
+    background: #FEF2F2;
+    border: 1px solid #FECACA;
+    border-radius: 6px;
+    padding: 2px 8px;
+    white-space: nowrap;
+    cursor: help;
+}
+.ai-bar-toggle {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #F8FAFC;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.15s;
+    user-select: none;
+}
+.ai-bar-toggle:hover {
+    background: #EFF6FF;
+    border-color: var(--accent-color);
+    color: var(--accent-color);
+}
+.ai-bar-toggle.active {
+    background: var(--accent-color);
+    color: #fff;
+    border-color: var(--accent-color);
+}
+
+/* ---- AI Bar Dropdown (炉次明细弹出面板) ---- */
+.ai-bar-dropdown {
+    position: absolute;
+    top: 100%;
+    right: 8px;
+    width: 280px;
+    max-height: 360px;
+    overflow-y: auto;
+    background: #FFFFFF;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+    z-index: 30;
+    padding: 8px;
+    display: none;
+}
+.ai-bar-dropdown.visible {
+    display: block;
+}
+.ai-bar-dropdown .ai-furnace-item {
+    background: #FFFFFF;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 6px 8px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s;
     display: flex;
     justify-content: space-between;
     align-items: center;
+    margin-bottom: 3px;
 }
-
-.ssp-toggle-btn {
-    background: transparent;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    font-size: 11px;
-    padding: 0 4px;
-    transition: all 0.2s;
-    flex-shrink: 0;
+.ai-bar-dropdown .ai-furnace-item:hover {
+    background: #EFF6FF;
+    border-color: var(--accent-color);
 }
-.ssp-toggle-btn:hover {
+.ai-bar-dropdown .ai-furnace-item.active {
+    border-color: var(--accent-color);
+    background: #EFF6FF;
+    font-weight: 600;
+}
+.ai-bar-dropdown .ai-furnace-name {
+    font-weight: 600;
     color: var(--text-color);
+    font-size: 12px;
 }
-
-#stats-3d-panel.collapsed {
-    padding: 6px 10px;
-    min-width: auto;
+.ai-bar-dropdown .ai-furnace-meta {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-align: right;
 }
-#stats-3d-panel.collapsed .ssp-body,
-#stats-3d-panel.collapsed .ssp-stat-row,
-#stats-3d-panel.collapsed .ssp-divider,
-#stats-3d-panel.collapsed .ssp-list-title,
-#stats-3d-panel.collapsed .ssp-item-row {
-    display: none;
+.ai-bar-dropdown .ai-unpacked-warn {
+    background: #FEF2F2;
+    border: 1px solid #FECACA;
+    border-radius: 8px;
+    padding: 6px 8px;
+    font-size: 10px;
+    color: var(--danger-color);
+    margin-top: 6px;
 }

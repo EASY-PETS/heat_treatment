@@ -44,7 +44,7 @@ import {
     createMaterialCard, selectMaterialCard, showMaterialDetail,
     deleteMaterialCard, getMaterialDataFromCard,
     updateTopSummary, updateFurnaceNav,
-    updateLeftPanelActiveForIndex, updateCenterStats,
+    updateLeftPanelActiveForIndex, renderAISummaryBar,
     showCapacityFeedback, openRulesModal, saveRulesModal,
     initMasterView, parseExcelData, showImportPreview, applyImportData,
     openJsonImportModal, parseJsonPlan, renderJsonPreview, importJsonPlanToMaster
@@ -159,7 +159,7 @@ function executeAndRender() {
         document.getElementById("furnace-nav").style.display = "none";
         hideExplodeBOMButtons();
     }
-    updateCenterStats(onCenterFurnaceClick);
+    renderAISummaryBar(onCenterFurnaceClick);
     updateTopSummary();
 
     const agg = aggregationStats;
@@ -233,7 +233,7 @@ function navigateFurnace(direction) {
     renderSingleFurnace(newIndex, filterName);
     updateFurnaceNav();
     updateLeftPanelActiveForIndex(newIndex);
-    updateCenterStats(onCenterFurnaceClick);
+    renderAISummaryBar(onCenterFurnaceClick);
 }
 
 /**
@@ -247,7 +247,7 @@ function onCenterFurnaceClick(idx) {
     renderSingleFurnace(idx, filterName);
     updateFurnaceNav();
     updateLeftPanelActiveForIndex(idx);
-    updateCenterStats(onCenterFurnaceClick);
+    renderAISummaryBar(onCenterFurnaceClick);
 }
 
 /**
@@ -258,7 +258,6 @@ function showMasterView() {
     document.getElementById("master-view").classList.add("active");
     document.getElementById("furnace-nav").style.display = "none";
     document.getElementById("canvas-container").style.display = "none";
-    document.getElementById("center-stats-panel").style.display = "none";
     document.getElementById("anim-control-bar").classList.remove("visible");
     hideExplodeBOMButtons();
     if (!masterRenderer) {
@@ -280,7 +279,6 @@ function hideMasterView() {
     document.getElementById("canvas-container").style.display = "block";
     if (globalFurnacesResult && globalFurnacesResult.length > 0) {
         document.getElementById("furnace-nav").style.display = "flex";
-        document.getElementById("center-stats-panel").style.display = "block";
         updateExplodeBOMButtons();
     }
 }
@@ -361,7 +359,7 @@ function init() {
                 renderSingleFurnace(idx, filterName);
                 updateFurnaceNav();
                 updateLeftPanelActiveForIndex(idx);
-                updateCenterStats(onCenterFurnaceClick);
+                renderAISummaryBar(onCenterFurnaceClick);
             }
         } else {
             // 无装炉结果时（仅空工装），切换 furnaceGroups 可见性
@@ -424,7 +422,6 @@ function init() {
             document.getElementById("btn-animate").style.display = "none";
             document.getElementById("furnace-nav").style.display = "none";
             document.getElementById("empty-state").style.display = "block";
-            document.getElementById("center-stats-panel").style.display = "none";
             hideExplodeBOMButtons();
             if (itemsGroup) {
                 while (itemsGroup.children.length > 0) itemsGroup.remove(itemsGroup.children[0]);
@@ -1028,14 +1025,10 @@ function clearAllMaterials() {
     if (itemsGroup) {
         while (itemsGroup.children.length > 0) itemsGroup.remove(itemsGroup.children[0]);
     }
-    document.getElementById('stats-3d-panel').style.display = 'none';
-
     // 5. 隐藏方案相关 UI
     document.getElementById('btn-export-pdf').style.display = 'none';
     document.getElementById('btn-animate').style.display = 'none';
     document.getElementById('furnace-nav').style.display = 'none';
-    document.getElementById('center-stats-panel').style.display = 'none';
-    document.getElementById('center-stats-panel').classList.remove('collapsed');
     hideExplodeBOMButtons();
 
     // 6. 显示空状态
@@ -1085,15 +1078,11 @@ function clearAllFurnaces() {
     if (itemsGroup) {
         while (itemsGroup.children.length > 0) itemsGroup.remove(itemsGroup.children[0]);
     }
-    document.getElementById('stats-3d-panel').style.display = 'none';
-    document.getElementById('stats-3d-panel').classList.remove('collapsed');
-
     // 6. 隐藏所有方案相关 UI
     document.getElementById('btn-export-pdf').style.display = 'none';
     document.getElementById('btn-animate').style.display = 'none';
     document.getElementById('furnace-nav').style.display = 'none';
-    document.getElementById('center-stats-panel').style.display = 'none';
-    document.getElementById('center-stats-panel').classList.remove('collapsed');
+    renderAISummaryBar(null);
     hideExplodeBOMButtons();
 
     // 7. 显示空状态
@@ -1157,37 +1146,8 @@ function toggleRightPanel() {
 /**
  * 折叠/展开中心方案统计面板
  */
-function toggleCenterStats() {
-    const panel = document.getElementById('center-stats-panel');
-    const btn = document.getElementById('btn-toggle-center-stats');
-
-    if (panel.classList.contains('collapsed')) {
-        panel.classList.remove('collapsed');
-        if (btn) btn.textContent = '▲';
-    } else {
-        panel.classList.add('collapsed');
-        if (btn) btn.textContent = '▼';
-    }
-}
-
-/**
- * 折叠/展开 3D 右下角炉次清单面板
- */
-function toggle3DStats() {
-    const panel = document.getElementById('stats-3d-panel');
-    if (!panel) return;
-
-    if (panel.classList.contains('collapsed')) {
-        panel.classList.remove('collapsed');
-    } else {
-        panel.classList.add('collapsed');
-    }
-}
-
 // 暴露全局函数供 onclick 调用
 window._selectAddToolingType = selectAddToolingType;
-window._toggle3DStats = toggle3DStats;
-window._toggleCenterStats = toggleCenterStats;
 
 // 初始化 & 绑定新事件
 init();
@@ -1215,7 +1175,4 @@ init();
     const expandRight = document.getElementById('panel-expand-btn-right');
     if (expandRight) expandRight.addEventListener('click', toggleRightPanel);
 
-    // 方案统计折叠
-    const btnToggleCenterStats = document.getElementById('btn-toggle-center-stats');
-    if (btnToggleCenterStats) btnToggleCenterStats.addEventListener('click', toggleCenterStats);
 })();

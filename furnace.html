@@ -89,16 +89,11 @@
 
         <!-- CENTER: 3D View -->
         <div id="canvas-area">
-            <!-- Fix: 3D场景右下角统计悬浮面板，展示当前炉膛物料统计信息 -->
-            <div id="stats-3d-panel" class="stats-3d-panel"></div>
-            <div id="center-stats-panel">
-                <div class="csp-header">
-                    <span>📊 方案统计</span>
-                    <span id="csp-summary" style="font-size:10px;color:#888;"></span>
-                    <button class="csp-toggle-btn" id="btn-toggle-center-stats" title="折叠/展开">▲</button>
-                </div>
-                <div class="csp-body" id="csp-body"></div>
-                <div id="center-stats-unpacked" style="display:none;"></div>
+            <!-- AI 推荐方案水平信息条（V6.0：移出3D场景，置于顶部） -->
+            <div id="ai-summary-bar" class="ai-summary-bar">
+                <div class="ai-bar-empty" id="ai-bar-empty">点击顶部 <b>⚡ 生成方案</b> 查看AI推荐</div>
+                <div class="ai-bar-content" id="ai-bar-content" style="display:none;"></div>
+                <div class="ai-bar-toggle" id="ai-bar-toggle" style="display:none;" title="展开炉次明细">📋</div>
             </div>
             <div id="anim-control-bar">
                 <span class="acb-label">🎬 模拟装炉进行中</span>

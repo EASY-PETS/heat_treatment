@@ -534,6 +534,264 @@ export function updateCenterStats(onFurnaceClick) {
 
 export function showCapacityFeedback(type, message) { const existing = document.getElementById('capacity-feedback'); if (existing) existing.remove(); const banner = document.createElement('div'); banner.id = 'capacity-feedback'; const bgColor = type === 'success' ? 'rgba(31,122,58,0.9)' : 'rgba(179,36,36,0.9)'; const borderColor = type === 'success' ? '#10b981' : '#ff4444'; banner.style.cssText = 'position: fixed; top: 64px; left: 50%; transform: translateX(-50%); z-index: 999; max-width: 800px; width: fit-content; background: ' + bgColor + '; border: 2px solid ' + borderColor + '; color: #fff; padding: 10px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; text-align: center; line-height: 1.6; box-shadow: 0 4px 20px rgba(0,0,0,0.5); transition: opacity 0.5s ease; opacity: 1;'; banner.textContent = message; document.body.appendChild(banner); setTimeout(() => { const el = document.getElementById('capacity-feedback'); if (el) { el.style.opacity = '0'; setTimeout(() => { if (el.parentNode) el.remove(); }, 500); } }, 5000); }
 
+// ==================== AI SUMMARY BAR (V6.0) ====================
+
+/**
+ * 计算热场均匀性得分（0-100）
+ * 基于工件在炉膛内的位置分布方差
+ * @param {Array} items - 炉膛内的工件列表
+ * @param {Object} furnace - 炉膛尺寸信息
+ * @returns {number} 0-100 的得分
+ */
+function calculateThermalUniformity(items, furnace) {
+    if (!items || items.length === 0) return 0;
+    
+    // 收集所有工件的中心点坐标
+    const centers = items.map(item => ({
+        x: (item.x || 0) + (item.w || 0) / 2,
+        y: (item.y || 0) + (item.h || 0) / 2,
+        z: (item.z || 0) + (item.d || 0) / 2
+    }));
+    
+    // 计算质心
+    const cx = centers.reduce((s, c) => s + c.x, 0) / centers.length;
+    const cy = centers.reduce((s, c) => s + c.y, 0) / centers.length;
+    const cz = centers.reduce((s, c) => s + c.z, 0) / centers.length;
+    
+    // 计算各维度的方差（相对于炉膛尺寸归一化）
+    const fw = furnace.w || 1, fh = furnace.h || 1, fd = furnace.d || 1;
+    const varX = centers.reduce((s, c) => s + Math.pow((c.x - cx) / fw, 2), 0) / centers.length;
+    const varY = centers.reduce((s, c) => s + Math.pow((c.y - cy) / fh, 2), 0) / centers.length;
+    const varZ = centers.reduce((s, c) => s + Math.pow((c.z - cz) / fd, 2), 0) / centers.length;
+    
+    // 方差越小越均匀，理想方差约为 0.02-0.08
+    const avgVar = (varX + varY + varZ) / 3;
+    // 映射到 0-100 分：方差=0 → 100分，方差=0.15 → 0分
+    const score = Math.max(0, Math.min(100, 100 - (avgVar / 0.15) * 100));
+    return Math.round(score);
+}
+
+/**
+ * 计算交期满足率（0-100）
+ * 基于物料卡片上的 deliveryDate 属性
+ * @returns {number} 0-100 的满足率
+ */
+function calculateDeliveryRate() {
+    const materialCards = document.querySelectorAll('.material-card');
+    if (materialCards.length === 0) return 100;
+    
+    let totalWithDate = 0;
+    let overdue = 0;
+    const now = new Date();
+    
+    materialCards.forEach(card => {
+        const deliveryDate = card.getAttribute('data-delivery-date');
+        if (deliveryDate) {
+            totalWithDate++;
+            const d = new Date(deliveryDate);
+            if (d < now) overdue++;
+        }
+    });
+    
+    if (totalWithDate === 0) return 100;
+    return Math.round(((totalWithDate - overdue) / totalWithDate) * 100);
+}
+
+/**
+ * V6.0: 渲染 AI 推荐方案水平信息条
+ * 替代旧的悬浮卡片，置于3D区域顶部，不遮挡3D模型
+ * @param {Function} onFurnaceClick - 点击炉次明细的回调
+ */
+export function renderAISummaryBar(onFurnaceClick) {
+    const bar = document.getElementById('ai-summary-bar');
+    const emptyEl = document.getElementById('ai-bar-empty');
+    const contentEl = document.getElementById('ai-bar-content');
+    const toggleBtn = document.getElementById('ai-bar-toggle');
+    
+    if (!bar || !contentEl) return;
+    
+    // 无方案时显示空状态
+    if (!globalFurnacesResult || globalFurnacesResult.length === 0) {
+        if (emptyEl) emptyEl.style.display = 'block';
+        contentEl.style.display = 'none';
+        if (toggleBtn) toggleBtn.style.display = 'none';
+        // 移除旧 dropdown
+        const oldDropdown = bar.querySelector('.ai-bar-dropdown');
+        if (oldDropdown) oldDropdown.remove();
+        return;
+    }
+    
+    if (emptyEl) emptyEl.style.display = 'none';
+    contentEl.style.display = 'flex';
+    if (toggleBtn) toggleBtn.style.display = 'flex';
+    
+    // === 计算全局指标 ===
+    let totalWeight = 0, totalCount = 0, totalPackedVol = 0, totalFurnaceVol = 0;
+    
+    globalFurnacesResult.forEach(f => {
+        totalWeight += f.totalWeight || 0;
+        totalCount += (f.packedItems ? f.packedItems.length : 0);
+        const fVol = (f.w || 0) * (f.h || 0) * (f.d || 0);
+        totalFurnaceVol += fVol;
+        if (f.packedItems) {
+            f.packedItems.forEach(item => {
+                totalPackedVol += (item.w || 0) * (item.h || 0) * (item.d || 0);
+            });
+        }
+    });
+    
+    // 空间利用率
+    const spaceUtilization = totalFurnaceVol > 0 ? (totalPackedVol / totalFurnaceVol) * 100 : 0;
+    
+    // 重量利用率
+    const totalMaxWeight = globalFurnacesResult.reduce((s, f) => s + (f.max_weight || 0), 0);
+    const weightUtilization = totalMaxWeight > 0 ? (totalWeight / totalMaxWeight) * 100 : 0;
+    
+    // 热场均匀性（各炉膛平均）
+    let thermalScores = [];
+    globalFurnacesResult.forEach(f => {
+        if (f.packedItems && f.packedItems.length > 0) {
+            thermalScores.push(calculateThermalUniformity(f.packedItems, f));
+        }
+    });
+    const thermalUniformity = thermalScores.length > 0
+        ? Math.round(thermalScores.reduce((s, v) => s + v, 0) / thermalScores.length)
+        : 0;
+    
+    // 交期满足率
+    const deliveryRate = calculateDeliveryRate();
+    
+    // 预计炉次
+    const estimatedHeats = globalFurnacesResult.length;
+    
+    // === 综合评分计算（加权） ===
+    const compositeScore = Math.round(
+        spaceUtilization * 0.35 +
+        thermalUniformity * 0.30 +
+        deliveryRate * 0.25 +
+        weightUtilization * 0.10
+    );
+    
+    // === 构建水平信息条 HTML ===
+    let html = '';
+    
+    // 综合评分
+    html += '<div class="ai-bar-score">';
+    html += '<span class="ai-bar-score-num">' + compositeScore + '</span>';
+    html += '<span class="ai-bar-score-label">⭐ 综合评分</span>';
+    html += '</div>';
+    
+    // 分隔
+    html += '<div class="ai-bar-separator"></div>';
+    
+    // 空间利用率
+    html += '<div class="ai-bar-metric">';
+    html += '<span class="ai-bar-metric-icon">📐</span>';
+    html += '<span>空间利用率</span>';
+    html += '<span class="ai-bar-metric-value ' + (spaceUtilization >= 80 ? 'good' : (spaceUtilization >= 60 ? '' : 'warn')) + '">' + spaceUtilization.toFixed(1) + '%</span>';
+    html += '</div>';
+    
+    // 热场均匀性
+    html += '<div class="ai-bar-metric">';
+    html += '<span class="ai-bar-metric-icon">🔥</span>';
+    html += '<span>热场均匀性</span>';
+    html += '<span class="ai-bar-metric-value ' + (thermalUniformity >= 80 ? 'good' : (thermalUniformity >= 60 ? '' : 'warn')) + '">' + thermalUniformity + '%</span>';
+    html += '</div>';
+    
+    // 交期满足率
+    html += '<div class="ai-bar-metric">';
+    html += '<span class="ai-bar-metric-icon">📅</span>';
+    html += '<span>交期满足率</span>';
+    html += '<span class="ai-bar-metric-value ' + (deliveryRate >= 90 ? 'good' : (deliveryRate >= 70 ? '' : 'warn')) + '">' + deliveryRate + '%</span>';
+    html += '</div>';
+    
+    // 分隔
+    html += '<div class="ai-bar-separator"></div>';
+    
+    // 概览摘要
+    html += '<div class="ai-bar-summary">共 <strong>' + estimatedHeats + '</strong> 炉 · <strong>' + totalCount + '</strong> 件 · <strong>' + totalWeight.toFixed(1) + '</strong>kg</div>';
+    
+    // 未装载警告
+    if (globalUnpackedItems && globalUnpackedItems.length > 0) {
+        html += '<div class="ai-bar-unpacked" title="' + globalUnpackedItems.length + ' 件无法装炉">⚠️ ' + globalUnpackedItems.length + ' 件未装载</div>';
+    }
+    
+    contentEl.innerHTML = html;
+    
+    // === 构建炉次明细下拉面板 ===
+    // 移除旧 dropdown
+    const oldDropdown = bar.querySelector('.ai-bar-dropdown');
+    if (oldDropdown) oldDropdown.remove();
+    
+    const dropdown = document.createElement('div');
+    dropdown.className = 'ai-bar-dropdown';
+    dropdown.id = 'ai-bar-dropdown';
+    
+    let dropdownHtml = '';
+    globalFurnacesResult.forEach((f, idx) => {
+        const fVol = (f.w || 0) * (f.h || 0) * (f.d || 0);
+        const pVol = (f.packedItems || []).reduce((acc, curr) => acc + (curr.w * curr.h * curr.d), 0);
+        const util = fVol > 0 ? ((pVol / fVol) * 100).toFixed(1) : '0';
+        const count = (f.packedItems || []).length;
+        const activeClass = (idx === currentFurnaceIndex) ? ' active' : '';
+        dropdownHtml += '<div class="ai-furnace-item' + activeClass + '" data-furnace-idx="' + idx + '">';
+        dropdownHtml += '<span class="ai-furnace-name">' + (f.instanceId || ('炉 #' + (idx + 1))) + '</span>';
+        dropdownHtml += '<span class="ai-furnace-meta">利用率 ' + util + '% · ' + count + '件</span>';
+        dropdownHtml += '</div>';
+    });
+    
+    if (globalUnpackedItems && globalUnpackedItems.length > 0) {
+        const summary = {};
+        globalUnpackedItems.forEach(u => { summary[u.name] = (summary[u.name] || 0) + 1; });
+        const uList = Object.entries(summary).map(([k, v]) => k + '×' + v).join(' · ');
+        dropdownHtml += '<div class="ai-unpacked-warn">⚠️ ' + globalUnpackedItems.length + ' 件未装载: ' + uList + '</div>';
+    }
+    
+    dropdown.innerHTML = dropdownHtml;
+    bar.appendChild(dropdown);
+    
+    // 绑定炉次明细点击事件
+    dropdown.querySelectorAll('.ai-furnace-item').forEach(item => {
+        item.addEventListener('click', function() {
+            const idx = parseInt(this.getAttribute('data-furnace-idx'));
+            if (!isNaN(idx) && onFurnaceClick) {
+                onFurnaceClick(idx);
+                // 更新 active 状态
+                dropdown.querySelectorAll('.ai-furnace-item').forEach(el => el.classList.remove('active'));
+                this.classList.add('active');
+                // 关闭下拉
+                dropdown.classList.remove('visible');
+                if (toggleBtn) toggleBtn.classList.remove('active');
+            }
+        });
+    });
+    
+    // 绑定 toggle 按钮
+    if (toggleBtn) {
+        const newToggle = toggleBtn.cloneNode(true);
+        toggleBtn.parentNode.replaceChild(newToggle, toggleBtn);
+        newToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const dd = bar.querySelector('.ai-bar-dropdown');
+            if (dd) {
+                const isVisible = dd.classList.contains('visible');
+                dd.classList.toggle('visible');
+                newToggle.classList.toggle('active', !isVisible);
+            }
+        });
+    }
+    
+    // 点击外部关闭下拉
+    document.addEventListener('click', function closeDropdown(e) {
+        if (!bar.contains(e.target)) {
+            const dd = bar.querySelector('.ai-bar-dropdown');
+            if (dd) dd.classList.remove('visible');
+            const tb = bar.querySelector('.ai-bar-toggle');
+            if (tb) tb.classList.remove('active');
+        }
+    }, { once: false });
+}
+
 // ==================== RULES MODAL (V2.0) ====================
 
 export function openRulesModal() {
