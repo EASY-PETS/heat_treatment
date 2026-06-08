@@ -1,421 +1,184 @@
-# 工业热处理装炉系统产品需求文档 (PRD)
-
-Industrial Furnace Loading System - Product Requirements Document
 
 ---
+
+# 工业热处理预装炉智能体产品需求文档 (PRD v2.0)
+
+> Industrial Furnace Loading Agent - Product Requirements Document (Digital Twin Edition)
 
 ## 引言
 
-本文档旨在详细阐述工业热处理装炉系统的产品需求、核心功能、用户角色、工业规则、技术架构以及未来发展规划。本系统致力于通过智能化、3D 可视化的方式，解决传统热处理装炉过程中效率低下、经验依赖性强、工艺标准化不足等痛点，最终目标是打造一个全面的工业热处理工艺平台。
+本文档旨在详细阐述工业热处理预装炉智能体的产品需求、核心功能、工业规则、技术架构以及未来发展规划。本项目旨在超越传统的“3D几何拼接工具”，打造一个面向热处理车间的**工业排产大脑（APS）与数字孪生（Digital Twin）中枢**。系统通过智能化、3D 可视化的方式，解决传统装炉效率低下、经验依赖性强的问题，最终实现空间利用率最高、热处理质量最稳、能耗成本最低的绿色制造闭环。
 
 ---
 
-# 一、项目目标
+## 一、 核心域模型与实体关系 (Domain Entities)
 
-开发一套工业热处理装炉系统，实现：
+为确保系统不仅能独立运行，未来更能与工厂底层工业互联网（MES/SCADA/CRM）无缝对接，系统基础数据结构严格遵循以下实体层级（Domain Hierarchy）：
 
-* 多炉型装炉规划
-* 3D 可视化摆放
-* 自动装炉优化
-* 工业 PDF 工艺卡输出
-* 工件碰撞与间距检测
-* 炉次管理与审核
-* 客户订单与 CAD 文件导入
+### 1. CRM (客户订单与工艺层)
 
-系统目标：
+* `crmOrderId`: 合同单号。
+* `customerName`: 客户名称，用于同客户物料的优先归堆排产。
+* `workOrderId`: 生产批次号 (MES 驱动)。
+* `processCode`: 工艺路线代码（如：渗碳、真空高淬高回）。**绝对约束：不同 `processCode` 的工件严禁混装入同一炉。**
 
-* 提高装炉效率
-* 提高炉膛利用率
-* 降低人工经验依赖
-* 标准化工艺流程
-* 支持未来 AI 优化
+### 2. Workshop & Equipment (车间与物理设备层)
 
----
+* `equipmentCode`: 对接 SCADA 的物理资产主键（如：1号真空油淬炉）。
+* `currentStatus`: 设备实时状态（`IDLE`, `HEATING`, `COOLING`, `MAINTENANCE`）。
+* `maxTemperature`: 设备极限温度（℃），用于过滤超高温工艺订单。
+* `maxLoadCapacity`: 额定最大安全载重（kg）。**绝对约束：$\sum M_{parts} + \sum M_{tooling} \le maxLoadCapacity$**。
 
-# 二、核心功能
+### 3. Chamber (炉膛 / 有效加热区)
 
-## 1. 装炉管理
+* 定义：特指设备内部经过 SAT/TUS 测温认证的**有效加热区 (Effective Heating Zone, EHZ)**。
+* **绝对约束：所有装载实体（含安全热运动间隙）在 $X, Y, Z$ 三个维度上绝对不可突破 EHZ 几何边界。**
 
-支持：
+### 4. Tooling (工装载具层)
 
-* 多炉型管理（标准料框、网篮、专用夹具、料盘、挂具、环形工装）
-* 工件导入（手动创建 + Excel/CSV 批量导入 + JSON 方案导入）
-* 自动装炉（多种算法可选）
-* 人工调整
-* 炉次分配
-* 工装类型选择与参数配置
-
-### 1.1 装炉算法
-
-系统提供三种装炉算法：
-
-| 算法 | 说明 | 适用场景 |
-|------|------|----------|
-| 异构空间填充 (Heterogeneous) | 贪心空位分割放置 | 简单场景、无搁板无重心需求 |
-| 搁板分层 (Shelf-Layered) | 自底向上分层平铺 | 需要分层管理的多层摆放 |
-| 重心居中嵌套 (Center-of-Gravity) | 搁板分层 + 重心居中嵌套 | 需要重心平衡的精密装炉 |
-
-### 1.2 装炉策略
-
-| 策略 | 键名 | 说明 |
-|------|------|------|
-| 重心稳定 + 贴边对称 | `balanced` | 少物料贴边对称，多物料兼顾重心 |
-| 空间利用率优先 | `spaceUtil` | 塞满炉子，忽略重心，强力贴边紧凑 |
-| 热场均衡装载 | `thermalBalance` | 温度均匀，避免中心聚集，控制局部密度 |
-| 表面均匀性优先 | `surfaceUniform` | 最大暴露面积，避免遮挡 |
-
-### 1.3 分组规则
-
-* 同工艺优先：按热处理工艺类型分组，同工艺工件聚集到同一炉膛
-* 同材质优先：按材料类型分组，同材质工件聚集到同一炉膛
-* 两者同时开启时：工艺优先 > 材质优先（二级分组）
+* 统称所有承载物料进炉的金属结构件。详见「工业规则」分类。
 
 ---
 
-## 2. 3D 可视化
+## 二、 核心功能模块
 
-系统提供：
+### 1. 装炉管理与 3D 异构空间排布引擎
 
-* 3D 炉膛显示（含多种料框类型渲染：网格 grid / 蜂窝 honeycomb / 托盘 tray / 挂具 hanger / 环形 ringnode）
-* 工件实时摆放
-* 缩放/旋转查看
-* 工件高亮
-* 炉内空间预览
-* 爆炸图模式（纵向/横向展开 + 分层显示）
-* 施工清单（BOM 分层视图）
-* 3D 显示设置（网格/坐标轴/标尺独立开关）
+* **多源数据导入：** 支持手动创建、Excel/CSV 批量导入、JSON 方案导入。
+* **智能化装炉算法矩阵：**
+* **异构空间填充 (Heterogeneous):** 贪心空位分割放置，适用于简单场景。
+* **搁板分层平铺 (Shelf-Layered):** 自底向上分层平铺，支持搁板动态高度分配。
+* **重心居中嵌套 (Center-of-Gravity):** 针对高精密热处理，控制 $X, Z$ 轴的质心偏移率。
 
-技术：
 
-* Three.js + OrbitControls
+* **装炉策略开关：** * 重心稳定 + 贴边对称 (`balanced`)
+* 空间利用率优先 (`spaceUtil`)
+* 热场均衡装载 (`thermalBalance`)
+* 表面均匀性优先 (`surfaceUniform`)
 
----
 
-## 3. PDF 工艺卡
 
-系统自动生成工业 PDF：
+### 2. 综合效益预测引擎 (Analytical Prediction Engine)
 
-* 炉次总览
-* 多视图图纸（俯视图、前视图、侧视图）
-* 工件图例 (Legend)
-* 尺寸标尺
-* 页码与 REV 版本号
-* 签字区
-* 工程图框
-* 六页式 PDF 布局
+在生成装炉方案的瞬间（无需耗时的物理仿真），基于统计学与物理公式输出预估效益：
 
-输出：
+* **⚡ 电力消耗预估：** 基于设备基础热损耗 + 升温有效热吸收（核心因子：$T_{target}$, $\sum M_{total}$, $t_{hold}$）。
+* **💨 气体能耗预估：** 基于炉膛空置率。**物理逻辑：炉膛净空体积 $V_{void} = V_{chamber} - V_{packed}$ 越小，所需回填的冷却/保护气体越少**。
+* **🛡️ 质量安全评分：** 基于算法检测热辐射遮挡率、垂直叠放压伤风险、循环气流阻力等给出 0-100 评分。
 
-* A4/A3 PDF（jsPDF 生成）
-* SVG 工程图（svg2pdf 转换）
-* 尺寸标注系统
-* 智能排版引擎
+### 3. SpaceX 航天级 3D 视觉与交互 (UI/UX)
+
+* **悬浮座舱布局：** 3D 渲染画布 (`#canvas-area`) 绝对定位铺满底层，HUD 面板（左侧配置/右侧清单）采用半透明暗色磨砂玻璃质感悬浮于场景之上。
+* **视觉资产规范：** 采用纯白底色配合钛灰（#64748B）线框，能量流光采用猛禽发动机点火色（真空紫 #7000FF 至 电光青蓝 #00F0FF 渐变）。所有 UI 图标统一为 1.5px 极简工程图纸风。
+* **高级视图：** 俯视/正视/侧视正交切换、爆炸图模式（横纵展开）、热场与重心标记。
+
+### 4. PDF 工业工艺卡导出
+
+* **六页式标准化输出：** 包含方案总览、多视图图纸、分层步骤图、AI 综合效益预测报告。
+* **工程化元素：** 自动生成工件图例 (Legend)、尺寸标尺、签字区、工程图框。
 
 ---
 
-## 4. 数据导入
+## 三、 工业规则与算法刚性约束
 
-支持：
+### 1. 5 大基础工装定义与物理规则 (Tooling Constraints)
 
-* CSV 订单（PapaParse）
-* Excel 订单（SheetJS / XLSX）
-* 热处理工件导入模板（`.xlsx`）
-* JSON 装炉方案导入/导出
-* STEP/STL 模具（规划中）
-* DWG/DXF 炉膛 CAD（规划中）
+系统摒弃互联网名词，严格遵守工业界工装物理特征建立算法约束边界：
 
----
+| 工装分类 | 工业特征 | 算法刚性约束 (Meta Rules) |
+| --- | --- | --- |
+| **料盘 / 托盘 (Tray)** | 无围边，带叉车脚，用于大型重型件（模具/大轴） | `hasShelf: false`, `canStackInside: false` (严禁叠放压伤), `exposurePriority: high` (最大化暴露面积), 必须严格重心居中。 |
+| **集装网篮 (Grid Basket)** | 密集网格，无搁板槽，用于批量小件（齿轮/紧固件） | `hasShelf: false`, `orientation: vertical_only` (轴类强制竖置), `isNestables: true` (允许作为虚拟工件嵌套入标准料框的搁板上)。 |
+| **标准料框 (Standard Basket)** | 高围边，带定距导轨，中型件模块化多层装载 | `hasShelf: true` (最大5层)。**动态层高分配：** 算法根据本层最高工件 $h_{max}$ 自动寻找最近导轨插入搁板。禁止工件直接肉身相叠。 |
+| **环形工装 (Ring Tooling)** | 井式/回转炉专用，中心吊轴+多层圆网盘 | `coordinateSystem: 'polar'` (极坐标排布), `centerVoidRadius: R` (中心主轴为绝对避障禁区), `hasLayers: true`。 |
+| **专用夹具/挂具 (Fixture)** | 内部带定制挂钩或垂直销轴，用于防变形细长轴 | `placementMode: discrete_nodes` (工件放置点从连续三维空间变为离散的三维定点捕捉)。 |
 
-# 三、用户角色
+### 2. 安全与放置规则
 
-## 1. 工艺工程师
-
-负责：
-
-* 创建装炉方案
-* 调整工件摆放
-* 导出工艺卡
+* **安全间距：** 工件间 $\ge 5\text{mm}$，距炉壁 $\ge 30\text{mm}$（支持按炉膛独立覆盖配置）。
+* **承重报警：** 实时监控 $\sum M \le maxLoadCapacity$，超载时强制阻断动画并警示。
+* **姿态翻转：** 支持系统在排布时尝试 X/Z 轴的 $90^\circ$ 旋转，圆柱体根据 `discFlipRatio` 判定是否作为圆盘侧放。
 
 ---
 
-## 2. 车间操作员
+## 四、 核心数据模型 (JSON 结构化约定)
 
-负责：
+### 1. Furnace / Tooling 配置结构
 
-* 查看工艺卡
-* 按图装炉
-* 提交执行状态
-
----
-
-## 3. 总工/审核人员
-
-负责：
-
-* 审核装炉方案
-* 工艺签字确认
-* 管理工业规则（间距、摆放策略、分组规则等）
-
----
-
-# 四、工业规则
-
-## 1. 摆放优先级
-
-系统默认：
-
-* 先放重工件（重量降序）
-* 先放大工件（体积降序）
-* 后放小工件
-
-目的：
-
-* 保证稳定性
-* 提高利用率
-
----
-
-## 2. 摆放方式
-
-支持：
-
-* 平摆（长方体最小面积面朝下姿态优化）
-* 水平旋转（w×d 和 d×w 两种朝向候选）
-* 串放
-* 插放
-
-不同工件支持不同摆放方式。
-
----
-
-## 3. 安全间距
-
-工件之间必须保留安全间隔：
-
-默认：
-
-* 工件间距 ≥ 5mm（可全局配置）
-* 距离炉壁 ≥ 30mm
-* 每个炉膛可独立设置间距
-
-系统必须自动检测碰撞。
-
----
-
-## 4. 重量平衡
-
-系统需要检测：
-
-* 左右偏载
-* 前后偏载
-* 重心位置（仅 XZ 平面，Y 轴由重力支配）
-* 四象限重量均衡
-
-超限时自动报警。
-
----
-
-## 5. 搁板分层
-
-系统支持：
-
-* 搁板实体厚度配置（默认 20mm，真实占用炉膛高度）
-* 自底向上层层累积放置
-* 环形工装内置搁板自动跳转
-
----
-
-# 五、核心数据模型
-
-## Part（工件）
-
-```js
+```javascript
 {
-    id,                    // 唯一标识
-    name,                  // 工件名称
-    shape,                 // 形状：'cuboid' | 'cylinder'
-    width,                 // 宽度 (mm)，圆柱为直径
-    height,                // 高度 (mm)，圆柱为长度
-    depth,                 // 深度 (mm)，圆柱为直径
-    weight,                // 单件重量 (kg)
-    count,                 // 数量
-    material,              // 材质（如 20CrMnTi、45#）
-    process,               // 热处理工艺（如 渗碳、氮化、淬火）
-    customer,              // 客户名称
-    itemCode,              // 物料编码
-    showName,              // PDF 显示名称（用于净化渲染）
-    color                  // 3D 渲染颜色
+    id: "furnace-001",
+    equipmentCode: "EQ-VAC-01",  // 预留对接 SCADA 资产主键
+    name: "1号真空油淬炉",
+    width: 900, height: 1200, depth: 900, // 仅限有效加热区 EHZ 尺寸
+    maxWeight: 1500,
+    toolingType: "standard-basket",       // 强关联五大工装逻辑
+    maxLayers: 5,
+    placementMode: "free",
+    allowedProcesses: ["渗碳", "调质"],     // 准入规则
+    params: {
+        // 针对特殊工装的结构参数（如环形内径、夹具挂钩间距）
+        innerDia: 200,
+        slotCount: 8
+    }
 }
+
 ```
 
----
+### 2. PackingResult (装炉计算结果)附带预测数据
 
-## Furnace（炉型/工装）
-
-```js
+```javascript
 {
-    id,                    // 唯一标识
-    name,                  // 炉膛/工装名称
-    width,                 // 炉膛内宽 (mm)
-    height,                // 炉膛内高 (mm)
-    depth,                 // 炉膛内深 (mm)
-    maxWeight,             // 最大承重 (kg)
-    count,                 // 可用台数
-    plannedHeats,          // 计划炉次数
-    actualSpacing,         // 每个炉膛独立间距 (mm)，null 则使用全局值
-    basketType,            // 料框类型：'grid' | 'honeycomb' | 'tray' | 'ringnode' | 'hanger'
-    toolingType,           // 工装类型：'standard-basket' | 'mesh-basket' | 'special-jig' |
-                           //            'material-tray' | 'hanger' | 'ring-tooling'
-    maxLayers,             // 最大堆叠层数
-    placementMode,         // 摆放模式：'free' | 'fixed' | 'vertical' | 'radial'
-    allowedProcesses,      // 允许的热处理工艺（逗号分隔）
-    params                 // 工装专属参数（如 ringCount、rodDiameter、slotWidth 等）
+    furnaceId: "furnace-001",
+    utilization: 0.82,
+    totalWeight: 1420,
+    packedItems: [ ... ],
+    // 效益预测引擎节点
+    predictions: {
+        powerConsumption: { estimatedKwh: 1250, efficiencyTier: "A" },
+        gasConsumption: { nitrogenNm3: 38 },
+        qualityRisk: { score: 94, deformationRisk: "LOW" }
+    }
 }
+
 ```
 
 ---
 
-## FurnaceTooling（工装类型注册表）
+## 五、 项目结构与技术栈
 
-```js
-// 六种内置工装类型，每种定义完整的元数据：
-{
-    toolingType,           // 唯一标识符
-    label,                 // 中文显示名
-    maxLayers,             // 最大堆叠层数
-    allowedProcesses,      // 允许的工艺列表（空数组 = 全部允许）
-    placementMode,         // 'free' | 'fixed' | 'vertical' | 'radial'
-    basketType,            // 映射到 3D 建模类型
-    params                 // 工装专属参数（网格大小、杆径、槽宽等）
-}
-```
+* **3D 渲染与视角：** `Three.js` + `OrbitControls`
+* **PDF 与工程图导出：** `jsPDF` + `svg2pdf` (搭配智能排版算法)
+* **数据流转与算法：** ES Modules (`furnace-engine.js`, `PackingRuleEngine.js`, `strategies.js`)
+* **模块解耦：** `state.js` 统一接管全局状态，UI 与 3D 渲染彻底分离。
 
 ---
 
-## PackingResult（装炉结果）
+## 六、 开发阶段规划
 
-```js
-{
-    furnaceId,             // 炉膛 ID
-    packedItems,           // 已装入工件列表（含 x, y, z, w, h, d, rotationInfo）
-    unpackedItems,         // 未装入工件列表
-    totalWeight,           // 总重量
-    utilization,           // 空间利用率
-    shelvesUsed,           // 使用的搁板列表 [{ y, thickness }]
-    aggregationStats,      // 聚集率统计 { materialRate, processRate }
-    groupingInfo           // 分组统计 { rulesText, summaryText, totalGroups }
-}
-```
+### Phase 1 ✅ 基础物理重构与可视化
 
----
+* 完成 3D 渲染解耦、多视口切换。
+* 基础 PDF 导出框架。
+* 完成装炉动画。
 
-# 六、项目结构
+### Phase 2 ✅ 算法升级与工业标准注入
 
-```text
-project/
-├── css/
-│   ├── main.css                    # 主样式
-│   └── pdf-template.css            # PDF 模板样式
-├── js/
-│   ├── app.js                      # 应用启动与模块协调
-│   ├── state.js                    # 全局状态管理（炉膛/物料/动画/显示设置）
-│   ├── furnace-engine.js           # 装炉算法核心（异构/搁板/重心居中/统一嵌套）
-│   ├── strategies.js               # 四种装炉策略配置（balanced/spaceUtil/thermalBalance/surfaceUniform）
-│   ├── PackingRuleEngine.js        # 分组规则引擎（同工艺/同材质分组）
-│   ├── basket-model.js             # 料框 3D 模型创建
-│   ├── item-models.js              # 工件 3D 模型创建
-│   ├── geometry-utils.js           # 姿态优化工具
-│   ├── three-scene.js              # Three.js 场景管理（渲染、动画、爆炸图、BOM）
-│   ├── ui.js                       # UI 交互（卡片、面板、弹窗、统计）
-│   ├── pdf-export.js               # PDF 导出（单炉膛）
-│   ├── pdf-six-page.js             # 六页式 PDF 生成器
-│   ├── screenshot-capture.js       # 3D 截图工具
-│   ├── server.js                   # 本地开发服务器
-│   └── modules/
-│       ├── furnaceManagement.js    # 炉膛管理模块
-│       ├── layoutStrategy.js       # 布局策略模块
-│       ├── loadingHistory.js       # 装炉历史模块
-│       ├── pdfManagement.js        # PDF 管理模块
-│       ├── preview3D.js            # 3D 预览模块
-│       ├── productManagement.js    # 产品管理模块
-│       └── workshopManagement.js   # 车间管理模块
-├── furnace.html                    # 主页面入口
-├── 热处理工件导入模板.xlsx         # Excel 导入模板
-├── 测试用例一.xlsx                 # 测试用例数据
-├── PRD.md                          # 产品需求文档（本文件）
-├── docs/
-│   └── ARCHITECTURE.md             # 系统架构文档
-└── package.json                    # 项目配置
-```
+* 引入搁板动态分配算法。
+* 完成重心居中算法、同工艺/同材质自动分组隔离。
+* 完成工程制图 PDF 生成。
+* 爆炸图模式与分层 BOM 清单。
+
+### Phase 3 🔄 智能化与架构升级（当前阶段）
+
+* **UI/UX 彻底重构：** 落地 SpaceX 航天级悬浮座舱设计与纯粹线框图标系统。
+* **工装模型库扩展：** `basket-model.js` 引入 5 大工装动态参数化工厂渲染。
+* **综合效益预测引擎：** 实现能耗、气耗与质量风险的自动评估。
+
+### Phase 4 📋 工业互联网深度融合
+
+* 提供 RESTful API，对接工厂 MES/ERP 系统。
+* 导入 DXF/DWG，根据真实工件轮廓进行像素级精确碰撞检测。
+* 实装 AI Agent，根据车间设备的实时运行状态 (`currentStatus`) 自动完成排产调度。
 
 ---
-
-# 七、推荐技术栈
-
-| 功能   | 技术                  |
-| ---- | ------------------- |
-| 3D   | Three.js            |
-| PDF  | jsPDF               |
-| SVG  | svg2pdf             |
-| 数据导入 | PapaParse / SheetJS (XLSX) |
-| CAD  | DXF Parser（规划中） |
-| 模块化  | ES Modules          |
-| 服务器 | Node.js (Express)   |
-
----
-
-# 八、开发阶段
-
-## Phase 1 ✅ 已完成
-
-* 项目模块化
-* PDF 工艺卡（单炉膛 + 六页式）
-* 多视图图纸
-* Legend 图例
-* 装炉动画播放
-
----
-
-## Phase 2 ✅ 已完成
-
-* SVG 工程图尺寸标注
-* SVG 工程图排版引擎
-* 页码与 REV
-* 工程图框
-* 搁板分层算法
-* 重心居中算法（XZ 平面、四象限均衡）
-* 分组规则引擎（同工艺/同材质聚集）
-* 策略化装炉（4 种策略 x 灵活的权重配置）
-* 爆炸图 + 施工清单视图
-
----
-
-## Phase 3 🔄 进行中
-
-* AI 装炉优化
-* 偏载分析
-* 热场分析
-* 自动排炉
-* DXF/DWG 炉膛 CAD 导入
-
----
-
-## Phase 4 📋 规划中
-
-* MES/ERP 对接
-* 审批流程
-* 工厂生产管理
-* 用户权限管理
-
----
-
-# 九、项目愿景（最终）
-
-本系统的最终目标是将"工业热处理装炉可视化工具"升级为一个全面的**工业热处理工艺平台**。该平台将不仅仅局限于装炉规划，更将支持：
-
-*   **工艺标准化与数字化：** 通过系统固化最佳实践，减少人为误差，实现工艺流程的全面数字化管理。
-*   **AI 智能优化：** 借助人工智能算法，实现更高效、更科学的装炉方案，进一步提升炉膛利用率和生产效率。
-*   **工厂 MES/ERP 协同：** 与工厂制造执行系统 (MES) 及企业资源规划 (ERP) 无缝对接，实现生产数据的互联互通和智能化决策。
-*   **工业级工程图输出：** 提供具备尺寸标注和智能排版能力的工业工程图，满足车间生产和质量管理的高标准要求。
-
-通过持续迭代和技术创新，本系统将成为推动工业热处理行业向智能化、数字化转型的核心动力。
