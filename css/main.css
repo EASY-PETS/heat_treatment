@@ -32,63 +32,94 @@ body {
 
 /* ==================== TOP BAR ==================== */
 #top-bar {
-    height: 56px; min-height: 56px;
+    height: 64px; min-height: 64px;
     background: #FFFFFF;
     border-bottom: 1px solid var(--border-color);
-    display: flex; align-items: center; padding: 0 18px;
-    gap: 10px; z-index: 20;
+    display: flex; align-items: center; padding: 0 20px;
+    gap: 4px; z-index: 20;
     box-shadow: 0 1px 3px rgba(0,0,0,0.04);
 }
-#top-bar h2 {
-    margin: 0; font-size: 24px; font-weight: 600;
-    color: var(--text-color);
-    white-space: nowrap; letter-spacing: 0.5px;
-}
 #top-bar .btn {
-    padding: 8px 16px; font-size: 13px; font-weight: 600;
-    border: 1px solid var(--border-color); border-radius: 8px; cursor: pointer;
-    color: var(--text-secondary); background: #F8FAFC;
-    transition: all 0.2s; white-space: nowrap;
+    padding: 7px 14px; font-size: 13px; font-weight: 500;
+    border: none; border-radius: 6px; cursor: pointer;
+    transition: all 0.15s; white-space: nowrap;
 }
-#top-bar .btn:hover {
+
+/* ---- Logo ---- */
+.top-logo {
+    display: flex; flex-direction: column;
+    justify-content: center; margin-right: 16px;
+    line-height: 1.25;
+}
+.top-logo-title {
+    font-size: 16px; font-weight: 700;
+    color: var(--text-color);
+    letter-spacing: 0.5px;
+}
+.top-logo-subtitle {
+    font-size: 11px; font-weight: 400;
+    color: var(--text-muted);
+    letter-spacing: 0.3px;
+}
+
+/* ---- 导航按钮 ---- */
+.top-nav-btn {
+    background: transparent;
+    color: var(--text-secondary);
+    padding: 7px 14px !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    border: none !important;
+    border-radius: 6px !important;
+}
+.top-nav-btn:hover {
     background: #F1F5F9;
-    border-color: #CBD5E1;
+    color: var(--text-color);
 }
-.btn-master {
-    background: #F8FAFC !important;
-    color: var(--text-secondary) !important;
-    border: 1px solid var(--border-color) !important;
+
+/* ---- 弹性填充 ---- */
+.top-spacer {
+    flex: 1;
+}
+
+/* ---- 工具按钮 (灰色) ---- */
+.top-tool-btn {
+    background: #F1F5F9;
+    color: var(--text-secondary);
+    padding: 7px 14px !important;
     font-size: 13px !important;
-    box-shadow: none !important;
+    font-weight: 500 !important;
+    border: none !important;
+    border-radius: 6px !important;
 }
-.btn-master:hover { background: #F1F5F9 !important; border-color: #CBD5E1 !important; transform: none; }
-.btn-rules {
-    background: #F8FAFC !important;
-    color: var(--text-secondary) !important;
-    border: 1px solid var(--border-color) !important;
-    font-size: 13px !important;
-    box-shadow: none !important;
+.top-tool-btn:hover {
+    background: #E2E8F0;
+    color: var(--text-color);
 }
-.btn-rules:hover { background: #F1F5F9 !important; border-color: #CBD5E1 !important; transform: none; }
+
+/* ---- 主按钮：生成方案 (蓝色) ---- */
 .btn-generate {
     background: var(--accent-color) !important;
     color: #FFFFFF !important;
-    border: 1px solid var(--accent-color) !important;
-    font-size: 14px !important; padding: 9px 22px !important;
-    letter-spacing: 0.5px;
+    border: none !important;
+    font-size: 13px !important; font-weight: 600 !important;
+    padding: 7px 20px !important;
+    border-radius: 6px !important;
+    margin-left: 6px;
+    letter-spacing: 0.3px;
     box-shadow: none !important;
 }
-.btn-generate:hover { background: var(--accent-hover) !important; border-color: var(--accent-hover) !important; transform: none; box-shadow: none !important; }
-.btn-animate-top { background-color: #F8FAFC; color: var(--text-secondary); border: 1px solid var(--border-color); display: none; }
-.btn-animate-top:hover { background-color: #F1F5F9; }
-.btn-pdf-top { background-color: #F8FAFC; color: var(--text-secondary); border: 1px solid var(--border-color); display: none; }
-.btn-pdf-top:hover { background-color: #F1F5F9; }
-.btn-explode-top { background: #F8FAFC; color: var(--text-secondary); border: 1px solid var(--border-color); display: none; box-shadow: none; }
-.btn-explode-top:hover { background: #F1F5F9; transform: none; }
-.btn-explode-top.active { background: var(--success-color); color: #FFFFFF; border-color: var(--success-color); box-shadow: none; }
-.btn-explode-top.active:hover { background: #16A34A; border-color: #16A34A; }
-.btn-bom-top { background: #F8FAFC; color: var(--text-secondary); border: 1px solid var(--border-color); display: none; box-shadow: none; }
-.btn-bom-top:hover { background: #F1F5F9; transform: none; }
+.btn-generate:hover {
+    background: var(--accent-hover) !important;
+    transform: none;
+    box-shadow: none !important;
+}
+
+/* ---- 旧样式兼容：隐藏已废弃的独立类 ---- */
+.btn-master, .btn-rules, .btn-animate-top, .btn-pdf-top,
+.btn-explode-top, .btn-bom-top {
+    /* 已由 .top-nav-btn / .top-tool-btn 替代，保留以便 JS 不会报错 */
+}
 
 #top-summary {
     margin-left: auto; font-size: 12px; color: var(--text-muted);

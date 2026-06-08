@@ -23,16 +23,21 @@
 
     <!-- ==================== TOP BAR ==================== -->
     <div id="top-bar">
-        <h2>🔥 热处理预装炉智能体</h2>
-        <button class="btn btn-master" id="btn-master">🏆 装料大师</button>
-        <button class="btn btn-rules" id="btn-rules">📐 摆放规则</button>
-        <button class="btn btn-rules" id="btn-tooling-mgmt" style="background: linear-gradient(135deg, #4f46e5 0%, #3730a3 100%); box-shadow: 0 0 14px rgba(79,70,229,0.35);">🔧 工装模板</button>
-        <button class="btn btn-generate" id="btn-generate-plan">⚡ 生成方案</button>
-        <button class="btn btn-animate-top" id="btn-animate">🎬 逐步模拟装框</button>
-        <button class="btn btn-pdf-top" id="btn-export-pdf">📄 导出 PDF</button>
-        <button class="btn btn-explode-top" id="btn-explode" style="display:none;">🔍 开启爆炸图</button>
-        <button class="btn btn-bom-top" id="btn-bom" style="display:none;">📋 施工清单</button>
-        <div id="top-summary">
+        <div class="top-logo">
+            <div class="top-logo-title">AI热处理装炉智能体</div>
+            <div class="top-logo-subtitle">AI Furnace Loading Agent</div>
+        </div>
+        <button class="btn top-nav-btn" id="btn-master">方案</button>
+        <button class="btn top-nav-btn" id="btn-tooling-mgmt">工装</button>
+        <button class="btn top-nav-btn" id="btn-material-nav">物料</button>
+        <button class="btn top-nav-btn" id="btn-rules">规则</button>
+        <div class="top-spacer"></div>
+        <button class="btn top-tool-btn" id="btn-animate">模拟装炉</button>
+        <button class="btn top-tool-btn" id="btn-export-pdf">导出PDF</button>
+        <button class="btn top-tool-btn" id="btn-bom" style="display:none;">施工清单</button>
+        <button class="btn top-tool-btn" id="btn-explode" style="display:none;">爆炸图</button>
+        <button class="btn btn-generate" id="btn-generate-plan">生成方案</button>
+        <div id="top-summary" style="display:none;">
             就绪 · <span id="top-furnace-count">0</span> 炉膛 · <span id="top-item-count">0</span> 批次待装
         </div>
     </div>
