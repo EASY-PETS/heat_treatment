@@ -273,7 +273,7 @@ export class Preview3D {
 
         if (!this.globalFurnacesResult || this.globalFurnacesResult.length === 0) {
             body.innerHTML = '<div class="furnace-info-empty">暂无装炉方案，请先配置并点击「生成方案」</div>';
-            if (hint) hint.textContent = '生成方案后查看当前炉膛详情';
+            if (hint) hint.textContent = '生成方案后查看当前进炉方向';
             return;
         }
 

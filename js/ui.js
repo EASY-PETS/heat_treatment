@@ -145,7 +145,7 @@ export function createFurnaceCard(name, depth, width, height, maxWeight, count, 
                 // 原本已选中，现在取消选中了，隐藏详情并恢复默认提示
                 document.getElementById('fdp-placeholder').style.display = 'block'; 
                 document.getElementById('fdp-body').style.display = 'none'; 
-                document.getElementById('fdp-title').textContent = '📋 炉膛详情'; 
+                document.getElementById('fdp-title').textContent = '📋 进炉方向'; 
             } 
         });
     setupFurnaceDrag(card);
@@ -404,7 +404,7 @@ export function saveFurnaceDetail(cardId) {
 
 export function deleteFurnaceCard(fid) {
     const card = document.getElementById('furnace-card-' + fid); if (card) card.remove();
-    if (selectedFurnaceCardId === 'furnace-card-' + fid) { setSelectedFurnaceCardId(null); document.getElementById('fdp-placeholder').style.display = 'block'; document.getElementById('fdp-body').style.display = 'none'; document.getElementById('fdp-title').textContent = '📋 炉膛详情'; }
+    if (selectedFurnaceCardId === 'furnace-card-' + fid) { setSelectedFurnaceCardId(null); document.getElementById('fdp-placeholder').style.display = 'block'; document.getElementById('fdp-body').style.display = 'none'; document.getElementById('fdp-title').textContent = '📋 进炉方向'; }
     updateTopSummary();
 }
 

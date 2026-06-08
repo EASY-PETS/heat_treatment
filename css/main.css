@@ -129,17 +129,27 @@ body {
 
 /* ==================== MAIN CONTENT ==================== */
 #main-content {
-    flex: 1; display: flex; overflow: hidden;
+    position: relative;
+    display: block;
+    height: 100%;
+    overflow: hidden;
 }
 
 /* ==================== LEFT PANEL - Furnace Config ==================== */
 #left-panel {
-    width: 260px; min-width: 260px; max-width: 260px;
-    background-color: var(--panel-bg);
-    border-right: 1px solid var(--border-color);
-    display: flex; flex-direction: column;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.06);
-    z-index: 10;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 20;
+    width: 260px;           /* 保持原有宽度 */
+    min-width: 260px;
+    max-width: 260px;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(12px);
+    border-right: none;
+    box-shadow: 4px 0 20px rgba(0, 0, 0, 0.08);
+    transition: width 0.2s ease, min-width 0.2s ease, max-width 0.2s ease;
 }
 #left-panel .panel-header {
     padding: 10px 12px;
@@ -352,8 +362,12 @@ body {
 
 /* ==================== CENTER CANVAS ==================== */
 #canvas-area {
-    flex: 1; display: flex; flex-direction: column;
-    background: #F1F5F9; position: relative; min-width: 0;
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 /* ==================== CENTER STATS PANEL ==================== */
@@ -426,12 +440,19 @@ body {
 
 /* ==================== RIGHT PANEL - Materials ==================== */
 #right-panel {
-    width: 280px; min-width: 280px; max-width: 280px;
-    background-color: var(--panel-bg);
-    border-left: 1px solid var(--border-color);
-    display: flex; flex-direction: column;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.06);
-    z-index: 10;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    z-index: 20;
+    width: 280px;
+    min-width: 280px;
+    max-width: 280px;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(12px);
+    border-left: none;
+    box-shadow: -4px 0 20px rgba(0, 0, 0, 0.08);
+    transition: width 0.2s ease, min-width 0.2s ease, max-width 0.2s ease;
 }
 #right-panel .panel-header {
     padding: 10px 12px;
@@ -1372,11 +1393,14 @@ body {
     transition: width 0.3s ease, min-width 0.3s ease, max-width 0.3s ease;
 }
 
+/* 左侧面板折叠状态 */
 #left-panel.collapsed {
-    width: 36px;
-    min-width: 36px;
-    max-width: 36px;
-    position: relative;
+    width: 36px !important;
+    min-width: 36px !important;
+    max-width: 36px !important;
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(8px);
+    overflow: hidden;
 }
 
 #left-panel.collapsed > *:not(.panel-header) {
@@ -1384,16 +1408,19 @@ body {
 }
 
 #left-panel.collapsed .panel-header {
+    height: 100%;
+    display: flex;
     flex-direction: column;
     justify-content: center;
     align-items: center;
-    padding: 8px 4px;
-    height: 100%;
+    padding: 8px 0;
+    background: transparent;
+    border-bottom: none;
 }
 
 #left-panel.collapsed .panel-header h3,
-#left-panel.collapsed .panel-header-actions .btn-sm,
-#left-panel.collapsed .panel-header-actions .btn-toggle-panel {
+#left-panel.collapsed .panel-header .btn-sm,
+#left-panel.collapsed .panel-header .btn-toggle-panel {
     display: none;
 }
 
@@ -1401,39 +1428,70 @@ body {
     display: flex !important;
     writing-mode: vertical-lr;
     text-orientation: upright;
-    font-size: 16px;
+    font-size: 18px;
+    cursor: pointer;
+    color: #2563eb;
+    background: rgba(37, 99, 235, 0.1);
+    border-radius: 8px;
+    padding: 8px 6px;
 }
 
+#left-panel.collapsed .panel-expand-btn-left:hover {
+    background: rgba(37, 99, 235, 0.2);
+    color: #1d4ed8;
+}
+
+/* 右侧面板折叠状态 - 只显示展开按钮 */
 #right-panel.collapsed {
-    width: 36px;
-    min-width: 36px;
-    max-width: 36px;
-    position: relative;
+    width: 36px !important;
+    min-width: 36px !important;
+    max-width: 36px !important;
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(8px);
+    overflow: hidden;
 }
 
+/* 折叠时，除 .panel-header 外的所有内容都隐藏 */
 #right-panel.collapsed > *:not(.panel-header) {
     display: none;
 }
 
+/* 折叠时 .panel-header 只用来承载展开按钮 */
 #right-panel.collapsed .panel-header {
+    height: 100%;
+    display: flex;
     flex-direction: column;
     justify-content: center;
     align-items: center;
-    padding: 8px 4px;
-    height: 100%;
+    padding: 8px 0;
+    background: transparent;
+    border-bottom: none;
 }
 
+/* 隐藏 .panel-header 内的所有普通按钮和标题 */
 #right-panel.collapsed .panel-header h3,
-#right-panel.collapsed .panel-header-actions .btn-sm,
-#right-panel.collapsed .panel-header-actions .btn-toggle-panel {
+#right-panel.collapsed .panel-header .btn-sm,
+#right-panel.collapsed .panel-header .btn-toggle-panel {
     display: none;
 }
 
+/* 显示并美化展开按钮 */
 #right-panel.collapsed .panel-expand-btn-right {
     display: flex !important;
     writing-mode: vertical-lr;
     text-orientation: upright;
-    font-size: 16px;
+    font-size: 18px;
+    cursor: pointer;
+    color: #2563eb;
+    background: rgba(37, 99, 235, 0.1);
+    border-radius: 8px;
+    padding: 8px 6px;
+    transition: all 0.2s;
+}
+
+#right-panel.collapsed .panel-expand-btn-right:hover {
+    background: rgba(37, 99, 235, 0.2);
+    color: #1d4ed8;
 }
 
 /* ==================== 3D DOCK BAR (底部毛玻璃工具栏) ==================== */
@@ -1553,6 +1611,7 @@ body {
     font-size: 13px;
     color: var(--text-muted);
     flex: 1;
+    text-align: center;   /* 新增这一行 */
 }
 .ai-bar-empty b {
     color: var(--accent-color);

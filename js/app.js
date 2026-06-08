@@ -1093,7 +1093,7 @@ function clearAllFurnaces() {
     // 8. 重置详情面板
     document.getElementById('fdp-placeholder').style.display = 'block';
     document.getElementById('fdp-body').style.display = 'none';
-    document.getElementById('fdp-title').textContent = '📋 炉膛详情';
+    document.getElementById('fdp-title').textContent = '📋 进炉方向';
     document.getElementById('mdp-placeholder').style.display = 'block';
     document.getElementById('mdp-body').style.display = 'none';
     document.getElementById('mdp-title').textContent = '📋 工件详情';
