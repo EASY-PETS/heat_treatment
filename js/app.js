@@ -48,6 +48,7 @@ import {
     updateTopSummary, updateFurnaceNav,
     updateLeftPanelActiveForIndex, renderAISummaryBar,
     showCapacityFeedback, openRulesModal, saveRulesModal,
+    renderFurnaceThumbnails,
     initMasterView, parseExcelData, showImportPreview, applyImportData,
     openJsonImportModal, parseJsonPlan, renderJsonPreview, importJsonPlanToMaster
 } from './ui.js';
@@ -156,6 +157,21 @@ function executeAndRender() {
         updateLeftPanelActiveForIndex(startIndex);
         // 显示爆炸图和施工清单按钮
         updateExplodeBOMButtons();
+
+        // 渲染底部缩略图栏
+        renderFurnaceThumbnails(
+            result.completedFurnaces,
+            startIndex,
+            (clickedIdx) => {
+                setCurrentFurnaceIndex(clickedIdx);
+                renderSingleFurnace(clickedIdx, getSelectedMaterialName());
+                updateFurnaceNav();
+                updateLeftPanelActiveForIndex(clickedIdx);
+                renderAISummaryBar(onCenterFurnaceClick);
+                // 刷新缩略图高亮
+                renderFurnaceThumbnails(globalFurnacesResult, clickedIdx, () => {});
+            }
+        );
     } else {
         document.getElementById("empty-state").style.display = "block";
         document.getElementById("furnace-nav").style.display = "none";
@@ -191,6 +207,32 @@ function executeAndRender() {
             (missingInfo ? missingInfo + "\n" : "") +
             "建议：增加炉膛台数 / 提高承重上限 / 减少物料数量" +
             aggInfo);
+
+        // 渲染底部缩略图栏
+        if (globalFurnacesResult && globalFurnacesResult.length > 0) {
+            renderFurnaceThumbnails(
+                globalFurnacesResult,
+                currentFurnaceIndex,
+                onCenterFurnaceClick   // 点击回调，用于切换炉膛
+            );
+        } else {
+            const thumbBar = document.getElementById('furnace-thumb-bar');
+            if (thumbBar) thumbBar.style.display = 'none';
+        }
+
+        renderFurnaceThumbnails(
+            result.completedFurnaces,
+            startIndex,
+            (clickedIdx) => {
+                setCurrentFurnaceIndex(clickedIdx);
+                renderSingleFurnace(clickedIdx, getSelectedMaterialName());
+                updateFurnaceNav();
+                updateLeftPanelActiveForIndex(clickedIdx);
+                renderAISummaryBar(onCenterFurnaceClick);
+                // 刷新缩略图高亮
+                renderFurnaceThumbnails(globalFurnacesResult, clickedIdx, () => {});
+            }
+        );
     }
 }
 
@@ -236,6 +278,8 @@ function navigateFurnace(direction) {
     updateFurnaceNav();
     updateLeftPanelActiveForIndex(newIndex);
     renderAISummaryBar(onCenterFurnaceClick);
+    // 新增：刷新缩略图高亮
+    renderFurnaceThumbnails(globalFurnacesResult, currentFurnaceIndex, () => {});
 }
 
 /**
@@ -250,6 +294,8 @@ function onCenterFurnaceClick(idx) {
     updateFurnaceNav();
     updateLeftPanelActiveForIndex(idx);
     renderAISummaryBar(onCenterFurnaceClick);
+    // 新增：刷新缩略图高亮
+    renderFurnaceThumbnails(globalFurnacesResult, currentFurnaceIndex, () => {});
 }
 
 /**
@@ -1033,6 +1079,10 @@ function clearAllMaterials() {
     document.getElementById('furnace-nav').style.display = 'none';
     hideExplodeBOMButtons();
 
+    // 隐藏缩略图栏
+    const thumbBar = document.getElementById('furnace-thumb-bar');
+    if (thumbBar) thumbBar.style.display = 'none';
+
     // 6. 显示空状态
     document.getElementById('empty-state').style.display = 'block';
 
@@ -1086,6 +1136,10 @@ function clearAllFurnaces() {
     document.getElementById('furnace-nav').style.display = 'none';
     renderAISummaryBar(null);
     hideExplodeBOMButtons();
+
+    // 隐藏缩略图栏
+    const thumbBar = document.getElementById('furnace-thumb-bar');
+    if (thumbBar) thumbBar.style.display = 'none';
 
     // 7. 显示空状态
     document.getElementById('empty-state').style.display = 'block';

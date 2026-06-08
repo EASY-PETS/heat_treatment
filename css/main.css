@@ -150,6 +150,10 @@ body {
     border-right: none;
     box-shadow: 4px 0 20px rgba(0, 0, 0, 0.08);
     transition: width 0.2s ease, min-width 0.2s ease, max-width 0.2s ease;
+    /* 新增以下三行 */
+    display: flex;
+    flex-direction: column;
+    height: 100%;
 }
 #left-panel .panel-header {
     padding: 10px 12px;
@@ -453,6 +457,10 @@ body {
     border-left: none;
     box-shadow: -4px 0 20px rgba(0, 0, 0, 0.08);
     transition: width 0.2s ease, min-width 0.2s ease, max-width 0.2s ease;
+    /* 👇 新增以下三行 */
+    display: flex;
+    flex-direction: column;
+    height: 100%;
 }
 #right-panel .panel-header {
     padding: 10px 12px;
@@ -1502,13 +1510,13 @@ body {
     transform: translateX(-50%);
     display: flex;
     align-items: center;
-    gap: 4px;
-    padding: 8px 16px;
+    gap: 2px;
+    padding: 4px 10px;
     background: rgba(255, 255, 255, 0.65);
     backdrop-filter: blur(16px) saturate(180%);
     -webkit-backdrop-filter: blur(16px) saturate(180%);
     border: 1px solid rgba(226, 232, 240, 0.6);
-    border-radius: 20px;
+    border-radius: 16px;
     box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06), 0 1px 4px rgba(0, 0, 0, 0.04);
     z-index: 15;
     user-select: none;
@@ -1524,15 +1532,16 @@ body {
     flex-direction: column;
     align-items: center;
     gap: 2px;
-    padding: 6px 12px;
+    padding: 4px 8px;
     background: transparent;
     border: none;
     border-radius: 12px;
     color: var(--text-secondary);
     cursor: pointer;
     transition: all 0.2s ease;
-    min-width: 52px;
+    min-width: 40px;
     font-family: inherit;
+    font-size: 11px;          /* 可能稍微缩小字体 */
 }
 .dock-btn:hover {
     background: rgba(37, 99, 235, 0.08);
@@ -1544,7 +1553,7 @@ body {
 }
 
 .dock-icon {
-    font-size: 18px;
+    font-size: 16px;
     line-height: 1;
     transition: transform 0.2s ease;
 }
@@ -1553,7 +1562,7 @@ body {
 }
 
 .dock-label {
-    font-size: 10px;
+    font-size: 9px;
     font-weight: 500;
     line-height: 1;
     white-space: nowrap;
@@ -1561,7 +1570,7 @@ body {
 
 .dock-separator {
     width: 1px;
-    height: 28px;
+    height: 24px;
     background: rgba(226, 232, 240, 0.8);
     margin: 0 6px;
 }
@@ -1776,4 +1785,150 @@ body {
     font-size: 10px;
     color: var(--danger-color);
     margin-top: 6px;
+}
+
+/* 缩略图栏头部（标题+折叠按钮） */
+.thumb-bar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    padding-left: 4px;
+    padding-right: 8px;
+}
+
+/* 折叠按钮样式（左侧，垂直居中） */
+.thumb-bar-collapse-btn {
+    flex-shrink: 0;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+    border: none;
+    border-radius: 20px;
+    width: 28px;
+    height: 28px;
+    cursor: pointer;
+    font-size: 14px;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.thumb-bar-collapse-btn:hover {
+    background: rgba(0, 0, 0, 0.7);
+}
+
+/* 炉膛缩略图栏（始终显示，无折叠按钮） */
+#furnace-thumb-bar {
+    flex-shrink: 0;
+    background: transparent;
+    backdrop-filter: none;
+    padding: 8px 12px;
+    width: fit-content;
+    max-width: calc(100% - 260px - 280px);
+    margin: 0 auto;
+    margin-bottom: 80px;        /* 避开底部 dock-bar */
+    z-index: 10;
+}
+
+/* 折叠状态：隐藏滚动容器，改变按钮箭头方向 */
+#furnace-thumb-bar.collapsed .thumb-scroll-container {
+    display: none;
+}
+#furnace-thumb-bar.collapsed .thumb-bar-collapse-btn {
+    transform: rotate(180deg);   /* 箭头向下表示展开 */
+}
+
+/* 可选：折叠时减少整体内边距，让顶部更紧凑 */
+#furnace-thumb-bar.collapsed {
+    padding-bottom: 4px;
+}
+
+.thumb-bar-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.9);
+    margin-bottom: 6px;
+    padding-left: 4px;
+}
+
+.thumb-scroll-container {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 4px 0;
+    scrollbar-width: thin;
+    justify-content: center;
+}
+
+.thumb-scroll-container::-webkit-scrollbar {
+    height: 4px;
+}
+.thumb-scroll-container::-webkit-scrollbar-track {
+    background: #E2E8F0;
+    border-radius: 4px;
+}
+.thumb-scroll-container::-webkit-scrollbar-thumb {
+    background: #94A3B8;
+    border-radius: 4px;
+}
+
+.thumb-card {
+    flex: 0 0 80px;
+    background: transparent;     /* 半透明暗色背景，增强对比度 */
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 6px;
+    padding: 4px 3px;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    text-align: center;
+    color: #f0f0f0;
+}
+
+.thumb-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--accent-color);
+    background: #F8FAFC;
+}
+
+.thumb-card.active {
+    border: 2px solid var(--accent-color);
+    background: #EFF6FF;
+    box-shadow: 0 4px 12px rgba(37,99,235,0.2);
+}
+
+.thumb-preview {
+    width: 100%;
+    height: 35px;
+    background: #F1F5F9;
+    border-radius: 6px;
+    margin-bottom: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    color: var(--text-muted);
+}
+
+.thumb-card.active .thumb-preview {
+    background: #E2E8F0;
+}
+
+.thumb-name {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.thumb-stats {
+    font-size: 8px;
+    color: var(--text-muted);
+    margin-top: 2px;
+    white-space: nowrap;
 }

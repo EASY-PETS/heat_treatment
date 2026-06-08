@@ -792,6 +792,56 @@ export function renderAISummaryBar(onFurnaceClick) {
     }, { once: false });
 }
 
+/**
+ * 渲染炉膛缩略图栏
+ * @param {Array} furnaces - globalFurnacesResult 数组
+ * @param {number} currentIdx - 当前显示的炉膛索引
+ * @param {Function} onClickCallback - 点击缩略图时的回调函数 (index) => void
+ */
+export function renderFurnaceThumbnails(furnaces, currentIdx, onClickCallback) {
+    const thumbBar = document.getElementById('furnace-thumb-bar');
+    const container = document.getElementById('thumb-scroll-container');
+    if (!thumbBar || !container) return;
+
+    if (!furnaces || furnaces.length === 0) {
+        thumbBar.style.display = 'none';
+        return;
+    }
+
+    thumbBar.style.display = 'block';
+    container.innerHTML = '';
+
+    furnaces.forEach((f, idx) => {
+        const totalVol = f.w * f.h * f.d;
+        const packedVol = (f.packedItems || []).reduce((acc, curr) => acc + (curr.w * curr.h * curr.d), 0);
+        const utilization = totalVol > 0 ? ((packedVol / totalVol) * 100).toFixed(0) : '0';
+        const itemCount = (f.packedItems || []).length;
+
+        let emoji = '📦';
+        if (utilization >= 80) emoji = '🟩';
+        else if (utilization >= 60) emoji = '🟨';
+        else if (utilization > 0) emoji = '🟧';
+        else emoji = '⬜';
+
+        const card = document.createElement('div');
+        card.className = 'thumb-card' + (idx === currentIdx ? ' active' : '');
+        card.setAttribute('data-furnace-idx', idx);
+
+        card.innerHTML = `
+            <div class="thumb-preview">${emoji}</div>
+            <div class="thumb-name" title="${f.instanceId}">${f.instanceId}</div>
+            <div class="thumb-stats">${itemCount}件 · ${utilization}%</div>
+        `;
+
+        card.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (onClickCallback) onClickCallback(idx);
+        });
+
+        container.appendChild(card);
+    });
+}
+
 // ==================== RULES MODAL (V2.0) ====================
 
 export function openRulesModal() {
