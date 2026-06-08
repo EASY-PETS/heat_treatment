@@ -981,14 +981,7 @@ function confirmAddTooling() {
     selectFurnaceCard(result.cardId);
 
     // 刷新主 3D 场景，渲染空料框
-    const hasMaterials = document.querySelectorAll(".material-card").length > 0;
-    if (hasMaterials) {
-        // 有物料时：执行装炉算法 + 渲染
-        executeAndRender();
-    } else {
-        // 无物料时：仅渲染空料框（手动构建 furnaceGroups）
-        renderEmptyToolingOnly();
-    }
+    renderEmptyToolingOnly();
 
     closeToolingAddModal();
 }

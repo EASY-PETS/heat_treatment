@@ -1007,9 +1007,9 @@ export function openRulesModal() {
     document.getElementById('rules-modal-overlay').style.display = 'flex';
     // 🔧 V2.6 清理：只保留对核心逻辑有数值影响的参数
     // 基础/尺寸规则：最小安全间距、炉壁间距、允许旋转90°
-    document.getElementById('rule-min-spacing').value = placementRules.minSpacing;
-    document.getElementById('rule-wall-spacing').value = placementRules.wallSpacing;
-    document.getElementById('rule-rotate').checked = placementRules.rotate;
+    // document.getElementById('rule-min-spacing').value = placementRules.minSpacing;
+    // document.getElementById('rule-wall-spacing').value = placementRules.wallSpacing;
+    // document.getElementById('rule-rotate').checked = placementRules.rotate;
     // 重量与安全规则：承重安全余量
     document.getElementById('rule-weight-margin').value = placementRules.weightMargin;
     // 搁板参数：主开关、层高、实体厚度
@@ -1063,9 +1063,9 @@ export function saveRulesModal() {
         dense: true,                            // 密集排布已固化
         sameMaterial: false,
         sameProcess: false,
-        minSpacing: parseFloat(document.getElementById('rule-min-spacing').value) || 5,
-        wallSpacing: parseFloat(document.getElementById('rule-wall-spacing').value) || 30,
-        rotate: document.getElementById('rule-rotate').checked,
+        // minSpacing: parseFloat(document.getElementById('rule-min-spacing').value) || 5,
+        // wallSpacing: parseFloat(document.getElementById('rule-wall-spacing').value) || 30,
+        rotate: true,
         weightMargin: parseFloat(document.getElementById('rule-weight-margin').value) || 10,
         balance: true,                          // 重心平衡已固化（搁板分层内嵌重心居中）
         sortStrategy: 'weight-desc',            // 排序策略固化为重量降序
