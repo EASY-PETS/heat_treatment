@@ -78,13 +78,6 @@
             <div class="spacing-line">
                 默认安全间距 <input type="number" id="global-spacing" value="5" min="0"> mm
             </div>
-            <!-- V2.2: 3D显示设置 -->
-            <div class="display-settings-line">
-                <span class="ds-label">3D 设置：</span>
-                <label class="ds-check"><input type="checkbox" id="ds-show-grid" checked> 显示地面网格</label>
-                <label class="ds-check"><input type="checkbox" id="ds-show-axes" checked> 显示坐标轴</label>
-                <label class="ds-check"><input type="checkbox" id="ds-show-rulers" checked> 显示尺寸刻度</label>
-            </div>
         </div>
 
         <!-- CENTER: 3D View -->
@@ -167,6 +160,20 @@
                 <button class="dock-btn" id="dock-thermal" title="热场">
                     <span class="dock-icon">🔥</span>
                     <span class="dock-label">热场</span>
+                </button>
+                <!-- 新增三个按钮 -->
+                <div class="dock-separator"></div>
+                <button class="dock-btn" id="dock-toggle-grid" title="显示/隐藏地面网格">
+                    <span class="dock-icon">🔲</span>
+                    <span class="dock-label">网格</span>
+                </button>
+                <button class="dock-btn" id="dock-toggle-axes" title="显示/隐藏坐标轴">
+                    <span class="dock-icon">📐</span>
+                    <span class="dock-label">坐标轴</span>
+                </button>
+                <button class="dock-btn" id="dock-toggle-rulers" title="显示/隐藏尺寸刻度">
+                    <span class="dock-icon">📏</span>
+                    <span class="dock-label">标尺</span>
                 </button>
             </div>
         </div>

@@ -620,22 +620,22 @@ function init() {
 
 
     // ==================== V2.2: 3D显示设置 ====================
-    const dsGrid = document.getElementById("ds-show-grid");
-    const dsAxes = document.getElementById("ds-show-axes");
-    const dsRulers = document.getElementById("ds-show-rulers");
+    // const dsGrid = document.getElementById("ds-show-grid");
+    // const dsAxes = document.getElementById("ds-show-axes");
+    // const dsRulers = document.getElementById("ds-show-rulers");
 
-    function applyDisplaySettings() {
-        setDisplaySettings({
-            showGrid: dsGrid.checked,
-            showAxes: dsAxes.checked,
-            showRulers: dsRulers.checked
-        });
-        refreshAllDisplayVisibility();
-    }
+    // function applyDisplaySettings() {
+    //     setDisplaySettings({
+    //         showGrid: dsGrid.checked,
+    //         showAxes: dsAxes.checked,
+    //         showRulers: dsRulers.checked
+    //     });
+    //     refreshAllDisplayVisibility();
+    // }
 
-    if (dsGrid) dsGrid.addEventListener("change", applyDisplaySettings);
-    if (dsAxes) dsAxes.addEventListener("change", applyDisplaySettings);
-    if (dsRulers) dsRulers.addEventListener("change", applyDisplaySettings);
+    // if (dsGrid) dsGrid.addEventListener("change", applyDisplaySettings);
+    // if (dsAxes) dsAxes.addEventListener("change", applyDisplaySettings);
+    // if (dsRulers) dsRulers.addEventListener("change", applyDisplaySettings);
 
 
     // ==================== 生成模式选择弹窗事件 ====================
@@ -1317,6 +1317,37 @@ init();
     function highlightDockBtn(activeBtn) {
         document.querySelectorAll('.dock-btn').forEach(b => b.classList.remove('active'));
         if (activeBtn) activeBtn.classList.add('active');
+    }
+
+    // 3D 显示设置切换按钮（网格、坐标轴、标尺）
+    const toggleGrid = document.getElementById('dock-toggle-grid');
+    const toggleAxes = document.getElementById('dock-toggle-axes');
+    const toggleRulers = document.getElementById('dock-toggle-rulers');
+
+    if (toggleGrid) {
+        toggleGrid.addEventListener('click', () => {
+            setDisplaySettings({ ...displaySettings, showGrid: !displaySettings.showGrid });
+            refreshAllDisplayVisibility();
+            toggleGrid.classList.toggle('active', displaySettings.showGrid);
+        });
+        // 初始化高亮状态
+        toggleGrid.classList.toggle('active', displaySettings.showGrid);
+    }
+    if (toggleAxes) {
+        toggleAxes.addEventListener('click', () => {
+            setDisplaySettings({ ...displaySettings, showAxes: !displaySettings.showAxes });
+            refreshAllDisplayVisibility();
+            toggleAxes.classList.toggle('active', displaySettings.showAxes);
+        });
+        toggleAxes.classList.toggle('active', displaySettings.showAxes);
+    }
+    if (toggleRulers) {
+        toggleRulers.addEventListener('click', () => {
+            setDisplaySettings({ ...displaySettings, showRulers: !displaySettings.showRulers });
+            refreshAllDisplayVisibility();
+            toggleRulers.classList.toggle('active', displaySettings.showRulers);
+        });
+        toggleRulers.classList.toggle('active', displaySettings.showRulers);
     }
 
 })();

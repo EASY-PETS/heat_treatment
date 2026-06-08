@@ -1828,7 +1828,7 @@ body {
     width: fit-content;
     max-width: calc(100% - 260px - 280px);
     margin: 0 auto;
-    margin-bottom: 80px;        /* 避开底部 dock-bar */
+    margin-bottom: 55px;        /* 避开底部 dock-bar */
     z-index: 10;
 }
 
