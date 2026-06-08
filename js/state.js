@@ -91,6 +91,13 @@ export let selectedMaterialCardId = null;
 export let fdpCollapsed = false;
 export let mdpCollapsed = false;
 
+// 筛选状态
+export let currentMaterialFilter = null;   // 当前选中的材质名称，null 表示全部
+export let currentProcessFilter = null;    // 当前选中的工艺名称，null 表示全部
+
+export function setCurrentMaterialFilter(value) { currentMaterialFilter = value; }
+export function setCurrentProcessFilter(value) { currentProcessFilter = value; }
+
 /** Furnace card sort state */
 export let sortState = { field: null, dir: 'asc' };
 

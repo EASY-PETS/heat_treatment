@@ -27,6 +27,7 @@ import {
     furnaceGroups, controls, camera,
     setFurnaceCounter, setMaterialCounter,
     setSelectedFurnaceCardId, setSelectedMaterialCardId,
+    currentMaterialFilter, currentProcessFilter,
     clearUsedColors
 } from './state.js';
 import {
@@ -48,7 +49,7 @@ import {
     updateTopSummary, updateFurnaceNav,
     updateLeftPanelActiveForIndex, renderAISummaryBar,
     showCapacityFeedback, openRulesModal, saveRulesModal,
-    renderFurnaceThumbnails,
+    renderFurnaceThumbnails, renderFilterBars,
     initMasterView, parseExcelData, showImportPreview, applyImportData,
     openJsonImportModal, parseJsonPlan, renderJsonPreview, importJsonPlanToMaster
 } from './ui.js';
@@ -110,6 +111,8 @@ function executeAndRender() {
     });
     let itemsInput = [];
     document.querySelectorAll(".material-card").forEach(card => {
+        // 关键：跳过被筛选隐藏的卡片
+        if (card.style.display === 'none') return;
         const d = getMaterialDataFromCard(card);
         itemsInput.push({
             name: d.name, shape: d.shape, count: d.count,
@@ -235,6 +238,27 @@ function executeAndRender() {
         );
     }
 }
+
+/**
+ * 清空所有装炉结果，重置3D场景和UI
+ */
+export function clearFurnaceResults() {
+    setGlobalFurnacesResult(null);
+    setGlobalUnpackedItems([]);
+    clearFurnaceGroups();
+    if (itemsGroup) {
+        while (itemsGroup.children.length > 0) itemsGroup.remove(itemsGroup.children[0]);
+    }
+    document.getElementById("btn-export-pdf").style.display = "none";
+    document.getElementById("btn-animate").style.display = "none";
+    document.getElementById("furnace-nav").style.display = "none";
+    hideExplodeBOMButtons();
+    document.getElementById("empty-state").style.display = "block";
+    renderAISummaryBar(null);
+    // 可选：显示提示
+    showCapacityFeedback('info', '筛选条件已变更，请重新生成方案');
+}
+window._clearFurnaceResults = clearFurnaceResults; // 供 ui.js 调用
 
 /**
  * V2.7: 控制爆炸图和施工清单按钮的显示/隐藏
@@ -616,6 +640,9 @@ function init() {
 
     // ==================== 生成模式选择弹窗事件 ====================
     initGenerationOptions();
+
+    // 渲染筛选条（物料卡片变化时会自动刷新，但初始需要调用一次）
+    renderFilterBars(clearFurnaceResults);
 }
 
 /**
@@ -1096,6 +1123,13 @@ function clearAllMaterials() {
     if (hasFurnaces) {
         renderEmptyToolingOnly();
     }
+
+    // 重置筛选状态
+    setCurrentMaterialFilter(null);
+    setCurrentProcessFilter(null);
+
+    // 刷新筛选条（此时物料卡片已清空，筛选条应显示“全部 (0)”）
+    renderFilterBars(clearFurnaceResults);
 
     // 9. 更新顶部摘要
     setCurrentFurnaceIndex(0);

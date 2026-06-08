@@ -30,12 +30,30 @@ import {
     setSortState, setImportPreviewData,
     setPlacementRules, setCurrentFurnaceIndex,
     setGlobalFurnacesResult, setGlobalUnpackedItems, setGlobalSpacingValue,
-    setToolingTemplates, setDefaultToolingType
+    setToolingTemplates, setDefaultToolingType,
+    currentMaterialFilter, currentProcessFilter,
+    setCurrentMaterialFilter, setCurrentProcessFilter
 } from './state.js';
 import {
     generateUniqueColor,
     findResultIndexByFid, getSelectedMaterialName
 } from './three-scene.js';
+
+function applyFiltersAndClearResults() {
+    // 根据筛选条件显示/隐藏物料卡片
+    document.querySelectorAll('.material-card').forEach(card => {
+        const material = card.getAttribute('data-material');
+        const process = card.getAttribute('data-process');
+        let visible = true;
+        if (currentMaterialFilter !== null && material !== currentMaterialFilter) visible = false;
+        if (currentProcessFilter !== null && process !== currentProcessFilter) visible = false;
+        card.style.display = visible ? 'flex' : 'none';
+    });
+    // 清空装炉结果
+    if (window.clearFurnaceResults) window.clearFurnaceResults();
+    // 可选：提示用户重新生成
+    showCapacityFeedback('info', '筛选条件已变更，请点击“生成方案”重新装炉');
+}
 
 // ==================== FURNACE CARD HELPERS ====================
 
@@ -451,6 +469,10 @@ export function createMaterialCard(name, shape, count, dim1, dim2, dim3, totalWe
     card.innerHTML = '<button class="m-delete" data-action="delete-material" data-mid="' + newMC + '">✕</button><div class="m-color-swatch" style="background-color:' + color + ';" title="' + name + '"></div><div class="m-info"><div class="m-name">' + name + '</div><div class="m-meta">' + shapeLabel + ' · ' + dimLabel + 'mm · ×' + count + '件 · ' + totalWeight + 'kg</div>' + metaExtra + '</div>';
     card.addEventListener('click', (e) => { if (e.target.closest('[data-action="delete-material"]')) return; const wasSelected = card.classList.contains('active'); selectMaterialCard(cardId); if (!wasSelected) { showMaterialDetail(cardId); } else { document.getElementById('mdp-placeholder').style.display = 'block'; document.getElementById('mdp-body').style.display = 'none'; document.getElementById('mdp-title').textContent = '📋 工件详情'; } });
     document.getElementById('material-cards-container').appendChild(card);
+    // 刷新筛选条
+    renderFilterBars(window._clearFurnaceResults);
+    // ✅ 立即应用当前筛选到新卡片
+    applyFilterAndClear(window._clearFurnaceResults);
     return { cardId, materialCounter: newMC, name, shape, count, dim1, dim2, dim3, totalWeight, color };
 }
 
@@ -492,7 +514,7 @@ export function saveMaterialDetail(cardId) {
     const btn = document.getElementById('mdp-save-btn'); if (btn) { btn.textContent = '✅ 已保存'; setTimeout(() => { btn.textContent = '💾 保存工件参数'; }, 1500); }
 }
 
-export function deleteMaterialCard(mid) { const card = document.getElementById('material-card-' + mid); if (card) card.remove(); if (selectedMaterialCardId === 'material-card-' + mid) { setSelectedMaterialCardId(null); document.getElementById('mdp-placeholder').style.display = 'block'; document.getElementById('mdp-body').style.display = 'none'; document.getElementById('mdp-title').textContent = '📋 工件详情'; } updateTopSummary(); }
+export function deleteMaterialCard(mid) { const card = document.getElementById('material-card-' + mid); if (card) card.remove(); if (selectedMaterialCardId === 'material-card-' + mid) { setSelectedMaterialCardId(null); document.getElementById('mdp-placeholder').style.display = 'block'; document.getElementById('mdp-body').style.display = 'none'; document.getElementById('mdp-title').textContent = '📋 工件详情'; } updateTopSummary(); renderFilterBars(window._clearFurnaceResults); applyFilterAndClear(window._clearFurnaceResults);}
 
 export function rgbToHex(rgb) { if (!rgb) return '#888888'; if (rgb.startsWith('#')) return rgb; const m = rgb.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/); if (!m) return '#888888'; return '#' + [m[1],m[2],m[3]].map(x => parseInt(x).toString(16).padStart(2,'0')).join(''); }
 
@@ -793,6 +815,143 @@ export function renderAISummaryBar(onFurnaceClick) {
 }
 
 /**
+ * 渲染材质和工艺筛选条
+ * @param {Function} onClearResults - 清空装炉结果的回调
+ */
+export function renderFilterBars(onClearResults) {
+    const materialContainer = document.getElementById('material-filter-tags');
+    const processContainer = document.getElementById('process-filter-tags');
+    if (!materialContainer || !processContainer) return;
+
+    // 统计材质和工艺数量
+    const materialMap = new Map();   // 材质名 -> 数量
+    const processMap = new Map();    // 工艺名 -> 数量
+    let totalCards = 0;
+
+    document.querySelectorAll('.material-card').forEach(card => {
+        totalCards++;
+        const material = card.getAttribute('data-material');
+        if (material) materialMap.set(material, (materialMap.get(material) || 0) + 1);
+        const process = card.getAttribute('data-process');
+        if (process) processMap.set(process, (processMap.get(process) || 0) + 1);
+    });
+
+    // 构建材质标签HTML
+    let materialHtml = `<div class="filter-tag ${currentMaterialFilter === null ? 'active' : ''}" data-type="material" data-filter="all">全部 (${totalCards})</div>`;
+    for (let [mat, cnt] of materialMap.entries()) {
+        materialHtml += `<div class="filter-tag ${currentMaterialFilter === mat ? 'active' : ''}" data-type="material" data-filter="${mat.replace(/"/g, '&quot;')}">${escapeHtml(mat)} (${cnt})</div>`;
+    }
+    materialContainer.innerHTML = materialHtml;
+
+    // 构建工艺标签HTML
+    let processHtml = `<div class="filter-tag ${currentProcessFilter === null ? 'active' : ''}" data-type="process" data-filter="all">全部 (${totalCards})</div>`;
+    for (let [proc, cnt] of processMap.entries()) {
+        processHtml += `<div class="filter-tag ${currentProcessFilter === proc ? 'active' : ''}" data-type="process" data-filter="${proc.replace(/"/g, '&quot;')}">${escapeHtml(proc)} (${cnt})</div>`;
+    }
+    processContainer.innerHTML = processHtml;
+
+    // 绑定点击事件
+    materialContainer.querySelectorAll('.filter-tag').forEach(tag => {
+        tag.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const filterValue = tag.getAttribute('data-filter');
+            const newFilter = filterValue === 'all' ? null : filterValue;
+            if (currentMaterialFilter === newFilter) return;
+            setCurrentMaterialFilter(newFilter);
+            applyFilterAndClear(onClearResults);
+        });
+    });
+    processContainer.querySelectorAll('.filter-tag').forEach(tag => {
+        tag.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const filterValue = tag.getAttribute('data-filter');
+            const newFilter = filterValue === 'all' ? null : filterValue;
+            if (currentProcessFilter === newFilter) return;
+            setCurrentProcessFilter(newFilter);
+            applyFilterAndClear(onClearResults);
+        });
+    });
+
+    // 绑定折叠按钮事件
+    document.querySelectorAll('.filter-collapse-btn').forEach(btn => {
+        const targetId = btn.getAttribute('data-target');
+        const target = document.getElementById(targetId);
+        const filterBar = btn.closest('.filter-bar');
+        if (!target || !filterBar) return;
+
+        // 从 localStorage 读取折叠状态并恢复（可选）
+        const storageKey = `filter_${targetId}_collapsed`;
+        const savedState = localStorage.getItem(storageKey);
+        if (savedState === 'true') {
+            filterBar.classList.add('collapsed');
+            btn.textContent = '▶';
+        } else {
+            btn.textContent = '▼';
+        }
+
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            filterBar.classList.toggle('collapsed');
+            const isCollapsed = filterBar.classList.contains('collapsed');
+            btn.textContent = isCollapsed ? '▶' : '▼';
+            localStorage.setItem(storageKey, isCollapsed);
+        });
+    });
+}
+
+/**
+ * 辅助：转义HTML特殊字符
+ */
+function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/[&<>]/g, function(m) {
+        if (m === '&') return '&amp;';
+        if (m === '<') return '&lt;';
+        if (m === '>') return '&gt;';
+        return m;
+    });
+}
+
+// /**
+//  * 应用筛选（隐藏/显示物料卡片）并清空装炉结果
+//  * @param {Function} onClearResults
+//  */
+// function applyFilterAndClear(onClearResults) {
+//     // 先应用筛选：隐藏不符合条件的卡片
+//     document.querySelectorAll('.material-card').forEach(card => {
+//         const material = card.getAttribute('data-material');
+//         const process = card.getAttribute('data-process');
+//         let visible = true;
+//         if (currentMaterialFilter !== null && material !== currentMaterialFilter) visible = false;
+//         if (currentProcessFilter !== null && process !== currentProcessFilter) visible = false;
+//         card.style.display = visible ? 'flex' : 'none';
+//     });
+
+//     // 清空装炉结果
+//     if (onClearResults) onClearResults();
+
+//     // 刷新筛选条本身（更新数量和激活状态）
+//     renderFilterBars(onClearResults);
+// }
+function applyFilterAndClear(onClearResults) {
+    // 先应用筛选：隐藏不符合条件的卡片
+    document.querySelectorAll('.material-card').forEach(card => {
+        const material = card.getAttribute('data-material');
+        const process = card.getAttribute('data-process');
+        let visible = true;
+        if (currentMaterialFilter !== null && material !== currentMaterialFilter) visible = false;
+        if (currentProcessFilter !== null && process !== currentProcessFilter) visible = false;
+        card.style.display = visible ? 'flex' : 'none';
+    });
+
+    // 清空装炉结果
+    if (onClearResults) onClearResults();
+
+    // 刷新筛选条（更新数量和激活状态）
+    renderFilterBars(onClearResults);
+}
+
+/**
  * 渲染炉膛缩略图栏
  * @param {Array} furnaces - globalFurnacesResult 数组
  * @param {number} currentIdx - 当前显示的炉膛索引
@@ -856,9 +1015,7 @@ export function openRulesModal() {
     // 搁板参数：主开关、层高、实体厚度
     document.getElementById('rule-shelf-layered').checked = placementRules.useShelfLayered;
     document.getElementById('rule-shelf-thickness').value = placementRules.shelfThickness || 20;
-    // V3.0: 装炉分组规则
-    document.getElementById('rule-same-process').checked = placementRules.sameProcess || false;
-    document.getElementById('rule-same-material').checked = placementRules.sameMaterial || false;
+
     // 姿态优化
     document.getElementById('rule-posture-optimization').checked = placementRules.allowPostureOptimization !== false;
     // V4.5: 圆盘翻转阈值
@@ -904,8 +1061,8 @@ export function saveRulesModal() {
     setPlacementRules({
         gravity: true,                          // 重力优先已固化
         dense: true,                            // 密集排布已固化
-        sameMaterial: document.getElementById('rule-same-material').checked,     // V3.0: 同材质分组
-        sameProcess: document.getElementById('rule-same-process').checked,       // V3.0: 同工艺分组
+        sameMaterial: false,
+        sameProcess: false,
         minSpacing: parseFloat(document.getElementById('rule-min-spacing').value) || 5,
         wallSpacing: parseFloat(document.getElementById('rule-wall-spacing').value) || 30,
         rotate: document.getElementById('rule-rotate').checked,
@@ -1037,7 +1194,7 @@ export function parseExcelData(workbook) {
 
 export function showImportPreview(data) { setImportPreviewData(data); const content = document.getElementById('import-preview-content'); let html = '<table class="import-table"><thead><tr><th>产品名称</th><th>客户</th><th>物料编码</th><th>形态</th><th>尺寸</th><th>数量</th><th>单重(kg)</th><th>材质</th><th>工艺</th><th>状态</th></tr></thead><tbody>'; data.forEach(d => { const dimStr = d.shape === 'cylinder' ? '⌀' + d.dim1 + '×H' + d.dim3 : d.dim1 + '×' + d.dim2 + '×' + d.dim3; const cls = d.valid ? '' : ' class="error"'; const displayName = d.showName || d.name.split('_')[0]; const customer = d.customer || ''; html += '<tr' + cls + '><td>' + displayName + '</td><td>' + customer + '</td><td>' + (d.itemCode || '') + '</td><td>' + (d.shape==='cylinder'?'圆柱':'立方') + '</td><td>' + dimStr + 'mm</td><td>' + d.count + '</td><td>' + d.weight + '</td><td>' + d.material + '</td><td>' + d.process + '</td><td>' + (d.valid?'✅':'⚠️ 尺寸不足') + '</td></tr>'; }); html += '</tbody></table>'; content.innerHTML = html; document.getElementById('import-preview-overlay').style.display = 'flex'; }
 
-export function applyImportData(replace) { if (replace) { document.querySelectorAll('.material-card').forEach(c => c.remove()); usedColors.clear(); } importPreviewData.filter(d => d.valid).forEach(d => { const color = generateUniqueColor(usedColors); createMaterialCard(d.name, d.shape, d.count, d.dim1, d.dim2, d.dim3, d.weight, color, { material: d.material, hardness: d.hardness, process: d.process, orderDate: d.orderDate, deliveryDate: d.deliveryDate, remark: d.remark, showName: d.showName, customer: d.customer, itemCode: d.itemCode }); }); updateTopSummary(); document.getElementById('import-preview-overlay').style.display = 'none'; }
+export function applyImportData(replace) { if (replace) { document.querySelectorAll('.material-card').forEach(c => c.remove()); usedColors.clear(); } importPreviewData.filter(d => d.valid).forEach(d => { const color = generateUniqueColor(usedColors); createMaterialCard(d.name, d.shape, d.count, d.dim1, d.dim2, d.dim3, d.weight, color, { material: d.material, hardness: d.hardness, process: d.process, orderDate: d.orderDate, deliveryDate: d.deliveryDate, remark: d.remark, showName: d.showName, customer: d.customer, itemCode: d.itemCode }); }); updateTopSummary(); document.getElementById('import-preview-overlay').style.display = 'none'; renderFilterBars(window._clearFurnaceResults); applyFilterAndClear(window._clearFurnaceResults);}
 
 // ==================== JSON IMPORT (MASTER) ====================
 

@@ -183,6 +183,22 @@
                     <span class="panel-expand-btn-right" id="panel-expand-btn-right" title="展开面板" style="display:none;">◀</span>
                 </div>
             </div>
+            <!-- 材质筛选条 -->
+            <div class="filter-bar" id="material-filter-bar">
+                <div class="filter-bar-header">
+                    <div class="filter-bar-title">🔧 材质</div>
+                    <button class="filter-collapse-btn" data-target="material-filter-tags">▼</button>
+                </div>
+                <div class="filter-tags" id="material-filter-tags"></div>
+            </div>
+            <!-- 工艺筛选条 -->
+            <div class="filter-bar" id="process-filter-bar">
+                <div class="filter-bar-header">
+                    <div class="filter-bar-title">⚙️ 工艺</div>
+                    <button class="filter-collapse-btn" data-target="process-filter-tags">▼</button>
+                </div>
+                <div class="filter-tags" id="process-filter-tags"></div>
+            </div>
             <div class="panel-scroll" id="material-cards-container"></div>
             <div id="material-detail-panel">
                 <div class="mdp-header" id="mdp-toggle-btn">
@@ -257,19 +273,6 @@
                     <label for="rule-shelf-thickness">搁板实体厚度 (mm) <span style="color:#666;font-size:9px;">V2.0 新增</span></label>
                     <input type="number" id="rule-shelf-thickness" value="20" min="0" max="200">
                     <span class="rule-desc">搁板真实占用炉膛高度空间（例如4层×20mm=扣除80mm有效高度）</span>
-                </div>
-            </div>
-            <div class="rule-group">
-                <div class="rule-group-title">🔀 装炉分组规则 (V3.0 新增)</div>
-                <div class="rule-item">
-                    <input type="checkbox" id="rule-same-process" checked>
-                    <label for="rule-same-process">工艺</label>
-                    <span class="rule-desc">启用后，系统优先将渗碳、调质、退火、氮化、真空淬火等不同工艺分别分组，再进行装炉。</span>
-                </div>
-                <div class="rule-item">
-                    <input type="checkbox" id="rule-same-material">
-                    <label for="rule-same-material">材质</label>
-                    <span class="rule-desc">启用后，系统优先将45#、40Cr、20CrMnTi、304等不同材质分别分组，再进行装炉。</span>
                 </div>
             </div>
             <div class="rule-group">
