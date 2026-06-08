@@ -6,16 +6,10 @@
  *   - Task 2: 爆炸图模式 — 按 layer 在 Y 轴展开 + 分层施工清单 BOM
  *   - Task 3: 性能优化 — 关闭工件透明度、动画阴影降级
  *
- * V2.3 Updates:
- *   - Task: 托盘式搁板料框（Tray Basket）3D模型
- *   - Task: 每个炉膛独立 basketType 参数
- *   - Task: 标尺系统修复 — 原点(0,0,0)为基础，向正方向延伸
- *   - Task: 炉膛沿X轴排列（V2.7 已移除）
- * V2.2:
- *   - Task: 蜂窝料框（Honeycomb Basket）3D模型 — texture-based hexagonal pattern
- *   - Task: 装料动画优化 — 工件从上方缓慢落入目标位置
- *   - Task: 标尺系统恢复 — X/Y/Z axes with dark lines for white background
- *   - Task: 3D显示设置 — grid, axes, ruler toggle controls
+ * V3.0 Updates:
+ *   - 默认隐藏坐标轴和标尺，仅显示浅灰色网格
+ *   - 工装材质改为金属质感
+ *   - 工件按材质(Cr12/H13/MOV)固定颜色
  *
  * Dependencies:
  *   - THREE.js (imported via importmap)
@@ -57,6 +51,52 @@ const COLOR_PALETTE = [
     '#ff6b6b','#4ecdc4','#45b7d1','#96ceb4','#ffeaa7',
     '#dda0dd','#98d8c8','#f7dc6f','#bb8fce','#85c1e9'
 ];
+
+// ==================== 物料材质固定颜色映射 ====================
+const MATERIAL_COLOR_MAP = {
+    'Cr12': 0x1E3A8A,   // 深蓝
+    'H13': 0x4B4B4B,    // 深灰
+    'MOV': 0xFFBF00      // 琥珀色
+};
+
+/**
+ * 根据物料材质获取固定颜色
+ * @param {string} material - 材质名称
+ * @returns {number|null} 颜色值，若不匹配则返回 null
+ */
+function getFixedColorByMaterial(material) {
+    if (!material) return null;
+    // 精确匹配或忽略大小写匹配
+    const matchedKey = Object.keys(MATERIAL_COLOR_MAP).find(key => 
+        key.toLowerCase() === material.toLowerCase()
+    );
+    return matchedKey ? MATERIAL_COLOR_MAP[matchedKey] : null;
+}
+
+// ==================== 工装金属材质处理 ====================
+/**
+ * 递归将 Group 内所有 MeshStandardMaterial 改为金属质感
+ * @param {THREE.Object3D} obj - 要处理的物体
+ */
+function applyMetallicMaterial(obj) {
+    if (!obj) return;
+    obj.traverse(child => {
+        if (child.isMesh && child.material) {
+            const materials = Array.isArray(child.material) ? child.material : [child.material];
+            materials.forEach(mat => {
+                if (mat instanceof THREE.MeshStandardMaterial) {
+                    mat.metalness = 0.85;
+                    mat.roughness = 0.25;
+                    // 保留原色但略微提亮为银灰基调（如果颜色接近原始灰色系则统一，否则保持原色增加金属感）
+                    if (mat.color.getHex() === 0xcccccc || mat.color.getHex() === 0xaaaaaa) {
+                        mat.color.setHex(0xc0c0c0);
+                    }
+                    mat.needsUpdate = true;
+                }
+            });
+        }
+    });
+}
 
 // ==================== COLOR GENERATOR ====================
 
@@ -308,12 +348,12 @@ export function initThree() {
     fillLight.position.set(-400, -200, -300);
     newScene.add(fillLight);
 
-    /* 地面网格 */
-    const gridHelper = new THREE.GridHelper(4000, 80, 0x333333, 0x555555);
+    /* 地面网格 - 浅灰色 */
+    const gridHelper = new THREE.GridHelper(4000, 80, 0xbbbbbb, 0xdddddd);
     gridHelper.position.y = -120;
     newScene.add(gridHelper);
 
-    /* 坐标轴 */
+    /* 坐标轴 (默认隐藏) */
     const customAxesGroup = new THREE.Group();
     const axesLen = 2000;
     const originY = -120;
@@ -335,11 +375,17 @@ export function initThree() {
 
     newScene.add(customAxesGroup);
 
-    /* 标尺刻度组 */
+    /* 标尺刻度组 (默认隐藏) */
     const rulerGroup = createRulerGroup(4000);
     newScene.add(rulerGroup);
 
     setMainSceneDisplayRefs(gridHelper, customAxesGroup, rulerGroup);
+
+    // 【V3.0】设置默认显示：只显示网格，隐藏坐标轴和标尺
+    displaySettings.showGrid = true;
+    displaySettings.showAxes = false;
+    displaySettings.showRulers = false;
+    updateMainSceneDisplayVisibility();
 
     const group = new THREE.Group();
     setItemsGroup(group);
@@ -405,7 +451,8 @@ export function initMasterThree() {
     ml.position.set(400, 800, 500);
     msScene.add(ml);
 
-    const grid = new THREE.GridHelper(4000, 80, 0x333333, 0x555555);
+    // 浅灰色网格
+    const grid = new THREE.GridHelper(4000, 80, 0xbbbbbb, 0xdddddd);
     grid.position.y = -120;
     msScene.add(grid);
     masterSceneGridHelper = grid;
@@ -436,6 +483,10 @@ export function initMasterThree() {
     msScene.add(rulerGroup);
     masterSceneRulerGroup = rulerGroup;
 
+    // 【V3.0】同步显示设置
+    displaySettings.showGrid = true;
+    displaySettings.showAxes = false;
+    displaySettings.showRulers = false;
     updateMasterSceneDisplayVisibility();
 
     function animateMaster() {
@@ -1012,6 +1063,9 @@ export function buildFurnaceGroup(furnace, index, filterMaterialName) {
         const basketType = furnace.basketType || 'grid';
         basketGroup = createBasketFrame(fw, fh, fd, 100, basketType);
     }
+    // 【V3.0】应用金属材质
+    applyMetallicMaterial(basketGroup);
+    
     // 工装局部坐标：原点 (0,0,0) 在 furnaceGroup 的 baseY 处
     basketGroup.position.set(-fw / 2, baseY, -fd / 2);
     furnaceGroup.add(basketGroup);
@@ -1085,6 +1139,18 @@ export function buildFurnaceGroup(furnace, index, filterMaterialName) {
     furnace.packedItems.forEach(item => {
         const isFiltered = filterMaterialName && item.material !== filterMaterialName;
         const mesh = createItemMesh(item, furnace, baseY, isFiltered);
+
+        // 【V3.0】按材质固定颜色（覆盖原有动态颜色）
+        const fixedColor = getFixedColorByMaterial(item.material);
+        if (fixedColor !== null && mesh.material) {
+            if (Array.isArray(mesh.material)) {
+                mesh.material.forEach(mat => {
+                    if (mat.color) mat.color.setHex(fixedColor);
+                });
+            } else if (mesh.material.color) {
+                mesh.material.color.setHex(fixedColor);
+            }
+        }
 
         const itemLayer = itemLayerMap.get(item.id) || 1;
         // 补充 userData 中 createItemMesh 未设置的字段
@@ -1316,6 +1382,8 @@ export async function playLoadingAnimation() {
     const basketType = furnace.basketType || 'grid';
     const toolingType = furnace.toolingType || 'standard-basket';
     const basketGroup = createBasketFrame(furnace.w, furnace.h, furnace.d, 100, basketType);
+    // 【V3.0】应用金属材质
+    applyMetallicMaterial(basketGroup);
     basketGroup.position.set(-furnace.w / 2, baseY, -furnace.d / 2);
     itemsGroup.add(basketGroup);
 
@@ -1381,6 +1449,18 @@ export async function playLoadingAnimation() {
             const mesh = new THREE.Mesh(geometry, material);
             mesh.castShadow = false;
             mesh.receiveShadow = false;
+
+            // 【V3.0】按材质固定颜色（覆盖原有动态颜色）
+            const fixedColor = getFixedColorByMaterial(item.material);
+            if (fixedColor !== null && mesh.material) {
+                if (Array.isArray(mesh.material)) {
+                    mesh.material.forEach(mat => {
+                        if (mat.color) mat.color.setHex(fixedColor);
+                    });
+                } else if (mesh.material.color) {
+                    mesh.material.color.setHex(fixedColor);
+                }
+            }
 
             // 扁平圆盘侧放旋转
             if (item.shape === 'cylinder' && item.needsRotation) {
@@ -1569,6 +1649,7 @@ function rebuildSceneUpTo(stepIndex, allSteps, filterMaterialName) {
     // V2.7: 在原点重建
     const basketType = furnace.basketType || 'grid';
     const basketGroup = createBasketFrame(furnace.w, furnace.h, furnace.d, 100, basketType);
+    applyMetallicMaterial(basketGroup);
     basketGroup.position.set(-furnace.w / 2, baseY, -furnace.d / 2);
     itemsGroup.add(basketGroup);
 
@@ -1599,6 +1680,7 @@ export function renderMasterPlan(plan) {
     const fw = plan.furnaceW || 800, fh = plan.furnaceH || 600, fd = plan.furnaceD || 600;
 
     const basketGroup = createBasketFrame(fw, fh, fd, 100, 'grid');
+    applyMetallicMaterial(basketGroup);
     basketGroup.position.set(-fw / 2, -120, -fd / 2);
     masterScene.add(basketGroup);
 
@@ -1630,6 +1712,16 @@ export function renderMasterPlan(plan) {
             depthWrite: true
         });
         const mesh = new THREE.Mesh(geo, mat);
+
+        // 【V3.0】主视图也应用材质固定颜色
+        const fixedColor = getFixedColorByMaterial(item.material);
+        if (fixedColor !== null && mesh.material) {
+            if (Array.isArray(mesh.material)) {
+                mesh.material.forEach(m => { if (m.color) m.color.setHex(fixedColor); });
+            } else if (mesh.material.color) {
+                mesh.material.color.setHex(fixedColor);
+            }
+        }
 
         // 扁平圆盘侧放旋转
         if (item.shape === 'cylinder' && item.needsRotation) {
