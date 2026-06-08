@@ -10,6 +10,7 @@
  *   - 炉膛独立料框类型配置：basketType 从 furnace card 读取并传入 packing engine
  *   - 容量不足详细提示：显示缺少数值 (kg)
  */
+import * as THREE from 'three';
 import {
     isAnimating, animPaused, animStopped,
     globalFurnacesResult, globalUnpackedItems, aggregationStats,
@@ -36,6 +37,7 @@ import {
     findResultIndexByFid, generateUniqueColor,
     refreshAllDisplayVisibility,
     toggleExplodedView, showLayeredBOM,
+    setTightFitCamera,
     showAILoadingLoading, hideAILoadingLoading
 } from './three-scene.js';
 import {
@@ -1174,5 +1176,59 @@ init();
 
     const expandRight = document.getElementById('panel-expand-btn-right');
     if (expandRight) expandRight.addEventListener('click', toggleRightPanel);
+
+    // ==================== 3D Dock 工具栏事件 ====================
+    const dockTopView = document.getElementById('dock-top-view');
+    const dockFrontView = document.getElementById('dock-front-view');
+    const dockSideView = document.getElementById('dock-side-view');
+    const dockExplode = document.getElementById('dock-explode');
+    const dockGravity = document.getElementById('dock-gravity');
+    const dockThermal = document.getElementById('dock-thermal');
+
+    if (dockTopView) {
+        dockTopView.addEventListener('click', () => {
+            setTightFitCamera(new THREE.Vector3(0, 1, 0));
+            highlightDockBtn(dockTopView);
+        });
+    }
+    if (dockFrontView) {
+        dockFrontView.addEventListener('click', () => {
+            setTightFitCamera(new THREE.Vector3(0, 0, 1));
+            highlightDockBtn(dockFrontView);
+        });
+    }
+    if (dockSideView) {
+        dockSideView.addEventListener('click', () => {
+            setTightFitCamera(new THREE.Vector3(1, 0, 0));
+            highlightDockBtn(dockSideView);
+        });
+    }
+    if (dockExplode) {
+        dockExplode.addEventListener('click', () => {
+            toggleExplodedView();
+            highlightDockBtn(dockExplode);
+        });
+    }
+    if (dockGravity) {
+        let gravityActive = false;
+        dockGravity.addEventListener('click', () => {
+            gravityActive = !gravityActive;
+            dockGravity.classList.toggle('active', gravityActive);
+            showCapacityFeedback('success', gravityActive ? '⚖️ 重心标记已显示' : '⚖️ 重心标记已隐藏');
+        });
+    }
+    if (dockThermal) {
+        let thermalActive = false;
+        dockThermal.addEventListener('click', () => {
+            thermalActive = !thermalActive;
+            dockThermal.classList.toggle('active', thermalActive);
+            showCapacityFeedback('success', thermalActive ? '🔥 热场可视化已开启' : '🔥 热场可视化已关闭');
+        });
+    }
+
+    function highlightDockBtn(activeBtn) {
+        document.querySelectorAll('.dock-btn').forEach(b => b.classList.remove('active'));
+        if (activeBtn) activeBtn.classList.add('active');
+    }
 
 })();

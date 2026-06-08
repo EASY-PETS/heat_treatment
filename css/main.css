@@ -1436,6 +1436,78 @@ body {
     font-size: 16px;
 }
 
+/* ==================== 3D DOCK BAR (底部毛玻璃工具栏) ==================== */
+#dock-bar {
+    position: absolute;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 16px;
+    background: rgba(255, 255, 255, 0.65);
+    backdrop-filter: blur(16px) saturate(180%);
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    border: 1px solid rgba(226, 232, 240, 0.6);
+    border-radius: 20px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06), 0 1px 4px rgba(0, 0, 0, 0.04);
+    z-index: 15;
+    user-select: none;
+    transition: opacity 0.3s ease;
+}
+#dock-bar.dock-hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.dock-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 6px 12px;
+    background: transparent;
+    border: none;
+    border-radius: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-width: 52px;
+    font-family: inherit;
+}
+.dock-btn:hover {
+    background: rgba(37, 99, 235, 0.08);
+    color: var(--accent-color);
+}
+.dock-btn.active {
+    background: rgba(37, 99, 235, 0.12);
+    color: var(--accent-color);
+}
+
+.dock-icon {
+    font-size: 18px;
+    line-height: 1;
+    transition: transform 0.2s ease;
+}
+.dock-btn:hover .dock-icon {
+    transform: scale(1.12);
+}
+
+.dock-label {
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.dock-separator {
+    width: 1px;
+    height: 28px;
+    background: rgba(226, 232, 240, 0.8);
+    margin: 0 6px;
+}
+
 /* ==================== CSP TOGGLE BUTTON ==================== */
 .csp-toggle-btn {
     background: transparent;
