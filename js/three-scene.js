@@ -132,6 +132,36 @@ export function disposeShelfMeshes() {
 }
 
 /**
+ * 创建环形工装的圆环搁板。
+ *
+ * 使用 RingGeometry 表示真实可装载圆盘区域：
+ * - 外圈以内可放料
+ * - 内圈以内不可放料
+ * - 不再使用矩形 createShelfMesh
+ */
+function createRingShelfMesh(outerRadius, innerRadius) {
+    const geo = new THREE.RingGeometry(innerRadius, outerRadius, 96);
+
+    const mat = new THREE.MeshStandardMaterial({
+        color: 0x667788,
+        metalness: 0.75,
+        roughness: 0.35,
+        transparent: true,
+        opacity: 0.35,
+        side: THREE.DoubleSide,
+        depthWrite: false
+    });
+
+    const mesh = new THREE.Mesh(geo, mat);
+
+    // RingGeometry 默认在 XY 平面，需要旋转到 XZ 平面
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.receiveShadow = true;
+
+    return mesh;
+}
+
+/**
  * V2.8: 搁板渲染函数（原点居中版本 — 修复坐标回归）
  *
  * 搁板 Mesh 作为 furnaceGroup 的子对象，严格继承炉膛局部坐标系。
@@ -199,7 +229,25 @@ export function renderShelvesForFurnace(furnace, furnaceGroup, baseY, layerGroup
             return;
         }
 
-        const shelfMesh = createShelfMesh(fw, fd, shelfThickness);
+        let shelfMesh;
+
+        if (furnace.toolingType === 'ring-tooling') {
+            const params = furnace.params || {};
+
+            const outerRadius =
+                params.outerRadius ||
+                params.radialRadius ||
+                Math.min(fw, fd) / 2 - 30;
+
+            const innerRadius =
+                params.centerVoidRadius ||
+                params.innerRadius ||
+                ((params.innerDia || 200) / 2);
+
+            shelfMesh = createRingShelfMesh(outerRadius, innerRadius);
+        } else {
+            shelfMesh = createShelfMesh(fw, fd, shelfThickness);
+        }
 
         // 🔧 搁板 XZ 必须对齐料框几何中心（furnaceGroup 原点）
         // 【修复】：直接贴合起始面，让 ExtrudeGeometry 自身向上自然拉伸出厚度
@@ -1021,6 +1069,96 @@ export function showLayeredBOM() {
     });
 }
 
+/**
+ * 绘制环形工装轮廓。
+ *
+ * 注意：
+ * 环形工装不应该显示为长方体蓝框。
+ * 它的真实结构是多个圆形/圆环形托盘层。
+ */
+function drawRingToolingOutline(furnaceGroup, furnace, baseY) {
+    const fw = furnace.w;
+    const fh = furnace.h;
+    const fd = furnace.d;
+    const params = furnace.params || {};
+
+    const outerRadius =
+        params.outerRadius ||
+        params.radialRadius ||
+        Math.min(fw, fd) / 2 - 30;
+
+    const innerRadius =
+        params.centerVoidRadius ||
+        params.innerRadius ||
+        ((params.innerDia || 200) / 2);
+
+    const shelfList =
+        furnace.shelvesUsed && furnace.shelvesUsed.length > 0
+            ? furnace.shelvesUsed
+            : [
+                { y: 0 },
+                { y: fh * 0.25 },
+                { y: fh * 0.5 },
+                { y: fh * 0.75 }
+            ];
+
+    const mat = new THREE.LineBasicMaterial({
+        color: 0x0066cc,
+        transparent: true,
+        opacity: 0.65
+    });
+
+    shelfList.forEach(shelf => {
+        const y = baseY + shelf.y;
+
+        // 外圈
+        const outerCurve = new THREE.EllipseCurve(
+            0, 0,
+            outerRadius, outerRadius,
+            0, Math.PI * 2,
+            false,
+            0
+        );
+        const outerPts = outerCurve.getPoints(96).map(p => new THREE.Vector3(p.x, y, p.y));
+        const outerGeo = new THREE.BufferGeometry().setFromPoints(outerPts);
+        const outerLine = new THREE.LineLoop(outerGeo, mat);
+        furnaceGroup.add(outerLine);
+
+        // 内圈空洞
+        const innerCurve = new THREE.EllipseCurve(
+            0, 0,
+            innerRadius, innerRadius,
+            0, Math.PI * 2,
+            false,
+            0
+        );
+        const innerPts = innerCurve.getPoints(96).map(p => new THREE.Vector3(p.x, y, p.y));
+        const innerGeo = new THREE.BufferGeometry().setFromPoints(innerPts);
+        const innerLine = new THREE.LineLoop(innerGeo, mat);
+        furnaceGroup.add(innerLine);
+    });
+
+    // 高度参考线，避免用户看不出高度范围
+    const verticalMat = new THREE.LineBasicMaterial({
+        color: 0x0066cc,
+        transparent: true,
+        opacity: 0.25
+    });
+
+    for (let i = 0; i < 4; i++) {
+        const angle = i * Math.PI / 2;
+        const x = outerRadius * Math.cos(angle);
+        const z = outerRadius * Math.sin(angle);
+
+        const geo = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(x, baseY, z),
+            new THREE.Vector3(x, baseY + fh, z)
+        ]);
+
+        furnaceGroup.add(new THREE.Line(geo, verticalMat));
+    }
+}
+
 // ==================== TASK 1: 多炉膛原点居中渲染 ====================
 
 /**
@@ -1070,13 +1208,24 @@ export function buildFurnaceGroup(furnace, index, filterMaterialName) {
     basketGroup.position.set(-fw / 2, baseY, -fd / 2);
     furnaceGroup.add(basketGroup);
 
-    // 蓝色外轮廓边框
-    const containerGeo = new THREE.BoxGeometry(fw, fh, fd);
-    const containerEdges = new THREE.EdgesGeometry(containerGeo);
-    const containerLine = new THREE.LineSegments(containerEdges,
-        new THREE.LineBasicMaterial({ color: 0x0066cc, linewidth: 1, transparent: true, opacity: 0.5 }));
-    containerLine.position.set(0, fh / 2 + baseY, 0);
-    furnaceGroup.add(containerLine);
+    // 普通工装显示蓝色长方体轮廓；环形工装显示圆形轮廓
+    if (toolingType === 'ring-tooling') {
+        drawRingToolingOutline(furnaceGroup, furnace, baseY);
+    } else {
+        const containerGeo = new THREE.BoxGeometry(fw, fh, fd);
+        const containerEdges = new THREE.EdgesGeometry(containerGeo);
+        const containerLine = new THREE.LineSegments(
+            containerEdges,
+            new THREE.LineBasicMaterial({
+                color: 0x0066cc,
+                linewidth: 1,
+                transparent: true,
+                opacity: 0.5
+            })
+        );
+        containerLine.position.set(0, fh / 2 + baseY, 0);
+        furnaceGroup.add(containerLine);
+    }
 
     // 🔧 重构：预计算每个工件的 layer → itemLayerMap
     const itemLayerMap = new Map(); // itemId → layer

@@ -1143,25 +1143,68 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
     // 检测是否为环形工装，并获取内置搁板
     const toolingType = furnaceConfig.toolingType;
     const toolingParams = furnaceConfig.params || {};
-    const isRadialTooling = (toolingType === 'ring-tooling') && toolingParams.useInternalShelves;
+    const isRadialTooling = toolingType === 'ring-tooling';
+
     let radialRadius = null;
+    let centerVoidRadius = 0;
     let internalShelves = [];
+
     if (isRadialTooling) {
-        radialRadius = toolingParams.radialRadius;
-        internalShelves = toolingParams.shelves || [];
-        // 按 Y 坐标排序（升序）
+        /**
+         * 环形工装不使用炉膛长方体作为可装载区域。
+         * 它的真实可装载区域是多个圆环形圆盘层。
+         */
+        const outerRadius =
+            toolingParams.outerRadius ||
+            toolingParams.radialRadius ||
+            Math.min(fw, fd) / 2 - 30;
+
+        centerVoidRadius =
+            toolingParams.centerVoidRadius ||
+            toolingParams.innerRadius ||
+            ((toolingParams.innerDia || 200) / 2);
+
+        const discCount =
+            toolingParams.ringCount ||
+            toolingParams.stationCount ||
+            3;
+
+        radialRadius = outerRadius;
+
+        internalShelves = [
+            {
+                y: 0,
+                thickness: 5,
+                radius: outerRadius,
+                innerRadius: centerVoidRadius
+            }
+        ];
+
+        for (let i = 0; i < discCount; i++) {
+            internalShelves.push({
+                y: fh * (i + 1) / (discCount + 1),
+                thickness: 5,
+                radius: outerRadius,
+                innerRadius: centerVoidRadius
+            });
+        }
+
         internalShelves.sort((a, b) => a.y - b.y);
     }
 
     // 根据工装类型生成内部障碍物（AABB）
     const toolingObstacles = [];
     if (toolingType === 'ring-tooling') {
-        const rodDiameter = toolingParams.rodDiameter || 40;
-        const rodRadius = rodDiameter / 2;
-        toolingObstacles.push({
-            min: { x: centerX - rodRadius, y: 0, z: centerZ - rodRadius },
-            max: { x: centerX + rodRadius, y: fh, z: centerZ + rodRadius }
-        });
+    /**
+     * 中心区域是绝对不可放料区。
+     * 这里用 AABB 粗略包围中心圆孔，真正圆形判断在 findCGXZPlacement 中完成。
+     */
+    const blockRadius = centerVoidRadius || 100;
+
+    toolingObstacles.push({
+        min: { x: centerX - blockRadius, y: 0, z: centerZ - blockRadius },
+        max: { x: centerX + blockRadius, y: fh, z: centerZ + blockRadius }
+    });
     } else if (toolingType === 'special-jig') {
         const rodDiameter = toolingParams.rodDiameter || 10;
         const rodRadius = rodDiameter / 2;
@@ -1577,6 +1620,11 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
                 
                 // 环形工装圆形边界检查
                 if (isRadialTooling && radialRadius) {
+                    const centerVoidRadius =
+                        toolingParams.centerVoidRadius ||
+                        toolingParams.innerRadius ||
+                        (toolingParams.rodDiameter || 40) / 2;
+
                     // 检查工件四个角点是否都在圆内
                     const corners = [
                         { x: cand.x, z: cand.z },
@@ -1594,6 +1642,22 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
                         }
                     }
                     if (outside) continue;
+                }
+                
+                // 环形工装中心空洞检查（确保工件不会穿过中心空洞）
+                if (isRadialTooling) {
+                    const itemCenterX = cand.x + iw / 2;
+                    const itemCenterZ = cand.z + id_ / 2;
+                    const itemBoundingRadius = Math.sqrt(iw * iw + id_ * id_) / 2;
+                    const distToCenter = Math.hypot(itemCenterX - centerX, itemCenterZ - centerZ);
+
+                    if (distToCenter - itemBoundingRadius < centerVoidRadius) {
+                        continue;
+                    }
+
+                    if (distToCenter + itemBoundingRadius > radialRadius) {
+                        continue;
+                    }
                 }
 
                 // 与工装内部障碍物碰撞检测
@@ -1643,6 +1707,18 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
             // 垂直高度检查
             const ih = item.h + sp;
             if (currentY + ih > fh) continue;
+            let layerCeilingY = fh;
+
+            if (isRadialTooling && internalShelves.length > 0) {
+                const nextShelf = internalShelves.find(s => s.y > currentY);
+                if (nextShelf) {
+                    layerCeilingY = nextShelf.y - (nextShelf.thickness || 0);
+                }
+            }
+
+            if (currentY + ih > layerCeilingY) {
+                continue;
+            }
 
             // 尺寸检查
             if (item.w > fw || item.h > fh || item.d > fd) continue;
@@ -1747,6 +1823,11 @@ function solveUnifiedMultiFurnace(furnacePoolInput, itemsInput, spacing, strateg
     let availableFurnaceInstances = [];
     furnacePoolInput.forEach(f => {
         const tooling = furnaceTooling[f.toolingType] || furnaceTooling['standard-basket'];
+        const extras = f.extras || {};
+        const params = {
+            ...(tooling.params || {}),
+            ...extras
+        };
         for (let i = 0; i < f.count; i++) {
             availableFurnaceInstances.push({
                 typeName: f.name, instanceId: `${f.name} (炉次 #${i + 1})`,
@@ -1759,6 +1840,7 @@ function solveUnifiedMultiFurnace(furnacePoolInput, itemsInput, spacing, strateg
                 maxLayers: f.maxLayers || 5,
                 allowedProcesses: f.allowedProcesses || '',
                 placementMode: f.placementMode || 'free',
+                params: params,
                 /** V5.0 P0: PRD §3.1 工装物理约束字段透传 */
                 hasShelf: (f.hasShelf != null ? f.hasShelf : tooling.hasShelf) ?? false,
                 canStackInside: (f.canStackInside != null ? f.canStackInside : tooling.canStackInside) ?? false,

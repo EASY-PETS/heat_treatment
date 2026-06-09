@@ -292,7 +292,16 @@ export const furnaceTooling = {
         isNestable: false,
         coordinateSystem: 'polar',
         centerVoidRadius: 200,
-        params: { innerRadius: 200, outerRadius: 400, angleStep: 30 }
+        params: {
+            useInternalShelves: true,
+            innerRadius: 20,
+            centerVoidRadius: 20,
+            outerRadius: 400,
+            ringCount: 3,
+            stationCount: 3,
+            rodDiameter: 40,
+            angleStep: 30
+        }
     }
 };
 
