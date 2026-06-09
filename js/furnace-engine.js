@@ -24,10 +24,11 @@
  *   - state.js (placementRules, aggregationStats)
  */
 
-import { placementRules, setAggregationStats, setGroupingInfo } from './state.js';
+import { placementRules, setAggregationStats, setGroupingInfo, furnaceTooling } from './state.js';
 import { groupMaterials, getGroupingSummary, getGroupingRules } from './PackingRuleEngine.js';
 import { strategyConfig, PackingStrategy } from './strategies.js'
 import { optimizePosture } from './geometry-utils.js';
+import { generatePredictions } from './prediction-engine.js';
 
 // ==================== 聚集规则辅助函数（Task 2） ====================
 
@@ -1745,6 +1746,7 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
 function solveUnifiedMultiFurnace(furnacePoolInput, itemsInput, spacing, strategy = 'balanced') {
     let availableFurnaceInstances = [];
     furnacePoolInput.forEach(f => {
+        const tooling = furnaceTooling[f.toolingType] || furnaceTooling['standard-basket'];
         for (let i = 0; i < f.count; i++) {
             availableFurnaceInstances.push({
                 typeName: f.name, instanceId: `${f.name} (炉次 #${i + 1})`,
@@ -1756,7 +1758,15 @@ function solveUnifiedMultiFurnace(furnacePoolInput, itemsInput, spacing, strateg
                 toolingType: f.toolingType || 'standard-basket',
                 maxLayers: f.maxLayers || 5,
                 allowedProcesses: f.allowedProcesses || '',
-                placementMode: f.placementMode || 'free'
+                placementMode: f.placementMode || 'free',
+                /** V5.0 P0: PRD §3.1 工装物理约束字段透传 */
+                hasShelf: (f.hasShelf != null ? f.hasShelf : tooling.hasShelf) ?? false,
+                canStackInside: (f.canStackInside != null ? f.canStackInside : tooling.canStackInside) ?? false,
+                exposurePriority: f.exposurePriority || tooling.exposurePriority || 'medium',
+                orientation: f.orientation || tooling.orientation || 'free',
+                isNestable: (f.isNestable != null ? f.isNestable : tooling.isNestable) ?? false,
+                coordinateSystem: f.coordinateSystem || tooling.coordinateSystem || 'cartesian',
+                centerVoidRadius: f.centerVoidRadius ?? tooling.centerVoidRadius ?? null
             });
         }
     });
@@ -1887,10 +1897,14 @@ export function executePacking(furnacePoolInput, itemsInput, spacing, strategy =
     const groupingSummary = getGroupingSummary(groups, groupingRules);
     setGroupingInfo(groupingSummary);
 
+    // V5.0 P0: Step 4 — 调用预测引擎生成效益预估
+    const predictions = generatePredictions(allCompletedFurnaces);
+
     return {
         completedFurnaces: allCompletedFurnaces,
         unpackedItems: allUnpackedItems,
         aggregationStats: aggStats,
-        groupingInfo: groupingSummary
+        groupingInfo: groupingSummary,
+        predictions
     };
 }

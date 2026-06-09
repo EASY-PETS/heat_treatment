@@ -518,34 +518,6 @@ function createTrayBasketFrame(w, h, d) {
     return group;
 }
 
-// ==================== SOLID BASKET FRAME ====================
-
-function createSolidBasketFrame(w, h, d) {
-    const group = new THREE.Group();
-    const geo = new THREE.BoxGeometry(w, h, d);
-    const edges = new THREE.EdgesGeometry(geo);
-    const line = new THREE.LineSegments(edges,
-        new THREE.LineBasicMaterial({ color: 0x0066cc, linewidth: 1.5, transparent: true, opacity: 0.6 }));
-    line.position.set(w / 2, h / 2, d / 2);
-    group.add(line);
-
-    const panelGeo = new THREE.BoxGeometry(w, h, d);
-    const panelMat = new THREE.MeshStandardMaterial({
-        color: 0x8899aa,
-        roughness: 0.4,
-        metalness: 0.3,
-        transparent: true,
-        opacity: 0.25,
-        depthWrite: false
-    });
-    const panel = new THREE.Mesh(panelGeo, panelMat);
-    panel.position.set(w / 2, h / 2, d / 2);
-    group.add(panel);
-
-    group.userData = { isBasketFrame: true, basketType: 'solid' };
-    return group;
-}
-
 // ==================== RING NODE BASKET FRAME ====================
 
 /**
@@ -785,8 +757,6 @@ export function createBasketFrame(w, h, d, gridSize, basketType) {
             return createHoneycombBasketFrame(w, h, d);
         case 'tray':
             return createTrayBasketFrame(w, h, d);
-        case 'solid':
-            return createRingNodeBasketFrame(w, h, d);
         case 'ringnode':
             return createRingNodeBasketFrame(w, h, d);
         case 'hanger':

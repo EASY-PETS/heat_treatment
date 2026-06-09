@@ -1,7 +1,9 @@
-// ==================== 模块1：车间管理 ====================
-
 /**
- * 车间管理模块
+ * @deprecated 此模块管理的是炉膛资产库（Chamber层），非PRD定义的Workshop（车间与物理设备层）。
+ *             功能与 furnaceManagement.js 重叠，建议合并。
+ *             Phase 2 将重新设计 Equipment→Chamber→Tooling 三层数据模型。
+ *
+ * 模块1：车间管理（待重构）
  * 负责展示车间已有炉膛资产库，支持选择已有炉膛加入当前预装方案
  */
 export class WorkshopManagement {

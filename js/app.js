@@ -22,12 +22,13 @@ import {
     setFdpCollapsed, setMdpCollapsed,
     placementRules,
     setGlobalFurnacesResult, setGlobalUnpackedItems, setGlobalSpacingValue,
+    setGlobalPredictions,
     setCurrentBasketType, setDisplaySettings, setDefaultToolingType,
     clearFurnaceGroups,
     furnaceGroups, controls, camera,
     setFurnaceCounter, setMaterialCounter,
     setSelectedFurnaceCardId, setSelectedMaterialCardId,
-    currentMaterialFilter, currentProcessFilter,
+    clearMaterialFilters, clearProcessFilters,
     clearUsedColors
 } from './state.js';
 import {
@@ -136,6 +137,11 @@ function executeAndRender() {
 
     setGlobalFurnacesResult(result.completedFurnaces);
     setGlobalUnpackedItems(result.unpackedItems);
+
+    // V5.0 P0: 存储预测结果供后续 UI 渲染使用
+    if (result.predictions) {
+        setGlobalPredictions(result.predictions);
+    }
 
     document.getElementById("btn-export-pdf").style.display = "inline-block";
     document.getElementById("btn-animate").style.display = "inline-block";
@@ -1118,8 +1124,8 @@ function clearAllMaterials() {
     }
 
     // 重置筛选状态
-    setCurrentMaterialFilter(null);
-    setCurrentProcessFilter(null);
+    clearMaterialFilters();
+    clearProcessFilters();
 
     // 刷新筛选条（此时物料卡片已清空，筛选条应显示“全部 (0)”）
     renderFilterBars(clearFurnaceResults);
@@ -1180,6 +1186,10 @@ function clearAllFurnaces() {
     document.getElementById('mdp-title').textContent = '📋 工件详情';
 
     // 9. 更新顶部摘要
+    clearMaterialFilters();
+    clearProcessFilters();
+    renderFilterBars(clearFurnaceResults);
+
     setCurrentFurnaceIndex(0);
     updateTopSummary();
 }

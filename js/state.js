@@ -84,19 +84,47 @@ export let animStopped = false;
 
 // ==================== SELECTION / NAVIGATION STATE ====================
 export let currentFurnaceIndex = 0;
+/**
+ * @deprecated 递增计数器仅用于DOM元素ID生成。后续Phase将替换为 equipmentCode/crmOrderId 等业务主键。
+ */
 export let furnaceCounter = 0;
+/** @deprecated 递增计数器仅用于DOM元素ID生成。 */
 export let materialCounter = 0;
 export let selectedFurnaceCardId = null;
 export let selectedMaterialCardId = null;
 export let fdpCollapsed = false;
 export let mdpCollapsed = false;
 
-// 筛选状态
-export let currentMaterialFilter = null;   // 当前选中的材质名称，null 表示全部
-export let currentProcessFilter = null;    // 当前选中的工艺名称，null 表示全部
+// 多选筛选状态
+// 材质内部是 OR：Cr12 或 H13
+// 工艺内部是 OR：真空淬火 或 氮化
+// 材质和工艺之间是 AND
+export let currentMaterialFilters = new Set();
+export let currentProcessFilters = new Set();
 
-export function setCurrentMaterialFilter(value) { currentMaterialFilter = value; }
-export function setCurrentProcessFilter(value) { currentProcessFilter = value; }
+export function toggleMaterialFilter(value) {
+    if (currentMaterialFilters.has(value)) {
+        currentMaterialFilters.delete(value);
+    } else {
+        currentMaterialFilters.add(value);
+    }
+}
+
+export function toggleProcessFilter(value) {
+    if (currentProcessFilters.has(value)) {
+        currentProcessFilters.delete(value);
+    } else {
+        currentProcessFilters.add(value);
+    }
+}
+
+export function clearMaterialFilters() {
+    currentMaterialFilters.clear();
+}
+
+export function clearProcessFilters() {
+    currentProcessFilters.clear();
+}
 
 /** Furnace card sort state */
 export let sortState = { field: null, dir: 'asc' };
@@ -141,18 +169,27 @@ export let aggregationStats = {
     processRate: null     // 工艺聚集率 (0-100)
 };
 
-// ==================== TOOLING TYPE EXTENSION (V4.8) ====================
+// ==================== TOOLING TYPE EXTENSION (V4.8 → V5.0 P0) ====================
 /**
  * 工装类型注册表 — 每种工装类型的完整元数据
  *
  * 字段说明:
- *   - toolingType:     唯一标识符
- *   - label:           中文显示名
- *   - maxLayers:       最大堆叠层数
+ *   - toolingType:      唯一标识符
+ *   - label:            中文显示名
+ *   - maxLayers:        最大堆叠层数
  *   - allowedProcesses: 允许的工艺列表（空数组 = 全部允许）
- *   - placementMode:   摆放模式 — 'free' | 'fixed' | 'vertical' | 'radial'
- *   - basketType:      映射到 3D 建模类型（grid|honeycomb|tray|ringnode|hanger|radial）
- *   - params:          工装专属参数
+ *   - placementMode:    摆放模式 — 'free' | 'fixed' | 'vertical' | 'radial' | 'discrete_nodes'
+ *   - basketType:       映射到 3D 建模类型（grid|honeycomb|tray|ringnode|hanger|radial）
+ *   - params:           工装专属参数
+ *
+ *   --- V5.0 P0: PRD §3.1 五大工装物理约束字段 ---
+ *   - hasShelf:           是否支持搁板（高围边 + 定距导轨）
+ *   - canStackInside:     是否允许工件直接肉身相叠
+ *   - exposurePriority:   暴露面积优先级 — 'high' | 'medium' | 'low'
+ *   - orientation:        工件朝向约束 — 'free' | 'vertical_only'
+ *   - isNestable:         是否可作为虚拟工件嵌套入标准料框搁板
+ *   - coordinateSystem:   坐标系类型 — 'cartesian' | 'polar'
+ *   - centerVoidRadius:   中心主轴避障禁区半径（仅 polar 坐标系有效），null 表示无限制
  */
 export const furnaceTooling = {
     'standard-basket': {
@@ -162,6 +199,14 @@ export const furnaceTooling = {
         allowedProcesses: [],
         placementMode: 'free',
         basketType: 'grid',
+        // V5.0 P0: PRD 物理约束字段
+        hasShelf: true,
+        canStackInside: false,
+        exposurePriority: 'medium',
+        orientation: 'free',
+        isNestable: false,
+        coordinateSystem: 'cartesian',
+        centerVoidRadius: null,
         params: { gridSize: 100, shelfThickness: 20 }
     },
     'mesh-basket': {
@@ -171,6 +216,14 @@ export const furnaceTooling = {
         allowedProcesses: ['渗碳', '碳氮共渗'],
         placementMode: 'free',
         basketType: 'honeycomb',
+        // V5.0 P0: 集装网篮 — 密集网格，无搁板槽，轴类强制竖置，允许作为虚拟工件嵌套
+        hasShelf: false,
+        canStackInside: false,
+        exposurePriority: 'high',
+        orientation: 'vertical_only',
+        isNestable: true,
+        coordinateSystem: 'cartesian',
+        centerVoidRadius: null,
         params: { gridSize: 80 }
     },
     'special-jig': {
@@ -178,8 +231,16 @@ export const furnaceTooling = {
         label: '专用夹具',
         maxLayers: 2,
         allowedProcesses: [],
-        placementMode: 'fixed',
+        placementMode: 'discrete_nodes',
         basketType: 'tray',
+        // V5.0 P0: 专用夹具/挂具 — 内部带定制挂钩或垂直销轴，工件放置点为离散三维定点捕捉
+        hasShelf: false,
+        canStackInside: false,
+        exposurePriority: 'medium',
+        orientation: 'free',
+        isNestable: false,
+        coordinateSystem: 'cartesian',
+        centerVoidRadius: null,
         params: { slotWidth: 60, slotSpacing: 20 }
     },
     'material-tray': {
@@ -189,6 +250,14 @@ export const furnaceTooling = {
         allowedProcesses: ['氮化'],
         placementMode: 'free',
         basketType: 'tray',
+        // V5.0 P0: 料盘 — 无围边，带叉车脚，严禁叠放压伤，最大化暴露面积，严格重心居中
+        hasShelf: false,
+        canStackInside: false,
+        exposurePriority: 'high',
+        orientation: 'free',
+        isNestable: false,
+        coordinateSystem: 'cartesian',
+        centerVoidRadius: null,
         params: { shelfThickness: 15 }
     },
     'hanger': {
@@ -196,8 +265,16 @@ export const furnaceTooling = {
         label: '挂具',
         maxLayers: 1,
         allowedProcesses: ['淬火', '回火'],
-        placementMode: 'vertical',
+        placementMode: 'discrete_nodes',
         basketType: 'hanger',
+        // V5.0 P0: 挂具 — 顶部横梁 + 垂直挂钩，用于防变形细长轴，离散定点捕捉
+        hasShelf: false,
+        canStackInside: false,
+        exposurePriority: 'high',
+        orientation: 'vertical_only',
+        isNestable: false,
+        coordinateSystem: 'cartesian',
+        centerVoidRadius: null,
         params: { hookSpacing: 80, maxHangWeight: 200 }
     },
     'ring-tooling': {
@@ -207,6 +284,14 @@ export const furnaceTooling = {
         allowedProcesses: ['渗碳'],
         placementMode: 'radial',
         basketType: 'ringnode',
+        // V5.0 P0: 环形工装 — 井式/回转炉专用，极坐标排布，中心主轴为绝对避障禁区
+        hasShelf: true,
+        canStackInside: false,
+        exposurePriority: 'medium',
+        orientation: 'free',
+        isNestable: false,
+        coordinateSystem: 'polar',
+        centerVoidRadius: 200,
         params: { innerRadius: 200, outerRadius: 400, angleStep: 30 }
     }
 };
@@ -219,6 +304,14 @@ export let toolingTemplates = [];
 
 /** 默认工装类型（新建炉膛时使用） */
 export let defaultToolingType = 'standard-basket';
+
+// ==================== V5.0 P0: 综合效益预测结果 ====================
+/**
+ * 装炉方案的预测数据 — 每个已完成炉膛对应一项
+ * @type {Array<{ furnaceId: string, powerConsumption: { estimatedKwh, efficiencyTier }, gasConsumption: { nitrogenNm3 }, qualityRisk: { score, deformationRisk } }> | null}
+ */
+export let globalPredictions = null;
+export function setGlobalPredictions(v) { globalPredictions = v; }
 
 /** V3.0: 分组规则信息 — 用于方案统计面板展示 */
 export let groupingInfo = {
@@ -251,7 +344,7 @@ export const BASKET_TYPES = ['grid', 'honeycomb', 'tray', 'ringnode'];
  * 默认料框类型（新建炉膛时使用）
  * V2.3: 改为仅作为新建炉膛的默认值，每个炉膛独立存储自己的 basketType
  */
-export let currentBasketType = 'grid';   // 'grid' | 'honeycomb' | 'tray' | 'solid'
+export let currentBasketType = 'grid';   // 'grid' | 'honeycomb' | 'tray' | 'ringnode'
 
 // ==================== 3D DISPLAY SETTINGS (V2.2) ====================
 /**
@@ -265,7 +358,10 @@ export let displaySettings = {
 };
 
 // ==================== MASTER PLANS ====================
-/** Historical furnace loading plans for "装料大师" view */
+/**
+ * @deprecated Demo 演示数据。PRD 中无此功能定义，后续 Phase 4 由 MES/ERP 真实历史数据替换。
+ * Historical furnace loading plans for "装料大师" view
+ */
 export const masterPlans = [
     {
         id: 1, title: '台车炉标准装载方案', tag: 'best', tagLabel: '最优方案',

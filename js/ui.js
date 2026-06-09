@@ -31,31 +31,14 @@ import {
     setPlacementRules, setCurrentFurnaceIndex,
     setGlobalFurnacesResult, setGlobalUnpackedItems, setGlobalSpacingValue,
     setToolingTemplates, setDefaultToolingType,
-    currentMaterialFilter, currentProcessFilter,
-    setCurrentMaterialFilter, setCurrentProcessFilter
+    currentMaterialFilters, currentProcessFilters,
+    toggleMaterialFilter, toggleProcessFilter,
+    clearMaterialFilters, clearProcessFilters
 } from './state.js';
 import {
     generateUniqueColor,
     findResultIndexByFid, getSelectedMaterialName
 } from './three-scene.js';
-
-function applyFiltersAndClearResults() {
-    // 根据筛选条件显示/隐藏物料卡片
-    document.querySelectorAll('.material-card').forEach(card => {
-        const material = card.getAttribute('data-material');
-        const process = card.getAttribute('data-process');
-        let visible = true;
-        if (currentMaterialFilter !== null && material !== currentMaterialFilter) visible = false;
-        if (currentProcessFilter !== null && process !== currentProcessFilter) visible = false;
-        card.style.display = visible ? 'flex' : 'none';
-    });
-    // 清空装炉结果
-    if (window.clearFurnaceResults) window.clearFurnaceResults();
-    // 可选：提示用户重新生成
-    showCapacityFeedback('info', '筛选条件已变更，请点击“生成方案”重新装炉');
-}
-
-// ==================== FURNACE CARD HELPERS ====================
 
 export function getFurnaceDataFromCard(card) {
     const fid = parseInt(card.getAttribute('data-fid'));
@@ -86,7 +69,7 @@ export function getFurnaceDataFromCard(card) {
     const extrasStr = card.getAttribute('data-extras');
     const extras = extrasStr ? JSON.parse(extrasStr) : {};
 
-    return { fid, name, width: parseFloat(dims[0]) || 0, height: parseFloat(dims[1]) || 0, depth: parseFloat(dims[2]) || 0, maxWeight, count, plannedHeats, actualSpacing, basketType, toolingType, maxLayers, allowedProcesses, placementMode };
+    return { fid, name, width: parseFloat(dims[0]) || 0, height: parseFloat(dims[1]) || 0, depth: parseFloat(dims[2]) || 0, maxWeight, count, plannedHeats, actualSpacing, basketType, toolingType, maxLayers, allowedProcesses, placementMode, extras };
 }
 
 export function getMaterialDataFromCard(card) {
@@ -511,6 +494,8 @@ export function saveMaterialDetail(cardId) {
     card.setAttribute('data-material', material); card.setAttribute('data-hardness', hardness); card.setAttribute('data-process', process);
     card.setAttribute('data-order-date', orderDate); card.setAttribute('data-delivery-date', deliveryDate); card.setAttribute('data-remark', remark);
     document.getElementById('mdp-title').textContent = '📋 ' + name; updateTopSummary();
+    renderFilterBars(window._clearFurnaceResults);
+    applyFilterAndClear(window._clearFurnaceResults);
     const btn = document.getElementById('mdp-save-btn'); if (btn) { btn.textContent = '✅ 已保存'; setTimeout(() => { btn.textContent = '💾 保存工件参数'; }, 1500); }
 }
 
@@ -837,16 +822,16 @@ export function renderFilterBars(onClearResults) {
     });
 
     // 构建材质标签HTML
-    let materialHtml = `<div class="filter-tag ${currentMaterialFilter === null ? 'active' : ''}" data-type="material" data-filter="all">全部 (${totalCards})</div>`;
+    let materialHtml = `<div class="filter-tag ${currentMaterialFilters.size === 0 ? 'active' : ''}" data-type="material" data-filter="all">全部 (${totalCards})</div>`;
     for (let [mat, cnt] of materialMap.entries()) {
-        materialHtml += `<div class="filter-tag ${currentMaterialFilter === mat ? 'active' : ''}" data-type="material" data-filter="${mat.replace(/"/g, '&quot;')}">${escapeHtml(mat)} (${cnt})</div>`;
+        materialHtml += `<div class="filter-tag ${currentMaterialFilters.has(mat) ? 'active' : ''}" data-type="material" data-filter="${mat.replace(/"/g, '&quot;')}">${escapeHtml(mat)} (${cnt})</div>`;
     }
     materialContainer.innerHTML = materialHtml;
 
     // 构建工艺标签HTML
-    let processHtml = `<div class="filter-tag ${currentProcessFilter === null ? 'active' : ''}" data-type="process" data-filter="all">全部 (${totalCards})</div>`;
+    let processHtml = `<div class="filter-tag ${currentProcessFilters.size === 0 ? 'active' : ''}" data-type="process" data-filter="all">全部 (${totalCards})</div>`;
     for (let [proc, cnt] of processMap.entries()) {
-        processHtml += `<div class="filter-tag ${currentProcessFilter === proc ? 'active' : ''}" data-type="process" data-filter="${proc.replace(/"/g, '&quot;')}">${escapeHtml(proc)} (${cnt})</div>`;
+        processHtml += `<div class="filter-tag ${currentProcessFilters.has(proc) ? 'active' : ''}" data-type="process" data-filter="${proc.replace(/"/g, '&quot;')}">${escapeHtml(proc)} (${cnt})</div>`;
     }
     processContainer.innerHTML = processHtml;
 
@@ -855,9 +840,11 @@ export function renderFilterBars(onClearResults) {
         tag.addEventListener('click', (e) => {
             e.stopPropagation();
             const filterValue = tag.getAttribute('data-filter');
-            const newFilter = filterValue === 'all' ? null : filterValue;
-            if (currentMaterialFilter === newFilter) return;
-            setCurrentMaterialFilter(newFilter);
+            if (filterValue === 'all') {
+                clearMaterialFilters();
+            } else {
+                toggleMaterialFilter(filterValue);
+            }
             applyFilterAndClear(onClearResults);
         });
     });
@@ -865,9 +852,11 @@ export function renderFilterBars(onClearResults) {
         tag.addEventListener('click', (e) => {
             e.stopPropagation();
             const filterValue = tag.getAttribute('data-filter');
-            const newFilter = filterValue === 'all' ? null : filterValue;
-            if (currentProcessFilter === newFilter) return;
-            setCurrentProcessFilter(newFilter);
+            if (filterValue === 'all') {
+                clearProcessFilters();
+            } else {
+                toggleProcessFilter(filterValue);
+            }
             applyFilterAndClear(onClearResults);
         });
     });
@@ -912,36 +901,21 @@ function escapeHtml(str) {
     });
 }
 
-// /**
-//  * 应用筛选（隐藏/显示物料卡片）并清空装炉结果
-//  * @param {Function} onClearResults
-//  */
-// function applyFilterAndClear(onClearResults) {
-//     // 先应用筛选：隐藏不符合条件的卡片
-//     document.querySelectorAll('.material-card').forEach(card => {
-//         const material = card.getAttribute('data-material');
-//         const process = card.getAttribute('data-process');
-//         let visible = true;
-//         if (currentMaterialFilter !== null && material !== currentMaterialFilter) visible = false;
-//         if (currentProcessFilter !== null && process !== currentProcessFilter) visible = false;
-//         card.style.display = visible ? 'flex' : 'none';
-//     });
-
-//     // 清空装炉结果
-//     if (onClearResults) onClearResults();
-
-//     // 刷新筛选条本身（更新数量和激活状态）
-//     renderFilterBars(onClearResults);
 // }
 function applyFilterAndClear(onClearResults) {
     // 先应用筛选：隐藏不符合条件的卡片
     document.querySelectorAll('.material-card').forEach(card => {
         const material = card.getAttribute('data-material');
         const process = card.getAttribute('data-process');
-        let visible = true;
-        if (currentMaterialFilter !== null && material !== currentMaterialFilter) visible = false;
-        if (currentProcessFilter !== null && process !== currentProcessFilter) visible = false;
-        card.style.display = visible ? 'flex' : 'none';
+        const materialPass =
+            currentMaterialFilters.size === 0 ||
+            currentMaterialFilters.has(material);
+
+        const processPass =
+            currentProcessFilters.size === 0 ||
+            currentProcessFilters.has(process);
+
+        card.style.display = materialPass && processPass ? 'flex' : 'none';
     });
 
     // 清空装炉结果
@@ -1194,7 +1168,7 @@ export function parseExcelData(workbook) {
 
 export function showImportPreview(data) { setImportPreviewData(data); const content = document.getElementById('import-preview-content'); let html = '<table class="import-table"><thead><tr><th>产品名称</th><th>客户</th><th>物料编码</th><th>形态</th><th>尺寸</th><th>数量</th><th>单重(kg)</th><th>材质</th><th>工艺</th><th>状态</th></tr></thead><tbody>'; data.forEach(d => { const dimStr = d.shape === 'cylinder' ? '⌀' + d.dim1 + '×H' + d.dim3 : d.dim1 + '×' + d.dim2 + '×' + d.dim3; const cls = d.valid ? '' : ' class="error"'; const displayName = d.showName || d.name.split('_')[0]; const customer = d.customer || ''; html += '<tr' + cls + '><td>' + displayName + '</td><td>' + customer + '</td><td>' + (d.itemCode || '') + '</td><td>' + (d.shape==='cylinder'?'圆柱':'立方') + '</td><td>' + dimStr + 'mm</td><td>' + d.count + '</td><td>' + d.weight + '</td><td>' + d.material + '</td><td>' + d.process + '</td><td>' + (d.valid?'✅':'⚠️ 尺寸不足') + '</td></tr>'; }); html += '</tbody></table>'; content.innerHTML = html; document.getElementById('import-preview-overlay').style.display = 'flex'; }
 
-export function applyImportData(replace) { if (replace) { document.querySelectorAll('.material-card').forEach(c => c.remove()); usedColors.clear(); } importPreviewData.filter(d => d.valid).forEach(d => { const color = generateUniqueColor(usedColors); createMaterialCard(d.name, d.shape, d.count, d.dim1, d.dim2, d.dim3, d.weight, color, { material: d.material, hardness: d.hardness, process: d.process, orderDate: d.orderDate, deliveryDate: d.deliveryDate, remark: d.remark, showName: d.showName, customer: d.customer, itemCode: d.itemCode }); }); updateTopSummary(); document.getElementById('import-preview-overlay').style.display = 'none'; renderFilterBars(window._clearFurnaceResults); applyFilterAndClear(window._clearFurnaceResults);}
+export function applyImportData(replace) { if (replace) { document.querySelectorAll('.material-card').forEach(c => c.remove()); usedColors.clear(); clearMaterialFilters(); clearProcessFilters();} importPreviewData.filter(d => d.valid).forEach(d => { const color = generateUniqueColor(usedColors); createMaterialCard(d.name, d.shape, d.count, d.dim1, d.dim2, d.dim3, d.weight, color, { material: d.material, hardness: d.hardness, process: d.process, orderDate: d.orderDate, deliveryDate: d.deliveryDate, remark: d.remark, showName: d.showName, customer: d.customer, itemCode: d.itemCode }); }); updateTopSummary(); document.getElementById('import-preview-overlay').style.display = 'none'; renderFilterBars(window._clearFurnaceResults); applyFilterAndClear(window._clearFurnaceResults);}
 
 // ==================== JSON IMPORT (MASTER) ====================
 

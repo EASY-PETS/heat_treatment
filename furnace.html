@@ -28,7 +28,7 @@
             <div class="top-logo-subtitle">AI Furnace Loading Agent</div>
         </div>
         <button class="btn top-nav-btn" id="btn-master">历史方案</button>
-        <button class="btn top-nav-btn" id="btn-tooling-mgmt">料框料盘</button>
+        <button class="btn top-nav-btn" id="btn-tooling-mgmt">工装管理</button>
         <button class="btn top-nav-btn" id="btn-material-nav">产品/模具</button>
         <button class="btn top-nav-btn" id="btn-rules">装炉规则</button>
         <div class="top-spacer"></div>
@@ -48,7 +48,7 @@
         <!-- LEFT PANEL: Furnace Config -->
         <div id="left-panel">
             <div class="panel-header">
-                <h3>料框配置</h3>
+                <h3>炉膛与工装</h3>
                 <div class="panel-header-actions">
                     <span class="panel-expand-btn-left" id="panel-expand-btn-left" title="展开面板" style="display:none;">▶</span>
                     <button class="btn-sm btn-toggle-panel" id="btn-toggle-left-panel" title="折叠/展开面板">◀</button>
@@ -382,7 +382,7 @@
     <div id="tooling-add-overlay">
         <div id="tooling-add-modal">
             <h3>🔧 选择工装类型并配置尺寸</h3>
-            <p class="tooling-add-subtitle">先选择工装类型，再配置尺寸参数，确认后添加料框</p>
+            <p class="tooling-add-subtitle">先选择工装类型，再配置炉膛尺寸参数，确认后添加炉膛</p>
             <div class="tooling-add-body">
                 <!-- 左侧：工装类型选择 -->
                 <div class="tooling-add-left">
@@ -397,17 +397,17 @@
                         <div class="tooling-add-section-title">📐 尺寸参数</div>
                         <div class="tooling-add-dim-row">
                             <div class="tooling-add-field">
-                                <label>名称</label>
+                                <label>炉膛名称</label>
                                 <input type="text" id="ta-name" value="">
                             </div>
                         </div>
                         <div class="tooling-add-dim-row">
                             <div class="tooling-add-field">
-                                <label>宽度 X (mm)</label>
+                                <label>宽度 X (mm) — 有效加热区</label>
                                 <input type="number" id="ta-width" value="900" min="100" max="5000">
                             </div>
                             <div class="tooling-add-field">
-                                <label>高度 Y (mm)</label>
+                                <label>高度 Y (mm) — 有效加热区</label>
                                 <input type="number" id="ta-height" value="1200" min="100" max="5000">
                             </div>
                             <div class="tooling-add-field">
