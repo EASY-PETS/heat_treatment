@@ -1953,21 +1953,42 @@ body {
 .filter-tag {
     display: inline-flex;
     align-items: center;
-    padding: 2px 8px;
-    background: #F1F5F9;
+    padding: 4px 10px;
+    background: #F8FAFC;
     border: 1px solid #E2E8F0;
-    border-radius: 16px;
+    border-radius: 999px;
     font-size: 11px;
+    font-weight: 500;
     color: #475569;
     cursor: pointer;
     transition: all 0.15s;
 }
-.filter-tag:hover {
-    background: #E2E8F0;
+.tooling-type-icon{
+    width:48px;
+    height:48px;
+    object-fit:contain;
 }
+.tooling-svg-icon {
+    width: 36px;
+    height: 36px;
+    object-fit: contain;
+    display: block;
+}
+
+.ttc-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 52px;
+}
+.filter-tag:hover {
+    background: #EFF6FF;
+    border-color: #BFDBFE;
+}
+
 .filter-tag.active {
-    color: #fff;
-    border-color: transparent;
+    color: white;
+    font-weight: 600;
 }
 /* 材质标签选中时蓝色 */
 .filter-tag[data-type="material"].active {
@@ -1976,6 +1997,11 @@ body {
 /* 工艺标签选中时绿色 */
 .filter-tag[data-type="process"].active {
     background: #22C55E;
+}
+
+/* 硬度标签选中时橙色 */
+.filter-tag[data-type="hardness"].active {
+    background: hsl(42, 95%, 53%);
 }
 .filter-tag .tag-count {
     margin-left: 2px;

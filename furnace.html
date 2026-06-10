@@ -206,6 +206,14 @@
                 </div>
                 <div class="filter-tags" id="process-filter-tags"></div>
             </div>
+            <!-- 硬度筛选条 -->
+            <div class="filter-bar" id="hardness-filter-bar">
+                <div class="filter-bar-header">
+                    <div class="filter-bar-title">🧪 硬度</div>
+                    <button class="filter-collapse-btn" data-target="hardness-filter-tags">▼</button>
+                </div>
+                <div class="filter-tags" id="hardness-filter-tags"></div>
+            </div>
             <div class="panel-scroll" id="material-cards-container"></div>
             <div id="material-detail-panel">
                 <div class="mdp-header" id="mdp-toggle-btn">
@@ -381,7 +389,7 @@
     <!-- Tooling Add Overlay - 工装类型选择 + 尺寸配置 -->
     <div id="tooling-add-overlay">
         <div id="tooling-add-modal">
-            <h3>🔧 选择工装类型并配置尺寸</h3>
+            <h3>选择工装类型并配置尺寸</h3>
             <p class="tooling-add-subtitle">先选择工装类型，再配置炉膛尺寸参数，确认后添加炉膛</p>
             <div class="tooling-add-body">
                 <!-- 左侧：工装类型选择 -->
@@ -394,7 +402,7 @@
                 <!-- 右侧：尺寸配置 -->
                 <div class="tooling-add-right">
                     <div class="tooling-add-section">
-                        <div class="tooling-add-section-title">📐 尺寸参数</div>
+                        <div class="tooling-add-section-title"></div>
                         <div class="tooling-add-dim-row">
                             <div class="tooling-add-field">
                                 <label>炉膛名称</label>
@@ -403,11 +411,11 @@
                         </div>
                         <div class="tooling-add-dim-row">
                             <div class="tooling-add-field">
-                                <label>宽度 X (mm) — 有效加热区</label>
+                                <label>宽度 X (mm)</label>
                                 <input type="number" id="ta-width" value="900" min="100" max="5000">
                             </div>
                             <div class="tooling-add-field">
-                                <label>高度 Y (mm) — 有效加热区</label>
+                                <label>高度 Y (mm)</label>
                                 <input type="number" id="ta-height" value="1200" min="100" max="5000">
                             </div>
                             <div class="tooling-add-field">
@@ -438,19 +446,19 @@
                     </div>
                     <!-- 工装预览信息 -->
                     <div class="tooling-add-section">
-                        <div class="tooling-add-section-title">📋 工装参数预览</div>
+                        <div class="tooling-add-section-title">工装参数预览</div>
                         <div class="tooling-add-preview" id="ta-preview">
                             <span style="color:#666;">请先在左侧选择工装类型</span>
                         </div>
                     </div>
                     <!-- 工装实拍图预览 -->
-                    <div class="tooling-add-section">
+                    <!-- <div class="tooling-add-section">
                         <div class="tooling-add-section-title">🖼 工装实拍图</div>
                         <div class="tooling-add-preview-img" id="ta-preview-img-container">
                             <img id="ta-preview-img" src="" alt="工装实拍图" style="display:none; width:100%; height:auto; border-radius:6px;" />
                             <span id="ta-preview-img-placeholder" style="color:#666;">请先在左侧选择工装类型</span>
                         </div>
-                    </div>
+                    </div> -->
                 </div>
             </div>
             <div class="tooling-add-actions">

@@ -28,7 +28,7 @@ import {
     furnaceGroups, controls, camera,
     setFurnaceCounter, setMaterialCounter,
     setSelectedFurnaceCardId, setSelectedMaterialCardId,
-    clearMaterialFilters, clearProcessFilters,
+    clearMaterialFilters, clearProcessFilters, clearHardnessFilters,
     clearUsedColors
 } from './state.js';
 import {
@@ -778,6 +778,13 @@ const TOOLING_ICONS = {
     'ring-tooling': '🔄'
 };
 
+const TOOLING_SVGS = {
+    'standard-basket': 'assets/icons/tooling-standard.svg',
+    'mesh-basket': 'assets/icons/tooling-mesh.svg',
+    'material-tray': 'assets/icons/tooling-tray.svg',
+    'ring-tooling': 'assets/icons/tooling-ring.svg'
+};
+
 /**
  * 工装类型对应的默认尺寸预设
  */
@@ -813,7 +820,10 @@ function openToolingAddModal() {
     renderToolingTypeCards();
 
     // 默认选中 defaultToolingType
-    selectAddToolingType(defaultToolingType);
+    const initialType = furnaceTooling[defaultToolingType]?.deprecated
+        ? 'standard-basket'
+        : defaultToolingType;
+    selectAddToolingType(initialType);
 
     overlay.classList.add('active');
 
@@ -852,15 +862,19 @@ function renderToolingTypeCards() {
 
     let html = '';
     Object.entries(furnaceTooling).forEach(([key, cfg]) => {
-        const icon = TOOLING_ICONS[key] || '🔧';
-        const procStr = cfg.allowedProcesses.length > 0
-            ? cfg.allowedProcesses.join('、')
-            : '全部工艺';
+        if (cfg.deprecated) return;
+        const svgPath = TOOLING_SVGS[key];
+        const iconHtml = svgPath
+            ? '<img class="tooling-svg-icon" src="' + svgPath + '" alt="' + cfg.label + '">'
+            : (TOOLING_ICONS[key] || '🔧');
+                const procStr = cfg.allowedProcesses.length > 0
+                    ? cfg.allowedProcesses.join('、')
+                    : '全部工艺';
         const placementLabels = { 'free': '自由摆放', 'fixed': '固定卡位', 'vertical': '垂直悬挂', 'radial': '径向排列' };
         const placementLabel = placementLabels[cfg.placementMode] || cfg.placementMode;
 
         html += '<div class="tooling-type-card" data-tooling="' + key + '" onclick="window._selectAddToolingType(\'' + key + '\')">';
-        html += '<span class="ttc-icon">' + icon + '</span>';
+        html += '<span class="ttc-icon">' + iconHtml + '</span>';
         html += '<span class="ttc-name">' + cfg.label + '</span>';
         html += '<div class="ttc-info">';
         html += '<span>📐 最大' + cfg.maxLayers + '层</span>';
@@ -1126,6 +1140,7 @@ function clearAllMaterials() {
     // 重置筛选状态
     clearMaterialFilters();
     clearProcessFilters();
+    clearHardnessFilters();
 
     // 刷新筛选条（此时物料卡片已清空，筛选条应显示“全部 (0)”）
     renderFilterBars(clearFurnaceResults);
@@ -1188,6 +1203,7 @@ function clearAllFurnaces() {
     // 9. 更新顶部摘要
     clearMaterialFilters();
     clearProcessFilters();
+    clearHardnessFilters();
     renderFilterBars(clearFurnaceResults);
 
     setCurrentFurnaceIndex(0);

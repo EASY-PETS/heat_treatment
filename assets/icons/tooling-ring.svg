@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" aria-label="环形工装" role="img">
+  <defs>
+    <linearGradient id="energy" x1="12" y1="12" x2="52" y2="52" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7000FF"/>
+      <stop offset="1" stop-color="#00F0FF"/>
+    </linearGradient>
+    <style><![CDATA[
+      .base { stroke: #64748B; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+      .energy { stroke: url(#energy); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+      .dash { stroke-dasharray: 3 3; }
+      .fill-energy { fill: url(#energy); }
+      .fill-white { fill: #fff; }
+    ]]></style>
+  </defs>
+  <circle class="base" cx="32" cy="32" r="19"/><circle class="base" cx="32" cy="32" r="12"/><path class="energy" d="M13 32 C18 20 29 13 42 16"/><rect class="base" x="30" y="8" width="4" height="10" rx="1"/><rect class="base" x="30" y="46" width="4" height="10" rx="1"/><rect class="base" x="8" y="30" width="10" height="4" rx="1"/><rect class="base" x="46" y="30" width="10" height="4" rx="1"/>
+</svg>

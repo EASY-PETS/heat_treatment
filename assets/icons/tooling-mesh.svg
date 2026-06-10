@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" aria-label="集装网篮" role="img">
+  <defs>
+    <linearGradient id="energy" x1="12" y1="12" x2="52" y2="52" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7000FF"/>
+      <stop offset="1" stop-color="#00F0FF"/>
+    </linearGradient>
+    <style><![CDATA[
+      .base { stroke: #64748B; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+      .energy { stroke: url(#energy); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+      .dash { stroke-dasharray: 3 3; }
+      .fill-energy { fill: url(#energy); }
+      .fill-white { fill: #fff; }
+    ]]></style>
+  </defs>
+  <rect class="base" x="14" y="20" width="36" height="30" rx="1"/><line class="base" x1="18" y1="20" x2="18" y2="50"/><line class="base" x1="24" y1="20" x2="24" y2="50"/><line class="base" x1="30" y1="20" x2="30" y2="50"/><line class="base" x1="36" y1="20" x2="36" y2="50"/><line class="base" x1="42" y1="20" x2="42" y2="50"/><line class="base" x1="48" y1="20" x2="48" y2="50"/><line class="base" x1="14" y1="24" x2="50" y2="24"/><line class="base" x1="14" y1="30" x2="50" y2="30"/><line class="base" x1="14" y1="36" x2="50" y2="36"/><line class="base" x1="14" y1="42" x2="50" y2="42"/><line class="base" x1="14" y1="48" x2="50" y2="48"/><line class="base" x1="14" y1="20" x2="22" y2="14"/><line class="base" x1="50" y1="20" x2="42" y2="14"/><line class="base" x1="22" y1="14" x2="42" y2="14"/><path class="energy" d="M16 48 L50 24"/>
+</svg>

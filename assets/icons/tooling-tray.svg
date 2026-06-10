@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" aria-label="料盘托盘" role="img">
+  <defs>
+    <linearGradient id="energy" x1="12" y1="12" x2="52" y2="52" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7000FF"/>
+      <stop offset="1" stop-color="#00F0FF"/>
+    </linearGradient>
+    <style><![CDATA[
+      .base { stroke: #64748B; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+      .energy { stroke: url(#energy); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+      .dash { stroke-dasharray: 3 3; }
+      .fill-energy { fill: url(#energy); }
+      .fill-white { fill: #fff; }
+    ]]></style>
+  </defs>
+  <path class="base" d="M12 34 L32 22 L52 34 L32 46 Z"/><line class="base" x1="18" y1="38" x2="18" y2="46"/><line class="base" x1="46" y1="38" x2="46" y2="46"/><line class="base" x1="20" y1="46" x2="44" y2="46"/><line class="base" x1="22" y1="32" x2="42" y2="32"/><line class="base" x1="18" y1="36" x2="46" y2="36"/><path class="energy" d="M18 34 L46 34"/>
+</svg>

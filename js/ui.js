@@ -31,9 +31,9 @@ import {
     setPlacementRules, setCurrentFurnaceIndex,
     setGlobalFurnacesResult, setGlobalUnpackedItems, setGlobalSpacingValue,
     setToolingTemplates, setDefaultToolingType,
-    currentMaterialFilters, currentProcessFilters,
-    toggleMaterialFilter, toggleProcessFilter,
-    clearMaterialFilters, clearProcessFilters
+    currentMaterialFilters, currentProcessFilters, currentHardnessFilters,
+    toggleMaterialFilter, toggleProcessFilter, toggleHardnessFilter,
+    clearMaterialFilters, clearProcessFilters, clearHardnessFilters
 } from './state.js';
 import {
     generateUniqueColor,
@@ -703,11 +703,13 @@ export function renderAISummaryBar(onFurnaceClick) {
 export function renderFilterBars(onClearResults) {
     const materialContainer = document.getElementById('material-filter-tags');
     const processContainer = document.getElementById('process-filter-tags');
-    if (!materialContainer || !processContainer) return;
+    const hardnessContainer = document.getElementById('hardness-filter-tags');
+    if (!materialContainer || !processContainer || !hardnessContainer) return;
 
     // 统计材质和工艺数量
     const materialMap = new Map();   // 材质名 -> 数量
     const processMap = new Map();    // 工艺名 -> 数量
+    const hardnessMap = new Map();   // 硬度名 -> 数量
     let totalCards = 0;
 
     document.querySelectorAll('.material-card').forEach(card => {
@@ -716,6 +718,8 @@ export function renderFilterBars(onClearResults) {
         if (material) materialMap.set(material, (materialMap.get(material) || 0) + 1);
         const process = card.getAttribute('data-process');
         if (process) processMap.set(process, (processMap.get(process) || 0) + 1);
+        const hardness = card.getAttribute('data-hardness');
+        if (hardness) hardnessMap.set(hardness, (hardnessMap.get(hardness) || 0) + 1);
     });
 
     // 构建材质标签HTML
@@ -731,6 +735,13 @@ export function renderFilterBars(onClearResults) {
         processHtml += `<div class="filter-tag ${currentProcessFilters.has(proc) ? 'active' : ''}" data-type="process" data-filter="${proc.replace(/"/g, '&quot;')}">${escapeHtml(proc)} (${cnt})</div>`;
     }
     processContainer.innerHTML = processHtml;
+
+    // 构建硬度标签HTML
+    let hardnessHtml = `<div class="filter-tag ${currentHardnessFilters.size === 0 ? 'active' : ''}" data-type="hardness" data-filter="all">全部 (${totalCards})</div>`;
+    for (let [hard, cnt] of hardnessMap.entries()) {
+        hardnessHtml += `<div class="filter-tag ${currentHardnessFilters.has(hard) ? 'active' : ''}" data-type="hardness" data-filter="${hard.replace(/"/g, '&quot;')}">${escapeHtml(hard)} (${cnt})</div>`;
+    }
+    hardnessContainer.innerHTML = hardnessHtml;
 
     // 绑定点击事件
     materialContainer.querySelectorAll('.filter-tag').forEach(tag => {
@@ -753,6 +764,18 @@ export function renderFilterBars(onClearResults) {
                 clearProcessFilters();
             } else {
                 toggleProcessFilter(filterValue);
+            }
+            applyFilterAndClear(onClearResults);
+        });
+    });
+    hardnessContainer.querySelectorAll('.filter-tag').forEach(tag => {
+        tag.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const filterValue = tag.getAttribute('data-filter');
+            if (filterValue === 'all') {
+                clearHardnessFilters();
+            } else {
+                toggleHardnessFilter(filterValue);
             }
             applyFilterAndClear(onClearResults);
         });
@@ -804,6 +827,7 @@ function applyFilterAndClear(onClearResults) {
     document.querySelectorAll('.material-card').forEach(card => {
         const material = card.getAttribute('data-material');
         const process = card.getAttribute('data-process');
+        const hardness = card.getAttribute('data-hardness');
         const materialPass =
             currentMaterialFilters.size === 0 ||
             currentMaterialFilters.has(material);
@@ -812,7 +836,11 @@ function applyFilterAndClear(onClearResults) {
             currentProcessFilters.size === 0 ||
             currentProcessFilters.has(process);
 
-        card.style.display = materialPass && processPass ? 'flex' : 'none';
+        const hardnessPass =
+            currentHardnessFilters.size === 0 ||
+            currentHardnessFilters.has(hardness);
+
+        card.style.display = materialPass && processPass && hardnessPass ? 'flex' : 'none';
     });
 
     // 清空装炉结果
@@ -1065,7 +1093,7 @@ export function parseExcelData(workbook) {
 
 export function showImportPreview(data) { setImportPreviewData(data); const content = document.getElementById('import-preview-content'); let html = '<table class="import-table"><thead><tr><th>产品名称</th><th>客户</th><th>物料编码</th><th>形态</th><th>尺寸</th><th>数量</th><th>单重(kg)</th><th>材质</th><th>工艺</th><th>状态</th></tr></thead><tbody>'; data.forEach(d => { const dimStr = d.shape === 'cylinder' ? '⌀' + d.dim1 + '×H' + d.dim3 : d.dim1 + '×' + d.dim2 + '×' + d.dim3; const cls = d.valid ? '' : ' class="error"'; const displayName = d.showName || d.name.split('_')[0]; const customer = d.customer || ''; html += '<tr' + cls + '><td>' + displayName + '</td><td>' + customer + '</td><td>' + (d.itemCode || '') + '</td><td>' + (d.shape==='cylinder'?'圆柱':'立方') + '</td><td>' + dimStr + 'mm</td><td>' + d.count + '</td><td>' + d.weight + '</td><td>' + d.material + '</td><td>' + d.process + '</td><td>' + (d.valid?'✅':'⚠️ 尺寸不足') + '</td></tr>'; }); html += '</tbody></table>'; content.innerHTML = html; document.getElementById('import-preview-overlay').style.display = 'flex'; }
 
-export function applyImportData(replace) { if (replace) { document.querySelectorAll('.material-card').forEach(c => c.remove()); usedColors.clear(); clearMaterialFilters(); clearProcessFilters();} importPreviewData.filter(d => d.valid).forEach(d => { const color = generateUniqueColor(usedColors); createMaterialCard(d.name, d.shape, d.count, d.dim1, d.dim2, d.dim3, d.weight, color, { material: d.material, hardness: d.hardness, process: d.process, orderDate: d.orderDate, deliveryDate: d.deliveryDate, remark: d.remark, showName: d.showName, customer: d.customer, itemCode: d.itemCode }); }); updateTopSummary(); document.getElementById('import-preview-overlay').style.display = 'none'; renderFilterBars(window._clearFurnaceResults); applyFilterAndClear(window._clearFurnaceResults);}
+export function applyImportData(replace) { if (replace) { document.querySelectorAll('.material-card').forEach(c => c.remove()); usedColors.clear(); clearMaterialFilters(); clearProcessFilters(); clearHardnessFilters();} importPreviewData.filter(d => d.valid).forEach(d => { const color = generateUniqueColor(usedColors); createMaterialCard(d.name, d.shape, d.count, d.dim1, d.dim2, d.dim3, d.weight, color, { material: d.material, hardness: d.hardness, process: d.process, orderDate: d.orderDate, deliveryDate: d.deliveryDate, remark: d.remark, showName: d.showName, customer: d.customer, itemCode: d.itemCode }); }); updateTopSummary(); document.getElementById('import-preview-overlay').style.display = 'none'; renderFilterBars(window._clearFurnaceResults); applyFilterAndClear(window._clearFurnaceResults);}
 
 // ==================== JSON IMPORT (MASTER) ====================
 

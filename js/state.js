@@ -101,6 +101,7 @@ export let mdpCollapsed = false;
 // 材质和工艺之间是 AND
 export let currentMaterialFilters = new Set();
 export let currentProcessFilters = new Set();
+export let currentHardnessFilters = new Set();
 
 export function toggleMaterialFilter(value) {
     if (currentMaterialFilters.has(value)) {
@@ -116,6 +117,18 @@ export function toggleProcessFilter(value) {
     } else {
         currentProcessFilters.add(value);
     }
+}
+
+export function toggleHardnessFilter(value) {
+    if (currentHardnessFilters.has(value)) {
+        currentHardnessFilters.delete(value);
+    } else {
+        currentHardnessFilters.add(value);
+    }
+}
+
+export function clearHardnessFilters() {
+    currentHardnessFilters.clear();
 }
 
 export function clearMaterialFilters() {
@@ -229,6 +242,7 @@ export const furnaceTooling = {
     'special-jig': {
         toolingType: 'special-jig',
         label: '专用夹具',
+        deprecated: true,
         maxLayers: 2,
         allowedProcesses: [],
         placementMode: 'discrete_nodes',
@@ -263,6 +277,7 @@ export const furnaceTooling = {
     'hanger': {
         toolingType: 'hanger',
         label: '挂具',
+        deprecated: true,
         maxLayers: 1,
         allowedProcesses: ['淬火', '回火'],
         placementMode: 'discrete_nodes',
