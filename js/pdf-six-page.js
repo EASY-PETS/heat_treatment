@@ -597,7 +597,7 @@ function getStrategyDisplay() {
     const strategyKey = placementRules.strategy || 'balanced';
     const strategyMap = {
         balanced: {
-            name: '重心稳定 + 贴边对称',
+            name: '重心稳定',
             desc: '由外向内逐层填充，对称分布，重心居中'
         },
         spaceUtil: {

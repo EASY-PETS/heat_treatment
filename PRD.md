@@ -51,7 +51,7 @@
 * **重心居中嵌套 (Center-of-Gravity):** 针对高精密热处理，控制 $X, Z$ 轴的质心偏移率。
 
 
-* **装炉策略开关：** * 重心稳定 + 贴边对称 (`balanced`)
+* **装炉策略开关：** * 重心稳定 (`balanced`)
 * 空间利用率优先 (`spaceUtil`)
 * 热场均衡装载 (`thermalBalance`)
 * 表面均匀性优先 (`surfaceUniform`)

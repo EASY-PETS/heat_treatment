@@ -1261,8 +1261,6 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
         const itemCX = testX + iw / 2;
         const itemCZ = testZ + id_ / 2;
 
-        console.log('[评分] 当前策略:', strategy);
-
         // 1. 重心偏差得分（XZ平面）
         let cgScore = 0;
         if (cfg.weights.cgDeviation > 0) {
@@ -1381,39 +1379,143 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
             thermalScore = penalty * cfg.weights.thermalEvenness;
         }
 
-        // 7. 表面均匀性得分（暴露面积、避免遮挡）
+        // 7. 表面均匀性得分：均匀间距 + 气流无遮挡 + 不贴壁
         let surfaceScore = 0;
-        if (cfg.weights.surfaceExposure > 0) {
+
+        if (strategy === PackingStrategy.SURFACE_UNIFORM) {
+            const rules = cfg.specialRules || {};
+
+            const targetSpacing = rules.targetSpacing ?? 80;
+            const minWallMargin = rules.minWallMargin ?? 60;
+            const maxWallMargin = rules.maxWallMargin ?? Math.min(fw, fd) * 0.4;
+
+            const spacingPenaltyWeight = rules.spacingPenaltyWeight ?? 18;
+            const wallMarginPenaltyWeight = rules.wallMarginPenaltyWeight ?? 12;
+
+            const shadowOverlapRatio = rules.shadowOverlapRatio ?? 0.35;
+            const shadowClearance = rules.shadowClearance ?? 220;
+            const airflowShadowPenalty = rules.airflowShadowPenalty ?? 2600;
+
+            const distLeft = testX;
+            const distRight = fw - (testX + iw);
+            const distFront = testZ;
+            const distBack = fd - (testZ + id_);
+
+            const minDistToWall = Math.min(
+                distLeft,
+                distRight,
+                distFront,
+                distBack
+            );
+
+            // 1. 边界距离评分：不要贴壁，也不要全部挤到中心
+            if (minDistToWall < minWallMargin) {
+                surfaceScore += (minWallMargin - minDistToWall) * wallMarginPenaltyWeight;
+            }
+
+            if (minDistToWall > maxWallMargin) {
+                surfaceScore += (minDistToWall - maxWallMargin) * wallMarginPenaltyWeight * 0.5;
+            }
+
+            // 2. 工件间距评分：距离太近严重惩罚
+            for (const p of layerItems) {
+                const pw = p.w_algo || p.w;
+                const pd = p.d_algo || p.d;
+
+                const dxGap = Math.max(
+                    0,
+                    Math.max(
+                        p.x - (testX + iw),
+                        testX - (p.x + pw)
+                    )
+                );
+
+                const dzGap = Math.max(
+                    0,
+                    Math.max(
+                        p.z - (testZ + id_),
+                        testZ - (p.z + pd)
+                    )
+                );
+
+                const gap = Math.hypot(dxGap, dzGap);
+
+                if (gap < targetSpacing) {
+                    surfaceScore += (targetSpacing - gap) * spacingPenaltyWeight;
+                }
+
+                // 3. Z 轴气流遮挡评分
+                // 如果 X 方向重叠太多，同时 Z 方向前后距离又不够，
+                // 说明两个工件处于同一条气流通道上，容易前后遮挡。
+                const overlapX = Math.max(
+                    0,
+                    Math.min(testX + iw, p.x + pw) - Math.max(testX, p.x)
+                );
+
+                const overlapRatioX = overlapX / Math.max(1, Math.min(iw, pw));
+
+                const centerZ1 = testZ + id_ / 2;
+                const centerZ2 = p.z + pd / 2;
+                const zCenterDistance = Math.abs(centerZ1 - centerZ2);
+
+                if (
+                    overlapRatioX > shadowOverlapRatio &&
+                    zCenterDistance < shadowClearance
+                ) {
+                    surfaceScore += overlapRatioX * airflowShadowPenalty;
+                }
+
+                // 4. 面贴面 / 过度邻接惩罚
+                // 表面处理模式下，不希望工件大面积贴合。
+                if (gap < 2) {
+                    surfaceScore += 2000;
+                }
+            }
+
+            surfaceScore *= cfg.weights.surfaceExposure || 1;
+        } else if (cfg.weights.surfaceExposure > 0) {
+            // 其他策略暂时保留旧逻辑，避免影响已有模式
             let exposure = 0;
-            // 到四壁距离（归一化）
+
             const distLeft = testX;
             const distRight = fw - (testX + iw);
             const distFront = testZ;
             const distBack = fd - (testZ + id_);
             const minDistToWall = Math.min(distLeft, distRight, distFront, distBack);
-            exposure += minDistToWall / 100; // 距离越大暴露越好
-            // 遮挡惩罚：其他工件在Z轴方向遮挡气流路径（简化）
+
+            exposure += minDistToWall / 100;
+
             for (const p of layerItems) {
-                const pCX = p.x + p.w/2;
-                const pCZ = p.z + p.d/2;
+                const pCX = p.x + p.w / 2;
+                const pCZ = p.z + p.d / 2;
                 const dz = Math.abs(pCZ - itemCZ);
                 const dx = Math.abs(pCX - itemCX);
+
                 if (dz < 50 && dx > iw) {
                     exposure -= 2;
                 }
             }
-            // 等壁距奖励
+
             if (cfg.specialRules.equalWallDistance) {
                 const meanDist = (distLeft + distRight + distFront + distBack) / 4;
-                const variance = ((distLeft-meanDist)**2 + (distRight-meanDist)**2 + (distFront-meanDist)**2 + (distBack-meanDist)**2) / 4;
-                if (variance < 1000) exposure += 2; // 距离均匀
+                const variance =
+                    ((distLeft - meanDist) ** 2 +
+                    (distRight - meanDist) ** 2 +
+                    (distFront - meanDist) ** 2 +
+                    (distBack - meanDist) ** 2) / 4;
+
+                if (variance < 1000) exposure += 2;
             }
+
             surfaceScore = -exposure * 500 * cfg.weights.surfaceExposure;
         }
 
         // 8. 四角均衡评分（基于包围盒距离 + 工件计数）
         let cornerScore = 0;
-        if (cfg.weights.cornerSpread > 0) {
+
+        // 注意：重心稳定模式不使用 cornerSpread
+        // 否则会导致“四个角各堆一坨”
+        if (strategy !== PackingStrategy.BALANCED && cfg.weights.cornerSpread > 0) {
             const fw = furnaceConfig.w;
             const fd = furnaceConfig.d;
             // 定义四个角坐标（左下、右下、左上、右上）
@@ -1494,20 +1596,229 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
             const distToBack = fd - (testZ + id_);
             const minDistToWall = Math.min(distToLeft, distToRight, distToFront, distToBack);
             // 原始奖励：距离越小，奖励越大（负分）
-            let rawLayerReward = -minDistToWall;   // 例如距离 0 → 0 分，距离 100 → -100 分
+            let rawLayerReward;
+
+            if (strategy === PackingStrategy.BALANCED) {
+                // 重心稳定模式：强奖励外圈，但不是四角优先
+                // minDistToWall 越小，说明越贴边，奖励越强
+                const maxOuterDistance = Math.min(fw, fd) / 2;
+                rawLayerReward = -Math.max(0, maxOuterDistance - minDistToWall);
+            } else {
+                // 其他模式保持原逻辑，避免影响空间利用率、热场均衡、表面均匀性
+                rawLayerReward = -minDistToWall;
+            }
+            
             // 工件数量衰减：已放置工件越多，外层优先级越低
             let layerWeight = cfg.weights.layerPriority;
             if (cfg.specialRules.layerDecayWithItems) {
                 const totalItems = layerItems.length;
-                const decay = Math.min(1, totalItems / 12); // 12 个工件后衰减至 0
+
+                // BALANCED 模式外圈优先衰减慢一点：
+                // 前期贴边，中期外圈连续，后期才向中心收缩
+                const decayLimit = strategy === PackingStrategy.BALANCED ? 30 : 12;
+
+                const decay = Math.min(1, totalItems / decayLimit);
                 layerWeight = layerWeight * Math.max(0, 1 - decay);
             }
             layerScore = rawLayerReward * layerWeight;
         }
 
+        // 11. BALANCED 专用：四边均衡评分
+        // 目的：避免只形成“左上 + 右下”两坨，引导工件分布到四条边
+        let sideBalanceScore = 0;
+
+        if (strategy === PackingStrategy.BALANCED && layerItems.length > 0 && layerItems.length < 28 ) {
+            function getNearestSide(x, z, w, d) {
+                const distLeft = x;
+                const distRight = fw - (x + w);
+                const distFront = z;
+                const distBack = fd - (z + d);
+
+                const minDist = Math.min(distLeft, distRight, distFront, distBack);
+
+                if (minDist === distLeft) return 'left';
+                if (minDist === distRight) return 'right';
+                if (minDist === distFront) return 'front';
+                return 'back';
+            }
+
+            const sideCounts = {
+                left: 0,
+                right: 0,
+                front: 0,
+                back: 0
+            };
+
+            for (const p of layerItems) {
+                const side = getNearestSide(
+                    p.x,
+                    p.z,
+                    p.w_algo || p.w,
+                    p.d_algo || p.d
+                );
+                sideCounts[side]++;
+            }
+
+            const candidateSide = getNearestSide(testX, testZ, iw, id_);
+
+            const minSideCount = Math.min(
+                sideCounts.left,
+                sideCounts.right,
+                sideCounts.front,
+                sideCounts.back
+            );
+
+            // 如果候选位置所在边已经放了很多，就加惩罚
+            // 如果候选位置在当前较空的边，就分数更低，更容易被选中
+            sideBalanceScore = (sideCounts[candidateSide] - minSideCount) * 180;
+        }
+
+        // 12. BALANCED 专用：角落惩罚
+        // 目的：允许贴边，但避免继续堆在四个角落
+        let cornerAvoidanceScore = 0;
+
+        if (strategy === PackingStrategy.BALANCED) {
+            const cornerAvoidRadius = 160;
+
+            const corners = [
+                { x: 0,  z: 0 },
+                { x: fw, z: 0 },
+                { x: 0,  z: fd },
+                { x: fw, z: fd }
+            ];
+
+            function boxDistanceToPoint(px, pz) {
+                const left = testX;
+                const right = testX + iw;
+                const front = testZ;
+                const back = testZ + id_;
+
+                const dx = Math.max(left - px, 0, px - right);
+                const dz = Math.max(front - pz, 0, pz - back);
+
+                return Math.hypot(dx, dz);
+            }
+
+            let nearestCornerDist = Infinity;
+
+            for (const c of corners) {
+                nearestCornerDist = Math.min(
+                    nearestCornerDist,
+                    boxDistanceToPoint(c.x, c.z)
+                );
+            }
+
+            if (nearestCornerDist < cornerAvoidRadius) {
+                cornerAvoidanceScore = (cornerAvoidRadius - nearestCornerDist) * 10;
+            }
+        }
+
+        // 13. BALANCED 专用：同边连续奖励
+        // 目的：四边播种完成后，优先沿同一条边连续扩展，而不是不断开新块
+        let sideContinuityScore = 0;
+
+        if (strategy === PackingStrategy.BALANCED && layerItems.length >= 8) {
+            const outerBandWidth = Math.min(fw, fd) * 0.22;
+
+            function getNearestSideForContinuity(x, z, w, d) {
+                const distLeft = x;
+                const distRight = fw - (x + w);
+                const distFront = z;
+                const distBack = fd - (z + d);
+
+                const minDist = Math.min(distLeft, distRight, distFront, distBack);
+
+                if (minDist === distLeft) return 'left';
+                if (minDist === distRight) return 'right';
+                if (minDist === distFront) return 'front';
+                return 'back';
+            }
+
+            const candidateMinWallDist = Math.min(
+                testX,
+                fw - (testX + iw),
+                testZ,
+                fd - (testZ + id_)
+            );
+
+            // 只有候选点仍在外圈时，才允许同边连续奖励
+            if (candidateMinWallDist <= outerBandWidth) {
+                const candidateSide = getNearestSideForContinuity(testX, testZ, iw, id_);
+
+                let bestGap = Infinity;
+
+                const sideCounts = {
+                    left: 0,
+                    right: 0,
+                    front: 0,
+                    back: 0
+                };
+
+                for (const p of layerItems) {
+                    const pw = p.w_algo || p.w;
+                    const pd = p.d_algo || p.d;
+
+                    const pSide = getNearestSideForContinuity(
+                        p.x,
+                        p.z,
+                        pw,
+                        pd
+                    );
+
+                    sideCounts[pSide]++;
+
+                    if (pSide !== candidateSide) continue;
+
+                    const dx = Math.max(
+                        0,
+                        Math.max(
+                            p.x - (testX + iw),
+                            testX - (p.x + pw)
+                        )
+                    );
+
+                    const dz = Math.max(
+                        0,
+                        Math.max(
+                            p.z - (testZ + id_),
+                            testZ - (p.z + pd)
+                        )
+                    );
+
+                    const gap = Math.hypot(dx, dz);
+                    bestGap = Math.min(bestGap, gap);
+                }
+
+                // 1. 同边贴合奖励：鼓励沿同一条边连续长出来
+                const minSideCount = Math.min(
+                    sideCounts.left,
+                    sideCounts.right,
+                    sideCounts.front,
+                    sideCounts.back
+                );
+
+                // 四条边至少各有 2 个工件之前，不给强连续奖励
+                // 否则会像现在这样，上下左先长大，右边迟迟不启动
+                if (minSideCount >= 2) {
+                    if (bestGap < 2) {
+                        sideContinuityScore -= 1200;
+                    } else if (bestGap < 80) {
+                        sideContinuityScore -= 600;
+                    }
+                }
+
+                // 仍然保留轻微补弱边逻辑
+                sideContinuityScore += (sideCounts[candidateSide] - minSideCount) * 80;
+
+                if (sideCounts[candidateSide] === minSideCount) {
+                    sideContinuityScore -= 300;
+                }
+            }
+        }
+
         // 最后将 cornerScore 加入总分
         return cgScore + centerDistScore + edgeScore + symmetryScore + isolationScore + thermalScore +
-            surfaceScore + cornerScore + spacingPenalty + layerScore;
+            surfaceScore + cornerScore + spacingPenalty + layerScore + sideBalanceScore + cornerAvoidanceScore + sideContinuityScore;
     }
 
     const currentStrategy = strategy;
@@ -1545,7 +1856,7 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
             const zRange = fd - id_;
             if (xRange < 0 || zRange < 0) continue;
 
-            const candidates = [];
+            let candidates = [];
             const seen = new Set();
 
             function addCandidate(x, z) {
@@ -1568,29 +1879,177 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
             }
 
             // 中心密集采样
-            const denseHalf = Math.min(fw, fd) / 5;
-            const denseStep = Math.max(10, Math.floor(Math.min(xRange, zRange) / 25));
-            for (let x = Math.max(0, centerX - iw / 2 - denseHalf); x <= Math.min(xRange, centerX - iw / 2 + denseHalf); x += denseStep) {
-                for (let z = Math.max(0, centerZ - id_ / 2 - denseHalf); z <= Math.min(zRange, centerZ - id_ / 2 + denseHalf); z += denseStep) {
-                    addCandidate(x, z);
+            // 表面均匀性模式不做中心密集采样，避免工件提前聚集到中心区域
+            if (currentStrategy !== PackingStrategy.SURFACE_UNIFORM) {
+                const denseHalf = Math.min(fw, fd) / 5;
+                const denseStep = Math.max(10, Math.floor(Math.min(xRange, zRange) / 25));
+
+                for (
+                    let x = Math.max(0, centerX - iw / 2 - denseHalf);
+                    x <= Math.min(xRange, centerX - iw / 2 + denseHalf);
+                    x += denseStep
+                ) {
+                    for (
+                        let z = Math.max(0, centerZ - id_ / 2 - denseHalf);
+                        z <= Math.min(zRange, centerZ - id_ / 2 + denseHalf);
+                        z += denseStep
+                    ) {
+                        addCandidate(x, z);
+                    }
                 }
             }
 
             // 已放置工件邻接
-            for (const p of layerItems) {
-                addCandidate(p.x + p.w_algo, p.z);
-                addCandidate(p.x - iw, p.z);
-                addCandidate(p.x, p.z + p.d_algo);
-                addCandidate(p.x, p.z - id_);
-                addCandidate(p.x + p.w_algo, p.z + p.d_algo);
-                addCandidate(p.x - iw, p.z - id_);
+            if (currentStrategy === PackingStrategy.SURFACE_UNIFORM) {
+                const surfaceCfg =
+                    strategyConfig[PackingStrategy.SURFACE_UNIFORM] ||
+                    strategyConfig[currentStrategy];
+
+                const rules = surfaceCfg.specialRules || {};
+
+                const targetSpacing = rules.targetSpacing ?? 80;
+                const wallMargin = rules.minWallMargin ?? 60;
+
+                // 表面模式：生成“有间距”的候选点，而不是贴合候选点
+                const pitchX = Math.max(iw + targetSpacing, 80);
+                const pitchZ = Math.max(id_ + targetSpacing, 80);
+
+                let rowIndex = 0;
+
+                for (
+                    let z = wallMargin;
+                    z <= zRange - wallMargin;
+                    z += pitchZ
+                ) {
+                    const offsetX = rowIndex % 2 === 0 ? 0 : pitchX / 2;
+
+                    for (
+                        let x = wallMargin + offsetX;
+                        x <= xRange - wallMargin;
+                        x += pitchX
+                    ) {
+                        addCandidate(x, z);
+                    }
+
+                    rowIndex++;
+                }
+
+                // 沿四周保留一圈“非贴壁”的候选点
+                // 注意：这里不是贴壁，而是离墙 wallMargin 的气流通道布局
+                const ratios = [0.2, 0.4, 0.6, 0.8];
+
+                for (const r of ratios) {
+                    addCandidate(Math.round(xRange * r), wallMargin);
+                    addCandidate(Math.round(xRange * r), zRange - wallMargin);
+
+                    addCandidate(wallMargin, Math.round(zRange * r));
+                    addCandidate(xRange - wallMargin, Math.round(zRange * r));
+                }
+
+            } else {
+                // 其他模式继续使用原来的邻接候选
+                for (const p of layerItems) {
+                    addCandidate(p.x + p.w_algo, p.z);
+                    addCandidate(p.x - iw, p.z);
+                    addCandidate(p.x, p.z + p.d_algo);
+                    addCandidate(p.x, p.z - id_);
+                    addCandidate(p.x + p.w_algo, p.z + p.d_algo);
+                    addCandidate(p.x - iw, p.z - id_);
+                }
             }
 
             // 炉壁贴合
-            addCandidate(0, 0);
-            addCandidate(xRange, 0);
-            addCandidate(0, zRange);
-            addCandidate(xRange, zRange);
+            // 表面均匀性模式不贴壁，改成“离壁留气流通道”
+            if (currentStrategy === PackingStrategy.SURFACE_UNIFORM) {
+                const surfaceCfg =
+                    strategyConfig[PackingStrategy.SURFACE_UNIFORM] ||
+                    strategyConfig[currentStrategy];
+
+                const wallMargin =
+                    surfaceCfg.specialRules?.minWallMargin ?? 60;
+
+                addCandidate(wallMargin, wallMargin);
+                addCandidate(xRange - wallMargin, wallMargin);
+                addCandidate(wallMargin, zRange - wallMargin);
+                addCandidate(xRange - wallMargin, zRange - wallMargin);
+            } else {
+                addCandidate(0, 0);
+                addCandidate(xRange, 0);
+                addCandidate(0, zRange);
+                addCandidate(xRange, zRange);
+            }
+            // BALANCED 模式：前期强制只在外圈候选点中选择
+            // 目的：避免还没形成外圈，就提前向中心连接
+            if (currentStrategy === PackingStrategy.BALANCED && layerItems.length < 36) {
+                const outerBandWidth = Math.min(fw, fd) * 0.22;
+
+                const edgeCandidates = candidates.filter(c => {
+                    const minDistToWall = Math.min(
+                        c.x,
+                        fw - (c.x + iw),
+                        c.z,
+                        fd - (c.z + id_)
+                    );
+
+                    return minDistToWall <= outerBandWidth;
+                });
+
+                // 保留兜底：如果外圈候选点为空，就不强制过滤，避免完全放不下
+                if (edgeCandidates.length > 0) {
+                    candidates = edgeCandidates;
+                }
+            }
+
+            // BALANCED 模式：补充四边中段候选点
+            // 目的：让算法优先有机会选择“边中段”，而不是只能从四角开始扩展
+            if (currentStrategy === PackingStrategy.BALANCED && layerItems.length < 24) {
+                const sideRatios = [0.25, 0.5, 0.75];
+
+                for (const r of sideRatios) {
+                    // 前后两条边
+                    addCandidate(Math.round(xRange * r), 0);
+                    addCandidate(Math.round(xRange * r), zRange);
+
+                    // 左右两条边
+                    addCandidate(0, Math.round(zRange * r));
+                    addCandidate(xRange, Math.round(zRange * r));
+                }
+            }
+
+            // BALANCED 模式：候选点先按“外圈优先”排序。
+            // 注意：最终仍由评分函数决定，这里只是让同分/近似同分时更稳定。
+            if (currentStrategy === PackingStrategy.BALANCED) {
+                candidates.sort((a, b) => {
+                    const edgeA = Math.min(
+                        a.x,
+                        fw - (a.x + iw),
+                        a.z,
+                        fd - (a.z + id_)
+                    );
+
+                    const edgeB = Math.min(
+                        b.x,
+                        fw - (b.x + iw),
+                        b.z,
+                        fd - (b.z + id_)
+                    );
+
+                    if (edgeA !== edgeB) return edgeA - edgeB;
+
+                    // 同样贴边时，优先选择更接近中心轴的点，减少只堆角落
+                    const centerA = Math.hypot(
+                        a.x + iw / 2 - centerX,
+                        a.z + id_ / 2 - centerZ
+                    );
+
+                    const centerB = Math.hypot(
+                        b.x + iw / 2 - centerX,
+                        b.z + id_ / 2 - centerZ
+                    );
+
+                    return centerA - centerB;
+                });
+            }
 
             // 碰撞检测 + 评分
             for (const cand of candidates) {
