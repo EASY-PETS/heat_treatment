@@ -125,7 +125,9 @@ function executeAndRender() {
         });
     });
 
-    const spacing = parseFloat(document.getElementById("global-spacing").value || 0);
+    // 全局安全间距已取消，保留 5mm 作为系统兜底值。
+    // 实际装炉优先使用每个工装自己的 actualSpacing。
+    const spacing = 5;
     setGlobalSpacingValue(spacing);
 
     /**

@@ -119,7 +119,8 @@ export function createFurnaceCard(name, depth, width, height, maxWeight, count, 
     const card = document.createElement('div');
     card.className = 'furnace-card'; card.id = cardId;
     card.setAttribute('data-fid', newFC);
-    if (actualSpacing !== undefined && actualSpacing !== null) card.setAttribute('data-spacing', actualSpacing);
+    const spacingToUse = actualSpacing !== undefined && actualSpacing !== null ? actualSpacing : 5;
+    card.setAttribute('data-spacing', spacingToUse);
     card.setAttribute('data-basket-type', basketType || 'grid');
     /** V4.8: 存储工装类型及相关参数 */
     const tt = toolingType || defaultToolingType;
@@ -232,10 +233,7 @@ let html =
     '</div>' +
 
     '<div class="fdp-row">' +
-        '<div class="fdp-field">' +
-            '<label>实际安全间距 (mm) <span style="color:#666;font-size:9px;">留空=用默认</span></label>' +
-            '<input type="number" id="fdp-spacing" value="' + (d.actualSpacing != null ? d.actualSpacing : '') + '" placeholder="默认用全局间距">' +
-        '</div>' +
+        '<div class="fdp-field"><label>安全间距 (mm) <span style="color:#666;font-size:9px;">不填=5mm</span></label><input type="number" id="fdp-spacing" value="' + (d.actualSpacing != null ? d.actualSpacing : '') + '" placeholder="默认 5mm"></div>' +
     '</div>';
 
     // 3. 动态插入该工装专属的扩展属性
@@ -283,7 +281,7 @@ export function saveFurnaceDetail(cardId) {
     const count = parseInt(document.getElementById('fdp-count').value) || 1;
     const plannedHeats = 0;
     const spacingVal = document.getElementById('fdp-spacing').value;
-    const actualSpacing = spacingVal !== '' ? parseFloat(spacingVal) : null;
+    const actualSpacing = spacingVal !== '' ? parseFloat(spacingVal) : 5;
 
     // 删除原本在这里读取 fdp-tooling-type、fdp-max-layers、fdp-basket-type 等等赋值给 setAttribute 的几十行代码
     // ----- 新增：根据不同工装类型保存其专属参数 -----
@@ -1023,7 +1021,10 @@ export function saveRulesModal() {
         discFlipRatio: parseFloat(document.getElementById('rule-disc-flip-ratio').value) || 1.0,
         centerOfGravity: true                   // 重心居中已固化，勾选搁板时无条件执行
     });
-    document.getElementById('global-spacing').value = placementRules.minSpacing;
+    const globalSpacingInput = document.getElementById('global-spacing');
+    if (globalSpacingInput) {
+        globalSpacingInput.value = placementRules.minSpacing;
+    }
     document.getElementById('rules-modal-overlay').style.display = 'none';
     
     const btn = document.getElementById('btn-rules'); const orig = btn.textContent;
