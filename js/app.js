@@ -472,18 +472,6 @@ function init() {
         e.stopPropagation();
         deleteMaterialCard(parseInt(btn.getAttribute("data-mid")));
     });
-    document.getElementById("furnace-cards-container").addEventListener("dblclick", (e) => {
-        const card = e.target.closest(".furnace-card");
-        if (!card) return;
-        selectFurnaceCard(card.id);
-        showFurnaceDetail(card.id);
-    });
-    document.getElementById("material-cards-container").addEventListener("dblclick", (e) => {
-        const card = e.target.closest(".material-card");
-        if (!card) return;
-        selectMaterialCard(card.id);
-        showMaterialDetail(card.id);
-    });
     document.getElementById("btn-add-item").addEventListener("click", () => {
         const color = generateUniqueColor(usedColors);
         createMaterialCard("新工件批次", "cuboid", 50, 150, 150, 60, 10, color);

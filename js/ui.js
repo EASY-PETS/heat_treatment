@@ -138,7 +138,7 @@ export function createFurnaceCard(name, depth, width, height, maxWeight, count, 
         '<span>📦 可用数量 ' + count + '</span>' +
         '<span>⚖ ' + maxWeight + 'kg</span>' +
     '</div>' +
-    '<div class="f-card-status">' + ttConfig.label + ' · 点击查看详情 · 双击编辑</div>';
+    '<div class="f-card-status">' + ttConfig.label + ' · 点击选择 · 再次点击取消</div>';
     // card.addEventListener('click', (e) => { if (e.target.closest('[data-action="delete-furnace"]')) return; if (e.target.closest('.f-drag-handle')) return; selectFurnaceCard(cardId); showFurnaceDetail(cardId); });
     card.addEventListener('click', (e) => { 
             if (e.target.closest('[data-action="delete-furnace"]')) return; 
@@ -339,7 +339,7 @@ export function saveFurnaceDetail(cardId) {
     // 卡片底部标签依然从原始的 data 属性读取（由添加工装时决定）
     // const tt = card.getAttribute('data-tooling-type') || 'standard-basket';
     const ttCfg = furnaceTooling[tt] || { label: '标准料框' };
-    card.querySelector('.f-card-status').textContent = ttCfg.label + ' · 点击查看详情 · 双击编辑';
+    card.querySelector('.f-card-status').textContent = ttCfg.label + ' · 点击选择 · 再次点击取消';
     
     if (actualSpacing !== null) card.setAttribute('data-spacing', actualSpacing); else card.removeAttribute('data-spacing');
     document.getElementById('fdp-title').textContent = '📋 ' + name; updateTopSummary();
