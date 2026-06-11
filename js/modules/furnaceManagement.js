@@ -133,7 +133,7 @@ export class FurnaceManagement {
             html += numberBadge;
             html += '<div class="priority-info">';
             html += '<span class="priority-name">' + fName + '</span>';
-            html += '<span class="priority-dims">' + Math.round(fData.width) + ' × ' + Math.round(fData.height) + ' × ' + Math.round(fData.depth) + ' · ' + instanceCount + '台</span>';
+            html += '<span class="priority-dims">' + Math.round(fData.width) + ' × ' + Math.round(fData.height) + ' × ' + Math.round(fData.depth) + ' · ' + instanceCount + '可用数量</span>';
             html += '</div>';
             html += priorityLabel;
             html += '</div>';

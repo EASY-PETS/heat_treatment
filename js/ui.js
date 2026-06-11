@@ -46,12 +46,13 @@ export function getFurnaceDataFromCard(card) {
     const metaSpans = card.querySelectorAll('.f-card-meta span');
     const dimSpan = metaSpans[0] ? metaSpans[0].textContent.replace('📐 ', '') : '0×0×0';
     const dims = dimSpan.split('×');
-    const countText = metaSpans[1] ? metaSpans[1].textContent : '×1台';
+    const countText = metaSpans[1] ? metaSpans[1].textContent : '可用数量 1';
     const count = parseInt(countText.replace(/[^0-9]/g, '')) || 1;
     const weightText = metaSpans[2] ? metaSpans[2].textContent : '0kg';
     const maxWeight = parseFloat(weightText.replace(/[^0-9.]/g, '')) || 0;
-    const plannedText = metaSpans[3] ? metaSpans[3].textContent : '计划0炉';
-    const plannedHeats = parseInt(plannedText.replace(/[^0-9]/g, '')) || 0;
+    // plannedHeats 是早期 Demo 字段，目前不参与算法，固定为 0 保持兼容
+    const plannedHeats = 0;
+
     const spacingText = card.getAttribute('data-spacing') || '';
     const actualSpacing = spacingText !== '' ? parseFloat(spacingText) : null;
     /**
@@ -106,7 +107,7 @@ export function getMaterialDataFromCard(card) {
  * @param {number} width - 宽度 X (mm)
  * @param {number} height - 高度 Y (mm)
  * @param {number} maxWeight - 承重上限 (kg)
- * @param {number} count - 台数
+ * @param {number} count - 可用数量
  * @param {number} plannedHeats - 计划装载炉次
  * @param {number|null} actualSpacing - 实际安全间距
  * @param {string} basketType - 料框类型 ('grid'|'honeycomb'|'tray'|'solid')，默认 'grid'
@@ -127,8 +128,16 @@ export function createFurnaceCard(name, depth, width, height, maxWeight, count, 
     card.setAttribute('data-max-layers', ttConfig.maxLayers);
     card.setAttribute('data-allowed-processes', (ttConfig.allowedProcesses || []).join(','));
     card.setAttribute('data-placement-mode', ttConfig.placementMode);
-    const ph = plannedHeats || 0;
-    card.innerHTML = '<span class="f-drag-handle" draggable="true" title="拖拽排序">⠿</span><button class="f-card-delete" data-action="delete-furnace" data-fid="' + newFC + '">✕</button><div class="f-card-name">' + name + '</div><div class="f-card-meta"><span>📐 ' + width + '×' + height + '×' + depth + '</span><span>📦 ×' + count + '台</span><span>⚖ ' + maxWeight + 'kg</span><span>计划' + ph + '炉</span></div><div class="f-card-status">' + ttConfig.label + ' · 点击查看详情 · 双击编辑</div>';
+    card.innerHTML =
+    '<span class="f-drag-handle" draggable="true" title="拖拽排序">⠿</span>' +
+    '<button class="f-card-delete" data-action="delete-furnace" data-fid="' + newFC + '">✕</button>' +
+    '<div class="f-card-name">' + name + '</div>' +
+    '<div class="f-card-meta">' +
+        '<span>📐 ' + width + '×' + height + '×' + depth + '</span>' +
+        '<span>📦 可用数量 ' + count + '</span>' +
+        '<span>⚖ ' + maxWeight + 'kg</span>' +
+    '</div>' +
+    '<div class="f-card-status">' + ttConfig.label + ' · 点击查看详情 · 双击编辑</div>';
     // card.addEventListener('click', (e) => { if (e.target.closest('[data-action="delete-furnace"]')) return; if (e.target.closest('.f-drag-handle')) return; selectFurnaceCard(cardId); showFurnaceDetail(cardId); });
     card.addEventListener('click', (e) => { 
             if (e.target.closest('[data-action="delete-furnace"]')) return; 
@@ -151,7 +160,7 @@ export function createFurnaceCard(name, depth, width, height, maxWeight, count, 
         });
     setupFurnaceDrag(card);
     document.getElementById('furnace-cards-container').appendChild(card);
-    return { cardId, furnaceCounter: newFC, name, depth, width, height, maxWeight, count, plannedHeats: ph, basketType: basketType || 'grid', toolingType: tt };
+    return { cardId, furnaceCounter: newFC, name, depth, width, height, maxWeight, count, plannedHeats: 0, basketType: basketType || 'grid', toolingType: tt };
 }
 
 // export function selectFurnaceCard(cardId) { document.querySelectorAll('.furnace-card').forEach(c => c.classList.remove('active')); const card = document.getElementById(cardId); if (card) { card.classList.add('active'); setSelectedFurnaceCardId(cardId); } }
@@ -187,11 +196,47 @@ export function showFurnaceDetail(cardId) {
     }
 
     // 2. 基础物理属性面板
-    let html =
-        '<div class="fdp-row"><div class="fdp-field"><label>名称</label><input type="text" id="fdp-name" value="' + d.name + '"></div></div>' +
-        '<div class="fdp-row"><div class="fdp-field"><label>' + labelW + '</label><input type="number" id="fdp-width" value="' + d.width + '"></div><div class="fdp-field"><label>高度 Y (mm)</label><input type="number" id="fdp-height" value="' + d.height + '"></div><div class="fdp-field"><label>' + labelD + '</label><input type="number" id="fdp-depth" value="' + d.depth + '"></div></div>' +
-        '<div class="fdp-row"><div class="fdp-field"><label>承重上限 (kg)</label><input type="number" id="fdp-weight" value="' + d.maxWeight + '"></div><div class="fdp-field"><label>台数</label><input type="number" id="fdp-count" value="' + d.count + '" min="1"></div></div>' +
-        '<div class="fdp-row"><div class="fdp-field"><label>计划装载炉次</label><input type="number" id="fdp-planned" value="' + d.plannedHeats + '" min="0"></div><div class="fdp-field"><label>实际安全间距 (mm) <span style="color:#666;font-size:9px;">留空=用默认</span></label><input type="number" id="fdp-spacing" value="' + (d.actualSpacing != null ? d.actualSpacing : '') + '" placeholder="默认用全局间距"></div></div>';
+// 2. 基础物理属性面板
+let html =
+    '<div class="fdp-row">' +
+        '<div class="fdp-field">' +
+            '<label>名称</label>' +
+            '<input type="text" id="fdp-name" value="' + d.name + '">' +
+        '</div>' +
+    '</div>' +
+
+    '<div class="fdp-row">' +
+        '<div class="fdp-field">' +
+            '<label>' + labelW + '</label>' +
+            '<input type="number" id="fdp-width" value="' + d.width + '">' +
+        '</div>' +
+        '<div class="fdp-field">' +
+            '<label>高度 Y (mm)</label>' +
+            '<input type="number" id="fdp-height" value="' + d.height + '">' +
+        '</div>' +
+        '<div class="fdp-field">' +
+            '<label>' + labelD + '</label>' +
+            '<input type="number" id="fdp-depth" value="' + d.depth + '">' +
+        '</div>' +
+    '</div>' +
+
+    '<div class="fdp-row">' +
+        '<div class="fdp-field">' +
+            '<label>承重上限 (kg)</label>' +
+            '<input type="number" id="fdp-weight" value="' + d.maxWeight + '">' +
+        '</div>' +
+        '<div class="fdp-field">' +
+            '<label>可用数量</label>' +
+            '<input type="number" id="fdp-count" value="' + d.count + '" min="1">' +
+        '</div>' +
+    '</div>' +
+
+    '<div class="fdp-row">' +
+        '<div class="fdp-field">' +
+            '<label>实际安全间距 (mm) <span style="color:#666;font-size:9px;">留空=用默认</span></label>' +
+            '<input type="number" id="fdp-spacing" value="' + (d.actualSpacing != null ? d.actualSpacing : '') + '" placeholder="默认用全局间距">' +
+        '</div>' +
+    '</div>';
 
     // 3. 动态插入该工装专属的扩展属性
     const ex = d.extras || {};
@@ -236,7 +281,7 @@ export function saveFurnaceDetail(cardId) {
     const depth = parseFloat(document.getElementById('fdp-depth').value) || 0;
     const maxWeight = parseFloat(document.getElementById('fdp-weight').value) || 0;
     const count = parseInt(document.getElementById('fdp-count').value) || 1;
-    const plannedHeats = parseInt(document.getElementById('fdp-planned').value) || 0;
+    const plannedHeats = 0;
     const spacingVal = document.getElementById('fdp-spacing').value;
     const actualSpacing = spacingVal !== '' ? parseFloat(spacingVal) : null;
 
@@ -288,8 +333,11 @@ export function saveFurnaceDetail(cardId) {
     // ----------------------------------------------
     
     card.querySelector('.f-card-name').textContent = name;
-    card.querySelector('.f-card-meta').innerHTML = '<span>📐 ' + width + '×' + height + '×' + depth + '</span><span>📦 ×' + count + '台</span><span>⚖ ' + maxWeight + 'kg</span><span>计划' + plannedHeats + '炉</span>';
-    
+    card.querySelector('.f-card-meta').innerHTML =
+    '<span>📐 ' + width + '×' + height + '×' + depth + '</span>' +
+    '<span>📦 可用数量 ' + count + '</span>' +
+    '<span>⚖ ' + maxWeight + 'kg</span>';
+
     // 卡片底部标签依然从原始的 data 属性读取（由添加工装时决定）
     // const tt = card.getAttribute('data-tooling-type') || 'standard-basket';
     const ttCfg = furnaceTooling[tt] || { label: '标准料框' };

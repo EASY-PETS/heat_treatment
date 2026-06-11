@@ -909,7 +909,6 @@ function selectAddToolingType(toolingKey) {
     document.getElementById('ta-depth').value = dims.depth;
     document.getElementById('ta-weight').value = dims.maxWeight;
     document.getElementById('ta-count').value = 1;
-    document.getElementById('ta-planned').value = 0;
     document.getElementById('ta-spacing').value = '';
 
     // 更新预览区
@@ -986,7 +985,7 @@ function confirmAddTooling() {
     const depth = parseFloat(document.getElementById('ta-depth').value) || 900;
     const maxWeight = parseFloat(document.getElementById('ta-weight').value) || 1000;
     const count = parseInt(document.getElementById('ta-count').value) || 1;
-    const plannedHeats = parseInt(document.getElementById('ta-planned').value) || 0;
+    const plannedHeats = 0;
     const spacingVal = document.getElementById('ta-spacing').value;
     const actualSpacing = spacingVal !== '' ? parseFloat(spacingVal) : null;
 

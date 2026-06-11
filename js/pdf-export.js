@@ -542,7 +542,7 @@ export function createUnpackedItemsPage({ pdfWrapper, unpackedItems }) {
         <div style="font-size:12px;font-weight:bold;margin-bottom:8px;color:#dc2626;">处理建议</div>
         <div style="font-size:11px;color:#64748b;line-height:1.8;">
             □ 安排下一炉次处理上述工件<br>
-            □ 调整炉膛配置（增加炉膛台数或更换更大炉膛）<br>
+            □ 调整炉膛配置（增加可用数量或更换更大炉膛）<br>
             □ 拆分工件批次，分多炉处理<br>
             □ 其他处理方案：_______________________________________________
         </div>
