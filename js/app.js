@@ -173,15 +173,7 @@ function executeAndRender() {
         renderFurnaceThumbnails(
             result.completedFurnaces,
             startIndex,
-            (clickedIdx) => {
-                setCurrentFurnaceIndex(clickedIdx);
-                renderSingleFurnace(clickedIdx, getSelectedMaterialName());
-                updateFurnaceNav();
-                updateLeftPanelActiveForIndex(clickedIdx);
-                renderAISummaryBar(onCenterFurnaceClick);
-                // 刷新缩略图高亮
-                renderFurnaceThumbnails(globalFurnacesResult, clickedIdx, () => {});
-            }
+            handleThumbFurnaceClick
         );
     } else {
         document.getElementById("empty-state").style.display = "block";
@@ -230,20 +222,6 @@ function executeAndRender() {
             const thumbBar = document.getElementById('furnace-thumb-bar');
             if (thumbBar) thumbBar.style.display = 'none';
         }
-
-        renderFurnaceThumbnails(
-            result.completedFurnaces,
-            startIndex,
-            (clickedIdx) => {
-                setCurrentFurnaceIndex(clickedIdx);
-                renderSingleFurnace(clickedIdx, getSelectedMaterialName());
-                updateFurnaceNav();
-                updateLeftPanelActiveForIndex(clickedIdx);
-                renderAISummaryBar(onCenterFurnaceClick);
-                // 刷新缩略图高亮
-                renderFurnaceThumbnails(globalFurnacesResult, clickedIdx, () => {});
-            }
-        );
     }
 }
 
@@ -311,7 +289,28 @@ function navigateFurnace(direction) {
     updateLeftPanelActiveForIndex(newIndex);
     renderAISummaryBar(onCenterFurnaceClick);
     // 新增：刷新缩略图高亮
-    renderFurnaceThumbnails(globalFurnacesResult, currentFurnaceIndex, () => {});
+    renderFurnaceThumbnails(
+        globalFurnacesResult,
+        currentFurnaceIndex,
+        handleThumbFurnaceClick
+    );
+}
+
+function handleThumbFurnaceClick(clickedIdx) {
+    setCurrentFurnaceIndex(clickedIdx);
+
+    const filterName = getSelectedMaterialName();
+    renderSingleFurnace(clickedIdx, filterName);
+
+    updateFurnaceNav();
+    updateLeftPanelActiveForIndex(clickedIdx);
+    renderAISummaryBar(onCenterFurnaceClick);
+
+    renderFurnaceThumbnails(
+        globalFurnacesResult,
+        clickedIdx,
+        handleThumbFurnaceClick
+    );
 }
 
 /**
@@ -327,7 +326,11 @@ function onCenterFurnaceClick(idx) {
     updateLeftPanelActiveForIndex(idx);
     renderAISummaryBar(onCenterFurnaceClick);
     // 新增：刷新缩略图高亮
-    renderFurnaceThumbnails(globalFurnacesResult, currentFurnaceIndex, () => {});
+    renderFurnaceThumbnails(
+        globalFurnacesResult,
+        currentFurnaceIndex,
+        handleThumbFurnaceClick
+    );
 }
 
 /**

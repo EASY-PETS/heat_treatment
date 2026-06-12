@@ -1528,16 +1528,32 @@ export async function playLoadingAnimation() {
     const furnace = globalFurnacesResult[startFurnaceIndex];
 
     // 为动画创建当前炉膛 Group（在原点）
-    const basketType = furnace.basketType || 'grid';
+    // 注意：动画不能再只根据 basketType 创建料框，否则 ring-tooling 会退化成 ringnode/普通料框。
     const toolingType = furnace.toolingType || 'standard-basket';
-    const basketGroup = createBasketFrame(furnace.w, furnace.h, furnace.d, 100, basketType);
+    const toolingParams = furnace.params || {};
+    let basketGroup;
+
+    try {
+        basketGroup = createEmptyTooling(
+            toolingType,
+            furnace.w,
+            furnace.h,
+            furnace.d,
+            toolingParams
+        );
+    } catch (e) {
+        console.warn('[playLoadingAnimation] createEmptyTooling 失败，回退到 createBasketFrame:', e);
+        const basketType = furnace.basketType || 'grid';
+        basketGroup = createBasketFrame(furnace.w, furnace.h, furnace.d, 100, basketType);
+    }
+
     // 【V3.0】应用金属材质
     applyMetallicMaterial(basketGroup);
     basketGroup.position.set(-furnace.w / 2, baseY, -furnace.d / 2);
     itemsGroup.add(basketGroup);
 
-    // 如果是环形工装，将内部搁板信息同步到 furnace.params
-    if (toolingType === 'ring-tooling' && basketGroup.userData.shelves) {
+    // 如果是环形工装，将真实环形工装的内部搁板信息同步回 furnace.params
+    if (toolingType === 'ring-tooling' && basketGroup.userData && basketGroup.userData.shelves) {
         furnace.params = furnace.params || {};
         furnace.params.radialRadius = basketGroup.userData.radialRadius;
         furnace.params.shelves = basketGroup.userData.shelves;
@@ -1545,13 +1561,23 @@ export async function playLoadingAnimation() {
         furnace.params.isRadialTooling = true;
     }
 
-    const containerGeo = new THREE.BoxGeometry(furnace.w, furnace.h, furnace.d);
-    const containerLine = new THREE.LineSegments(
-        new THREE.EdgesGeometry(containerGeo),
-        new THREE.LineBasicMaterial({ color: 0x0066cc, linewidth: 1, transparent: true, opacity: 0.5 })
-    );
-    containerLine.position.set(0, furnace.h / 2 + baseY, 0);
-    itemsGroup.add(containerLine);
+    // 普通工装显示蓝色长方体轮廓；环形工装显示圆形轮廓
+    if (toolingType === 'ring-tooling') {
+        drawRingToolingOutline(itemsGroup, furnace, baseY);
+    } else {
+        const containerGeo = new THREE.BoxGeometry(furnace.w, furnace.h, furnace.d);
+        const containerLine = new THREE.LineSegments(
+            new THREE.EdgesGeometry(containerGeo),
+            new THREE.LineBasicMaterial({
+                color: 0x0066cc,
+                linewidth: 1,
+                transparent: true,
+                opacity: 0.5
+            })
+        );
+        containerLine.position.set(0, furnace.h / 2 + baseY, 0);
+        itemsGroup.add(containerLine);
+    }
 
     // 🔧 按 layer 分组工件，按层级编排动画步骤：Layer1工件→搁板1→Layer2工件→搁板2→...
     const layerItemMap = new Map(); // layer → [items]
@@ -1647,14 +1673,32 @@ export async function playLoadingAnimation() {
         });
 
         // 🔧 在该层工件后插入搁板动画步骤（如果上方一层有工件）
-        if (layer <= sortedShelves.length) {
+        if (furnace.toolingType !== 'ring-tooling' && layer <= sortedShelves.length) {
             const shelfIdx = layer - 1;
             const shelfY = sortedShelves[shelfIdx].y;
             const nextLayer = layer + 1;
             const nextLayerHasItems = layerItemMap.has(nextLayer) && layerItemMap.get(nextLayer).length > 0;
             if (nextLayerHasItems) {
                 const shelfThickness = placementRules.shelfThickness || 20;
-                const shelfMesh = createShelfMesh(furnace.w, furnace.d, shelfThickness);
+                let shelfMesh;
+
+                if (furnace.toolingType === 'ring-tooling') {
+                    const params = furnace.params || {};
+
+                    const outerRadius =
+                        params.outerRadius ||
+                        params.radialRadius ||
+                        Math.min(furnace.w, furnace.d) / 2 - 30;
+
+                    const innerRadius =
+                        params.centerVoidRadius ||
+                        params.innerRadius ||
+                        ((params.innerDia || 200) / 2);
+
+                    shelfMesh = createRingShelfMesh(outerRadius, innerRadius);
+                } else {
+                    shelfMesh = createShelfMesh(furnace.w, furnace.d, shelfThickness);
+                }
                 shelfMesh.userData = {
                     isShelfMesh: true,
                     shelfY: shelfY,
