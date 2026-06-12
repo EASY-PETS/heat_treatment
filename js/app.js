@@ -10,6 +10,9 @@
  *   - 炉膛独立料框类型配置：basketType 从 furnace card 读取并传入 packing engine
  *   - 容量不足详细提示：显示缺少数值 (kg)
  */
+
+import { analyzeFurnaces } from './plan-analysis.js';
+import { renderPlanAnalysisPanel } from './ui.js';
 import * as THREE from 'three';
 import {
     isAnimating, animPaused, animStopped,
@@ -149,6 +152,15 @@ function executeAndRender() {
     // V5.0 P0: 存储预测结果供后续 UI 渲染使用
     if (result.predictions) {
         setGlobalPredictions(result.predictions);
+
+        const analysis = analyzeFurnaces(
+            result.completedFurnaces || [],
+            result.unpackedItems || [],
+            result.predictions || []
+        );
+
+        renderPlanAnalysisPanel(analysis);
+        activateRightPanelTab('analysis');
     }
 
     document.getElementById("btn-export-pdf").style.display = "inline-block";
@@ -230,6 +242,7 @@ function executeAndRender() {
         }
     }
 }
+
 
 function collectMaterialBatchesForRecord() {
     return [...document.querySelectorAll('.material-card')].map(card => {
@@ -455,6 +468,7 @@ function init() {
     initThree();
     updateTopSummary();
     hideExplodeBOMButtons();
+    initRightPanelTabs();
 
     // ==================== EVENT LISTENERS ====================
 
@@ -690,6 +704,26 @@ function init() {
         // 新格式：直接恢复到当前装炉工作台
         if (isDigitalTwinRecord(window._jiParsedPlan)) {
             loadDigitalTwinRecordToWorkbench(window._jiParsedPlan);
+            if (isDigitalTwinRecord(window._jiParsedPlan)) {
+                const record = window._jiParsedPlan;
+
+                loadDigitalTwinRecordToWorkbench(record);
+
+                const analysis = analyzeFurnaces(
+                    getRuntimeFurnacesFromRecord(record),
+                    record.loadingPlan?.unpackedItems || [],
+                    record.predictions || []
+                );
+
+                renderPlanAnalysisPanel(analysis);
+
+                document.getElementById("json-import-overlay").style.display = "none";
+                hideMasterView();
+                return;
+            }
+
+            renderPlanAnalysisPanel(analysis);
+
             document.getElementById("json-import-overlay").style.display = "none";
             hideMasterView();
             return;
@@ -758,6 +792,34 @@ function init() {
 
     // 渲染筛选条（物料卡片变化时会自动刷新，但初始需要调用一次）
     renderFilterBars(clearFurnaceResults);
+}
+
+function initRightPanelTabs() {
+    const tabBtns = document.querySelectorAll('.right-tab-btn');
+    const panes = document.querySelectorAll('.right-tab-pane');
+
+    if (!tabBtns.length || !panes.length) return;
+
+    tabBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tab = btn.getAttribute('data-tab');
+
+            tabBtns.forEach(b => b.classList.remove('active'));
+            panes.forEach(p => p.classList.remove('active'));
+
+            btn.classList.add('active');
+
+            const pane = document.getElementById('right-tab-' + tab);
+            if (pane) {
+                pane.classList.add('active');
+            }
+        });
+    });
+}
+
+function activateRightPanelTab(tab) {
+    const btn = document.querySelector('.right-tab-btn[data-tab="' + tab + '"]');
+    if (btn) btn.click();
 }
 
 /**
@@ -848,6 +910,8 @@ function loadDigitalTwinRecordToWorkbench(record) {
     setGlobalFurnacesResult(furnaces);
     setGlobalUnpackedItems(record.loadingPlan?.unpackedItems || []);
     setCurrentFurnaceIndex(0);
+    setSelectedFurnaceCardId(null);
+    setSelectedMaterialCardId(null);
 
     clearFurnaceGroups();
 
@@ -855,6 +919,17 @@ function loadDigitalTwinRecordToWorkbench(record) {
     document.getElementById("canvas-container").style.display = "block";
 
     if (furnaces.length > 0) {
+        const btnAnimate = document.getElementById("btn-animate");
+        if (btnAnimate) {
+            btnAnimate.style.display = "inline-block";
+            btnAnimate.disabled = false;
+            btnAnimate.style.opacity = "1";
+        }
+
+        const btnExportPdf = document.getElementById("btn-export-pdf");
+        if (btnExportPdf) {
+            btnExportPdf.style.display = "inline-block";
+        }
         renderSingleFurnace(0, getSelectedMaterialName());
         updateFurnaceNav();
         updateExplodeBOMButtons();

@@ -191,6 +191,13 @@
                     <span class="panel-expand-btn-right" id="panel-expand-btn-right" title="展开面板" style="display:none;">◀</span>
                 </div>
             </div>
+            <div class="right-panel-tabs">
+                <button class="right-tab-btn active" data-tab="material">工件详情</button>
+                <button class="right-tab-btn" data-tab="analysis">方案分析</button>
+                <button class="right-tab-btn" data-tab="simulation">模拟数据</button>
+            </div>
+
+            <div class="right-tab-pane active" id="right-tab-material">
             <!-- 材质筛选条 -->
             <div class="filter-bar" id="material-filter-bar">
                 <div class="filter-bar-header">
@@ -226,7 +233,18 @@
                     <div class="mdp-body" id="mdp-body" style="display:none;"></div>
                 </div>
             </div>
-        </div>
+            </div>
+                    <div class="right-tab-pane" id="right-tab-analysis">
+                <div id="plan-analysis-panel" class="plan-analysis-panel">
+                    <div class="analysis-empty">生成方案后显示方案分析</div>
+                </div>
+            </div>
+
+            <div class="right-tab-pane" id="right-tab-simulation">
+                <div class="simulation-empty">
+                    热场、气流、辐射模拟数据待接入
+                </div>
+            </div>
 
     </div>
 

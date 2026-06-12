@@ -1222,3 +1222,85 @@ export function importJsonPlanToMaster(data, initMasterViewFn) {
     masterPlans.unshift(plan); if (initMasterViewFn) initMasterViewFn();
     const btn = document.getElementById('btn-master-import-json'); const orig = btn.textContent; btn.textContent = '✅ 导入成功'; setTimeout(() => { btn.textContent = orig; }, 2000);
 }
+
+export function renderPlanAnalysisPanel(analysis) {
+    const el = document.getElementById('plan-analysis-panel');
+    if (!el || !analysis) return;
+
+    const recHtml = (analysis.recommendations || []).map(r => {
+        return `<div class="analysis-rec-item">• ${r}</div>`;
+    }).join('');
+
+    const statusClass =
+        analysis.status === '不可执行'
+            ? 'danger'
+            : (analysis.status === '需人工确认' ? 'warning' : 'success');
+
+    el.innerHTML = `
+        <div class="analysis-score-card">
+            <div class="analysis-score">${analysis.compositeScore}</div>
+            <div class="analysis-score-label">综合评分</div>
+        </div>
+
+        <div class="analysis-diagnosis-card ${statusClass}">
+            <div class="analysis-diagnosis-title">AI 诊断</div>
+
+            <div class="analysis-diagnosis-row">
+                <span>方案状态</span>
+                <strong>${analysis.status || '-'}</strong>
+            </div>
+
+            <div class="analysis-diagnosis-row">
+                <span>主要瓶颈</span>
+                <strong>${analysis.bottleneck || '-'}</strong>
+            </div>
+
+            <div class="analysis-rec-list">
+                ${recHtml || '<div class="analysis-rec-item">• 当前暂无明显风险。</div>'}
+            </div>
+        </div>
+
+        <div class="analysis-grid">
+            <div class="analysis-item">
+                <span>空间利用率</span>
+                <strong>${(analysis.spaceUtilization * 100).toFixed(1)}%</strong>
+            </div>
+            <div class="analysis-item">
+                <span>重量利用率</span>
+                <strong>${(analysis.weightUtilization * 100).toFixed(1)}%</strong>
+            </div>
+            <div class="analysis-item">
+                <span>炉次数量</span>
+                <strong>${analysis.furnaceCount}</strong>
+            </div>
+            <div class="analysis-item">
+                <span>已装工件</span>
+                <strong>${analysis.totalItems}</strong>
+            </div>
+            <div class="analysis-item">
+                <span>未装工件</span>
+                <strong>${analysis.unpackedCount}</strong>
+            </div>
+            <div class="analysis-item">
+                <span>搁板数量</span>
+                <strong>${analysis.totalShelves}</strong>
+            </div>
+            <div class="analysis-item">
+                <span>最大层数</span>
+                <strong>${analysis.maxLayerCount}</strong>
+            </div>
+            <div class="analysis-item">
+                <span>预计电耗</span>
+                <strong>${analysis.estimatedKwh.toFixed(1)} kWh</strong>
+            </div>
+            <div class="analysis-item">
+                <span>预计氮气</span>
+                <strong>${analysis.nitrogenNm3.toFixed(1)} Nm³</strong>
+            </div>
+            <div class="analysis-item">
+                <span>质量评分</span>
+                <strong>${analysis.qualityScore ? analysis.qualityScore.toFixed(0) : '-'}</strong>
+            </div>
+        </div>
+    `;
+}

@@ -571,14 +571,30 @@ export function initMasterThree() {
  * layer 1 = 底层 (Y≈0), layer 2 = 第一层搁板上方, etc.
  */
 function getItemLayer(item, furnace) {
-    if (typeof item.layer === 'number' && item.layer >= 1) return item.layer;
-    // 从 item.y 推算：y=0 附近是 layer 1
-    if (furnace.shelvesUsed && furnace.shelvesUsed.length > 0) {
+    // 导入 JSON 后，item.layer 可能没有正确同步；
+    // 只要存在 shelvesUsed，就优先用 item.y 反推真实层级。
+    if (
+        furnace &&
+        Array.isArray(furnace.shelvesUsed) &&
+        furnace.shelvesUsed.length > 0 &&
+        typeof item.y === 'number'
+    ) {
         const sortedShelves = [...furnace.shelvesUsed].sort((a, b) => a.y - b.y);
+
         for (let i = sortedShelves.length - 1; i >= 0; i--) {
-            if (item.y >= sortedShelves[i].y) return i + 2;
+            if (item.y >= sortedShelves[i].y - 0.5) {
+                return i + 2;
+            }
         }
+
+        return 1;
     }
+
+    // 没有搁板时，再信任 layer 字段
+    if (typeof item.layer === 'number' && item.layer >= 1) {
+        return item.layer;
+    }
+
     return 1;
 }
 
