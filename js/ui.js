@@ -1150,7 +1150,65 @@ export function openJsonImportModal() { document.getElementById('ji-json-textare
 
 export function parseJsonPlan(jsonStr) { try { const data = JSON.parse(jsonStr); if (!data.title) throw new Error('缺少 title 字段'); if (!data.furnace) throw new Error('缺少 furnace 字段'); if (!data.materials || !Array.isArray(data.materials)) throw new Error('缺少 materials 数组'); if (data.materials.length === 0) throw new Error('materials 数组不能为空'); const f = data.furnace; if (!f.name) throw new Error('furnace.name 不能为空'); if (!f.width || !f.height || !f.depth) throw new Error('furnace 缺少尺寸字段'); data.materials.forEach((m, i) => { if (!m.name) throw new Error('materials[' + i + '] 缺少 name'); if (!m.shape) throw new Error('materials[' + i + '] 缺少 shape'); if (!m.dim1 || !m.dim3) throw new Error('materials[' + i + '] 缺少尺寸字段'); }); return { ok: true, data }; } catch(e) { return { ok: false, error: e.message }; } }
 
-export function renderJsonPreview(data) { const f = data.furnace; const approver = data.approver || '未指定'; let html = '<div class="ji-preview-row"><span class="ji-preview-tag">📋 ' + data.title + '</span><span class="ji-preview-tag">🏭 ' + f.name + ' (' + f.width + '×' + f.height + '×' + f.depth + 'mm)</span><span class="ji-preview-tag">⚖ 承重 ' + (f.maxWeight || '未知') + 'kg</span></div><div class="ji-preview-row" style="margin-top:6px;"><span class="ji-preview-tag">📅 ' + (data.date || '未知日期') + '</span><span class="ji-preview-tag">👤 操作员: ' + (data.operator || '未知') + '</span><span class="ji-preview-tag">✅ 审批人: ' + approver + '</span><span class="ji-preview-tag">📦 ' + data.materials.length + ' 种物料</span></div><div style="margin-top:10px;font-size:10px;color:#666;">物料列表：</div><div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px;">'; data.materials.forEach(m => { const shapeLabel = m.shape === 'cylinder' ? '圆柱' : '立方'; const dimLabel = m.shape === 'cylinder' ? '⌀' + m.dim1 + '×H' + m.dim3 : m.dim1 + '×' + (m.dim2||'?') + '×' + m.dim3; html += '<span style="padding:2px 8px;background:rgba(124,58,237,0.15);border:1px solid rgba(124,58,237,0.3);border-radius:10px;font-size:10px;color:#c4b5fd;">' + m.name + ' (' + shapeLabel + ' ' + dimLabel + 'mm ×' + (m.count||1) + '件)</span>'; }); html += '</div>'; document.getElementById('ji-preview-box').innerHTML = html; document.getElementById('ji-preview-section').style.display = 'block'; }
+export function renderJsonPreview(data) {
+    if (
+        data &&
+        data.schemaVersion === 'heat-treatment-digital-twin-v1' &&
+        data.loadingPlan &&
+        Array.isArray(data.loadingPlan.furnaces)
+    ) {
+        const title = data.meta?.title || '装炉数字孪生记录';
+        const furnaces = data.loadingPlan.furnaces || [];
+        const materials = data.materials || [];
+
+        const totalItems = furnaces.reduce((sum, f) => {
+            return sum + ((f.packedItems && f.packedItems.length) || 0);
+        }, 0);
+
+        const totalWeight = furnaces.reduce((sum, f) => {
+            return sum + (f.totalWeightKg || 0);
+        }, 0);
+
+        let html = '';
+        html += '<div class="ji-preview-row">';
+        html += '<span class="ji-preview-tag">📋 ' + title + '</span>';
+        html += '<span class="ji-preview-tag">🧬 ' + data.schemaVersion + '</span>';
+        html += '<span class="ji-preview-tag">🔥 ' + furnaces.length + ' 个炉次</span>';
+        html += '<span class="ji-preview-tag">📦 ' + totalItems + ' 件已装</span>';
+        html += '<span class="ji-preview-tag">⚖ ' + totalWeight.toFixed(1) + 'kg</span>';
+        html += '</div>';
+
+        html += '<div class="ji-preview-row" style="margin-top:6px;">';
+        html += '<span class="ji-preview-tag">🧰 工装: ' + (furnaces[0]?.toolingType || '-') + '</span>';
+        html += '<span class="ji-preview-tag">📐 尺寸: ' +
+            (furnaces[0]?.dimensions?.width || 0) + '×' +
+            (furnaces[0]?.dimensions?.height || 0) + '×' +
+            (furnaces[0]?.dimensions?.depth || 0) + 'mm</span>';
+        html += '<span class="ji-preview-tag">⚙️ 策略: ' + (data.loadingPlan.strategy || '-') + '</span>';
+        html += '<span class="ji-preview-tag">🧾 物料批次: ' + materials.length + '</span>';
+        html += '</div>';
+
+        document.getElementById('ji-preview-box').innerHTML = html;
+        document.getElementById('ji-preview-section').style.display = 'block';
+        return;
+    }
+
+    // 下面保留你原来的旧格式 renderJsonPreview(data)
+    // 旧格式预览
+    const f = data.furnace || {};
+    const materials = data.materials || [];
+
+    let html = '';
+    html += '<div class="ji-preview-row">';
+    html += '<span class="ji-preview-tag">📋 ' + (data.title || '历史方案') + '</span>';
+    html += '<span class="ji-preview-tag">🔥 ' + (f.name || '-') + '</span>';
+    html += '<span class="ji-preview-tag">📐 ' + (f.width || 0) + '×' + (f.height || 0) + '×' + (f.depth || 0) + 'mm</span>';
+    html += '<span class="ji-preview-tag">📦 ' + materials.length + ' 个物料批次</span>';
+    html += '</div>';
+
+    document.getElementById('ji-preview-box').innerHTML = html;
+    document.getElementById('ji-preview-section').style.display = 'block';
+}
 
 export function importJsonPlanToMaster(data, initMasterViewFn) {
     const f = data.furnace; if (!f || !f.name) { alert('❌ 导入失败：JSON 中缺少 furnace 信息或 furnace.name 字段'); return; } if (!f.width || !f.height || !f.depth) { alert('❌ 导入失败：炉膛 "' + f.name + '" 缺少完整尺寸字段 (width/height/depth)'); return; }

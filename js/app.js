@@ -57,7 +57,13 @@ import {
 import { executePacking } from './furnace-engine.js';
 import { showPdfSelectModal, exportSingleFurnacePDF, getSelectedPdfFurnaceIds } from './pdf-export.js';
 import { generateSixPagePDF } from './pdf-six-page.js';
-
+import {
+    buildCurrentDigitalTwinRecord,
+    downloadJsonFile,
+    parseDigitalTwinRecord,
+    getRuntimeFurnacesFromRecord,
+    isDigitalTwinRecord
+} from './plan-record.js';
 /**
  * V2.7: executeAndRender — 核心入口函数
  *
@@ -223,6 +229,81 @@ function executeAndRender() {
             if (thumbBar) thumbBar.style.display = 'none';
         }
     }
+}
+
+function collectMaterialBatchesForRecord() {
+    return [...document.querySelectorAll('.material-card')].map(card => {
+        const d = getMaterialDataFromCard(card);
+
+        return {
+            materialBatchId: d.itemCode || `MAT-${d.mid}`,
+            name: d.name,
+            customer: d.customer || '',
+            itemCode: d.itemCode || '',
+
+            shape: d.shape,
+            dimensions: {
+                length: d.dim1,
+                width: d.dim2,
+                height: d.dim3,
+                unit: 'mm'
+            },
+
+            quantity: d.count,
+            totalWeightKg: d.totalWeight,
+            unitWeightKg: d.count > 0 ? d.totalWeight / d.count : 0,
+
+            material: d.material || '',
+            process: d.process || '',
+            hardnessTarget: d.hardness || '',
+            orderDate: d.orderDate || '',
+            deliveryDate: d.deliveryDate || '',
+            remark: d.remark || ''
+        };
+    });
+}
+
+function collectToolingForRecord() {
+    return [...document.querySelectorAll('.furnace-card')].map(card => {
+        const d = getFurnaceDataFromCard(card);
+
+        return {
+            toolingId: `TOOLING-${d.fid}`,
+            toolingName: d.name,
+            toolingType: d.toolingType,
+            basketType: d.basketType,
+
+            dimensions: {
+                width: d.width,
+                height: d.height,
+                depth: d.depth,
+                unit: 'mm'
+            },
+
+            maxLoadKg: d.maxWeight,
+            availableCount: d.count,
+            actualSpacingMm: d.actualSpacing != null ? d.actualSpacing : 5,
+            params: d.extras || {}
+        };
+    });
+}
+
+function exportCurrentPlanJson() {
+    if (!globalFurnacesResult || globalFurnacesResult.length === 0) {
+        alert('请先生成装炉方案，再导出 JSON');
+        return;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const title = `装炉数字孪生记录_${today}`;
+
+    const record = buildCurrentDigitalTwinRecord({
+        title,
+        materials: collectMaterialBatchesForRecord(),
+        tooling: collectToolingForRecord()
+    });
+
+    downloadJsonFile(record, `${title}.json`);
 }
 
 /**
@@ -392,6 +473,10 @@ function init() {
     document.getElementById("btn-generate-plan").addEventListener("click", showGenerationOptions);
     document.getElementById("btn-animate").addEventListener("click", playLoadingAnimation);
     document.getElementById("btn-export-pdf").addEventListener("click", showPdfSelectModal);
+    const btnExportJson = document.getElementById('btn-export-json');
+    if (btnExportJson) {
+        btnExportJson.addEventListener('click', exportCurrentPlanJson);
+    }
 
     // V2.7: 爆炸图按钮
     const btnExplode = document.getElementById("btn-explode");
@@ -561,25 +646,56 @@ function init() {
     });
     document.getElementById("btn-ji-parse").addEventListener("click", () => {
         const jsonStr = document.getElementById("ji-json-textarea").value.trim();
+
         if (!jsonStr) {
             document.getElementById("ji-error-msg").textContent = "请先输入或粘贴 JSON 内容";
             document.getElementById("ji-error-msg").classList.add("visible");
             return;
         }
-        const result = parseJsonPlan(jsonStr);
-        if (!result.ok) {
-            document.getElementById("ji-error-msg").textContent = "❌ 解析失败：" + result.error;
+
+        try {
+            const raw = JSON.parse(jsonStr);
+
+            // 新格式：装炉数字孪生记录
+            if (isDigitalTwinRecord(raw)) {
+                const record = parseDigitalTwinRecord(raw);
+
+                document.getElementById("ji-error-msg").classList.remove("visible");
+                renderJsonPreview(record);
+                document.getElementById("btn-ji-import").disabled = false;
+                window._jiParsedPlan = record;
+                return;
+            }
+
+            // 旧格式：历史方案 JSON
+            const result = parseJsonPlan(jsonStr);
+            if (!result.ok) {
+                throw new Error(result.error);
+            }
+
+            document.getElementById("ji-error-msg").classList.remove("visible");
+            renderJsonPreview(result.data);
+            document.getElementById("btn-ji-import").disabled = false;
+            window._jiParsedPlan = result.data;
+
+        } catch (e) {
+            document.getElementById("ji-error-msg").textContent = "❌ 解析失败：" + e.message;
             document.getElementById("ji-error-msg").classList.add("visible");
             document.getElementById("btn-ji-import").disabled = true;
-            return;
         }
-        document.getElementById("ji-error-msg").classList.remove("visible");
-        renderJsonPreview(result.data);
-        document.getElementById("btn-ji-import").disabled = false;
-        window._jiParsedPlan = result.data;
-    });
+});
     document.getElementById("btn-ji-import").addEventListener("click", () => {
         if (!window._jiParsedPlan) return;
+
+        // 新格式：直接恢复到当前装炉工作台
+        if (isDigitalTwinRecord(window._jiParsedPlan)) {
+            loadDigitalTwinRecordToWorkbench(window._jiParsedPlan);
+            document.getElementById("json-import-overlay").style.display = "none";
+            hideMasterView();
+            return;
+        }
+
+        // 旧格式：继续进入历史方案库
         importJsonPlanToMaster(window._jiParsedPlan, () => initMasterView(renderMasterPlan));
         document.getElementById("json-import-overlay").style.display = "none";
     });
@@ -724,6 +840,40 @@ function executeWithAnimation() {
     setTimeout(() => {
         playLoadingAnimation();
     }, 300);
+}
+
+function loadDigitalTwinRecordToWorkbench(record) {
+    const furnaces = getRuntimeFurnacesFromRecord(record);
+
+    setGlobalFurnacesResult(furnaces);
+    setGlobalUnpackedItems(record.loadingPlan?.unpackedItems || []);
+    setCurrentFurnaceIndex(0);
+
+    clearFurnaceGroups();
+
+    document.getElementById("empty-state").style.display = "none";
+    document.getElementById("canvas-container").style.display = "block";
+
+    if (furnaces.length > 0) {
+        renderSingleFurnace(0, getSelectedMaterialName());
+        updateFurnaceNav();
+        updateExplodeBOMButtons();
+
+        renderFurnaceThumbnails(
+            furnaces,
+            0,
+            (clickedIdx) => {
+                setCurrentFurnaceIndex(clickedIdx);
+                renderSingleFurnace(clickedIdx, getSelectedMaterialName());
+                updateFurnaceNav();
+                renderAISummaryBar(onCenterFurnaceClick);
+                renderFurnaceThumbnails(globalFurnacesResult, clickedIdx, () => {});
+            }
+        );
+    }
+
+    renderAISummaryBar(onCenterFurnaceClick);
+    updateTopSummary();
 }
 
 /**

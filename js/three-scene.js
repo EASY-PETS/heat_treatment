@@ -182,12 +182,25 @@ function createRingShelfMesh(outerRadius, innerRadius) {
  * @param {Map<number, THREE.Group>} layerGroups - layer编号 → LayerGroup 的映射
  */
 export function renderShelvesForFurnace(furnace, furnaceGroup, baseY, layerGroups) {
+    if (furnace.toolingType === 'ring-tooling') {
+        return;
+    }
+    
     if (baseY === undefined) baseY = -120;
     const shelfThickness = placementRules.shelfThickness || 20;
 
+    const hasExplicitShelves =
+        Array.isArray(furnace.shelvesUsed) &&
+        furnace.shelvesUsed.length > 0;
+
     const shelfYs = new Set();
-    if (furnace.shelvesUsed && furnace.shelvesUsed.length > 0) {
-        furnace.shelvesUsed.forEach(s => shelfYs.add(s.y));
+
+    if (hasExplicitShelves) {
+        furnace.shelvesUsed.forEach(s => {
+            if (typeof s.y === 'number') {
+                shelfYs.add(s.y);
+            }
+        });
     } else {
         furnace.packedItems.forEach(item => {
             if (typeof item.y === 'number' && !isNaN(item.y) && item.y > 0) {
@@ -222,11 +235,16 @@ export function renderShelvesForFurnace(furnace, furnaceGroup, baseY, layerGroup
             }
         }
         // 🔧 跳过上方无工件的空搁板
-        const layerHasItems = furnace.packedItems.some(
-            item => getItemLayer(item, furnace) === shelfLayer
-        );
-        if (!layerHasItems) {
-            return;
+        // 如果 shelvesUsed 是算法明确输出 / JSON 明确恢复的实体搁板，直接渲染。
+        // 不再依赖 item.layer，因为导出的 item.layer 可能没有正确同步。
+        if (!hasExplicitShelves) {
+            const layerHasItems = furnace.packedItems.some(
+                item => getItemLayer(item, furnace) === shelfLayer
+            );
+
+            if (!layerHasItems) {
+                return;
+            }
         }
 
         let shelfMesh;
