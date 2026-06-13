@@ -10,7 +10,7 @@
  *   - 炉膛独立料框类型配置：basketType 从 furnace card 读取并传入 packing engine
  *   - 容量不足详细提示：显示缺少数值 (kg)
  */
-
+import { createPlanLibraryController } from './plan-library.js';
 import { analyzeFurnaces } from './plan-analysis.js';
 import { renderPlanAnalysisPanel, renderCandidatePlanCards } from './ui.js';
 import * as THREE from 'three';
@@ -24,6 +24,7 @@ import {
     setAnimPaused, setAnimStopped, setCurrentFurnaceIndex,
     setFdpCollapsed, setMdpCollapsed,
     placementRules,
+    setPlacementRules,
     setGlobalFurnacesResult, setGlobalUnpackedItems, setGlobalSpacingValue,
     setGlobalPredictions,
     setDisplaySettings,
@@ -177,17 +178,12 @@ function applyCandidatePlan(index) {
             handleThumbFurnaceClick
         );
 
-        document.getElementById("btn-export-pdf").style.display = "inline-block";
-        document.getElementById("btn-animate").style.display = "inline-block";
-
-        const btnSavePlanLibrary = document.getElementById("btn-save-plan-library");
-        if (btnSavePlanLibrary) {
-            btnSavePlanLibrary.style.display = "inline-block";
-        }
+        showPlanActionButtons();
     } else {
         document.getElementById("empty-state").style.display = "block";
         document.getElementById("furnace-nav").style.display = "none";
         hideExplodeBOMButtons();
+        hidePlanActionButtons();
     }
 
     renderAISummaryBar(onCenterFurnaceClick);
@@ -252,12 +248,28 @@ function executeAndRender() {
         if (card.style.display === 'none') return;
         const d = getMaterialDataFromCard(card);
         itemsInput.push({
-            name: d.name, shape: d.shape, count: d.count,
-            dim1: d.dim1, dim2: d.dim2, dim3: d.dim3,
-            weight: d.totalWeight, color: d.color,
-            material: d.material || "", process: d.process || "",
-            customer: d.customer || "", itemCode: d.itemCode || "",
-            showName: d.showName || ""
+            name: d.name,
+            shape: d.shape,
+            count: d.count,
+
+            dim1: d.dim1,
+            dim2: d.dim2,
+            dim3: d.dim3,
+
+            weight: d.totalWeight,
+            color: d.color,
+
+            material: d.material || "",
+            process: d.process || "",
+            hardness: d.hardness || "",
+
+            customer: d.customer || "",
+            itemCode: d.itemCode || "",
+            showName: d.showName || "",
+
+            orderDate: d.orderDate || "",
+            deliveryDate: d.deliveryDate || "",
+            remark: d.remark || "",
         });
     });
 
@@ -299,14 +311,6 @@ function executeAndRender() {
     renderCandidatePlanCards(candidatePlans, currentCandidatePlanIndex, applyCandidatePlan);
     activateRightPanelTab('analysis');
 
-    document.getElementById("btn-export-pdf").style.display = "inline-block";
-    document.getElementById("btn-animate").style.display = "inline-block";
-
-    const btnSavePlanLibrary = document.getElementById("btn-save-plan-library");
-    if (btnSavePlanLibrary) {
-        btnSavePlanLibrary.style.display = "inline-block";
-    }
-
     let startIndex = 0;
     if (selectedFurnaceCardId) {
         const card = document.getElementById(selectedFurnaceCardId);
@@ -322,6 +326,7 @@ function executeAndRender() {
     clearFurnaceGroups();
 
     if (result.completedFurnaces.length > 0) {
+        showPlanActionButtons();
         renderSingleFurnace(startIndex);
         updateFurnaceNav();
         updateLeftPanelActiveForIndex(startIndex);
@@ -338,6 +343,7 @@ function executeAndRender() {
         document.getElementById("empty-state").style.display = "block";
         document.getElementById("furnace-nav").style.display = "none";
         hideExplodeBOMButtons();
+        hidePlanActionButtons();
     }
     renderAISummaryBar(onCenterFurnaceClick);
     updateTopSummary();
@@ -392,6 +398,7 @@ function collectMaterialBatchesForRecord() {
         return {
             materialBatchId: d.itemCode || `MAT-${d.mid}`,
             name: d.name,
+            showName: d.showName || d.name,
             customer: d.customer || '',
             itemCode: d.itemCode || '',
 
@@ -412,7 +419,8 @@ function collectMaterialBatchesForRecord() {
             hardnessTarget: d.hardness || '',
             orderDate: d.orderDate || '',
             deliveryDate: d.deliveryDate || '',
-            remark: d.remark || ''
+            remark: d.remark || '',
+            cadImage: d.cadImage || ''
         };
     });
 }
@@ -442,6 +450,211 @@ function collectToolingForRecord() {
     });
 }
 
+const planLibrary = createPlanLibraryController({
+    canSaveCurrentPlan: () => {
+        return !!(globalFurnacesResult && globalFurnacesResult.length > 0);
+    },
+
+    buildCurrentRecord: (title) => {
+        return buildCurrentDigitalTwinRecord({
+            title,
+            materials: collectMaterialBatchesForRecord(),
+            tooling: collectToolingForRecord()
+        });
+    },
+
+    getFallbackStrategy: () => {
+        return placementRules.strategy || '-';
+    },
+
+    onLoadRecord: (record, item) => {
+        applyDigitalTwinRecordToWorkbench(record, {
+            sourceTitle: item?.title || record.meta?.title || '',
+            closeLibrary: true,
+            showSuccess: true
+        });
+    }
+});
+
+/**
+ * 清空所有装炉结果，重置3D场景和UI
+ */
+export function clearFurnaceResults() {
+    setGlobalFurnacesResult(null);
+    setGlobalUnpackedItems([]);
+    clearFurnaceGroups();
+
+    if (itemsGroup) {
+        while (itemsGroup.children.length > 0) {
+            itemsGroup.remove(itemsGroup.children[0]);
+        }
+    }
+
+    hidePlanActionButtons();
+
+    const furnaceNav = document.getElementById("furnace-nav");
+    if (furnaceNav) furnaceNav.style.display = "none";
+
+    const thumbBar = document.getElementById("furnace-thumb-bar");
+    if (thumbBar) thumbBar.style.display = "none";
+
+    hideExplodeBOMButtons();
+
+    const emptyState = document.getElementById("empty-state");
+    if (emptyState) emptyState.style.display = "block";
+
+    renderAISummaryBar(null);
+    showCapacityFeedback('success', '筛选条件已变更，请重新生成方案');
+}
+
+window._clearFurnaceResults = clearFurnaceResults;
+
+/**
+ * 控制爆炸图和施工清单按钮的显示
+ */
+function updateExplodeBOMButtons() {
+    const btnExplode = document.getElementById("btn-explode");
+    const btnBOM = document.getElementById("btn-bom");
+
+    if (btnExplode) btnExplode.style.display = "inline-block";
+    if (btnBOM) btnBOM.style.display = "inline-block";
+}
+
+/**
+ * 隐藏爆炸图和施工清单按钮
+ */
+function hideExplodeBOMButtons() {
+    const btnExplode = document.getElementById("btn-explode");
+    const btnBOM = document.getElementById("btn-bom");
+
+    if (btnExplode) btnExplode.style.display = "none";
+    if (btnBOM) btnBOM.style.display = "none";
+}
+
+function showPlanActionButtons() {
+    const ids = [
+        'btn-export-pdf',
+        'btn-animate',
+        'btn-save-plan-library'
+    ];
+
+    ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.style.display = 'inline-block';
+            el.disabled = false;
+            el.style.opacity = '1';
+        }
+    });
+}
+
+function hidePlanActionButtons() {
+    const ids = [
+        'btn-export-pdf',
+        'btn-animate',
+        'btn-save-plan-library'
+    ];
+
+    ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.style.display = 'none';
+        }
+    });
+}
+
+/**
+ * 导航至上一个或下一个炉膛方案
+ */
+function navigateFurnace(direction) {
+    if (!globalFurnacesResult || globalFurnacesResult.length === 0) return;
+
+    const newIndex =
+        (currentFurnaceIndex + direction + globalFurnacesResult.length) %
+        globalFurnacesResult.length;
+
+    setCurrentFurnaceIndex(newIndex);
+
+    const group = furnaceGroups.get(newIndex);
+    if (group && controls) {
+        controls.target.copy(group.position);
+        controls.update();
+    }
+
+    const filterName = getSelectedMaterialName();
+
+    renderSingleFurnace(newIndex, filterName);
+    updateFurnaceNav();
+    updateLeftPanelActiveForIndex(newIndex);
+    renderAISummaryBar(onCenterFurnaceClick);
+
+    renderFurnaceThumbnails(
+        globalFurnacesResult,
+        newIndex,
+        handleThumbFurnaceClick
+    );
+}
+
+function handleThumbFurnaceClick(clickedIdx) {
+    setCurrentFurnaceIndex(clickedIdx);
+
+    const filterName = getSelectedMaterialName();
+
+    renderSingleFurnace(clickedIdx, filterName);
+    updateFurnaceNav();
+    updateLeftPanelActiveForIndex(clickedIdx);
+    renderAISummaryBar(onCenterFurnaceClick);
+
+    renderFurnaceThumbnails(
+        globalFurnacesResult,
+        clickedIdx,
+        handleThumbFurnaceClick
+    );
+}
+
+/**
+ * 点击中心统计面板的炉膛项时触发，切换到对应炉膛
+ */
+function onCenterFurnaceClick(idx) {
+    setCurrentFurnaceIndex(idx);
+
+    const filterName = getSelectedMaterialName();
+
+    renderSingleFurnace(idx, filterName);
+    updateFurnaceNav();
+    updateLeftPanelActiveForIndex(idx);
+    renderAISummaryBar(onCenterFurnaceClick);
+
+    renderFurnaceThumbnails(
+        globalFurnacesResult,
+        idx,
+        handleThumbFurnaceClick
+    );
+}
+
+/**
+ * 显示方案库视图
+ */
+function showMasterView() {
+    document.body.classList.add('library-mode');
+
+    const masterView = document.getElementById("master-view");
+    if (masterView) masterView.classList.add("active");
+
+    const furnaceNav = document.getElementById("furnace-nav");
+    if (furnaceNav) furnaceNav.style.display = "none";
+
+    const canvasContainer = document.getElementById("canvas-container");
+    if (canvasContainer) canvasContainer.style.display = "none";
+
+    const animControlBar = document.getElementById("anim-control-bar");
+    if (animControlBar) animControlBar.classList.remove("visible");
+
+    hideExplodeBOMButtons();
+
+    planLibrary.renderPlanLibraryList();
+}
+
 function exportCurrentPlanJson() {
     if (!globalFurnacesResult || globalFurnacesResult.length === 0) {
         alert('请先生成装炉方案，再导出 JSON');
@@ -458,374 +671,6 @@ function exportCurrentPlanJson() {
     });
 
     downloadJsonFile(record, `${title}.json`);
-}
-
-const PLAN_LIBRARY_STORAGE_KEY = 'heat_treatment_plan_library_v1';
-
-function getPlanLibraryItems() {
-    try {
-        return JSON.parse(localStorage.getItem(PLAN_LIBRARY_STORAGE_KEY) || '[]');
-    } catch (e) {
-        console.warn('读取方案库失败：', e);
-        return [];
-    }
-}
-
-function setPlanLibraryItems(items) {
-    localStorage.setItem(PLAN_LIBRARY_STORAGE_KEY, JSON.stringify(items));
-}
-
-function escapeHtmlText(value) {
-    return String(value ?? '').replace(/[&<>"']/g, (ch) => {
-        const map = {
-            '&': '&amp;',
-            '<': '&lt;',
-            '>': '&gt;',
-            '"': '&quot;',
-            "'": '&#39;'
-        };
-        return map[ch] || ch;
-    });
-}
-
-function safeFileName(name) {
-    return String(name || '装炉方案').replace(/[\\/:*?"<>|]/g, '_');
-}
-
-function buildPlanLibrarySummary(record) {
-    const furnaces = record.loadingPlan?.furnaces || [];
-    const materials = record.materials || [];
-
-    const totalItems = furnaces.reduce((sum, f) => {
-        return sum + ((f.packedItems && f.packedItems.length) || 0);
-    }, 0);
-
-    const totalWeight = furnaces.reduce((sum, f) => {
-        return sum + Number(f.totalWeightKg ?? f.totalWeight ?? 0);
-    }, 0);
-
-    const firstFurnace = furnaces[0] || {};
-    const dim = firstFurnace.dimensions || {};
-
-    return {
-        furnaceCount: furnaces.length,
-        materialBatchCount: materials.length,
-        totalItems,
-        totalWeightKg: totalWeight,
-        firstFurnaceName: firstFurnace.instanceId || firstFurnace.typeName || '-',
-        firstFurnaceSize: dim.width
-            ? `${dim.width}×${dim.height}×${dim.depth}mm`
-            : '-',
-        strategy: record.loadingPlan?.strategy || placementRules.strategy || '-'
-    };
-}
-
-function saveCurrentPlanToLibrary() {
-    if (!globalFurnacesResult || globalFurnacesResult.length === 0) {
-        alert('请先生成装炉方案，再保存到方案库');
-        return;
-    }
-
-    const today = new Date().toISOString().slice(0, 10);
-    const defaultTitle = `装炉方案_${today}`;
-    const inputTitle = prompt('请输入方案名称', defaultTitle);
-
-    if (inputTitle === null) return;
-
-    const title = inputTitle.trim() || defaultTitle;
-
-    const record = buildCurrentDigitalTwinRecord({
-        title,
-        materials: collectMaterialBatchesForRecord(),
-        tooling: collectToolingForRecord()
-    });
-
-    const now = new Date().toISOString();
-
-    const item = {
-        id: `PLAN-${Date.now()}`,
-        title,
-        createdAt: now,
-        updatedAt: now,
-        summary: buildPlanLibrarySummary(record),
-        record
-    };
-
-    const items = getPlanLibraryItems();
-    items.unshift(item);
-
-    try {
-        setPlanLibraryItems(items);
-        showCapacityFeedback('success', `✅ 已保存到方案库：${title}`);
-    } catch (e) {
-        console.error(e);
-        alert('保存失败：浏览器本地存储空间可能不足。可以先导出 JSON 备份。');
-    }
-}
-
-/**
- * 清空所有装炉结果，重置3D场景和UI
- */
-export function clearFurnaceResults() {
-    setGlobalFurnacesResult(null);
-    setGlobalUnpackedItems([]);
-    clearFurnaceGroups();
-    if (itemsGroup) {
-        while (itemsGroup.children.length > 0) itemsGroup.remove(itemsGroup.children[0]);
-    }
-    document.getElementById("btn-export-pdf").style.display = "none";
-    document.getElementById("btn-animate").style.display = "none";
-    document.getElementById("furnace-nav").style.display = "none";
-    hideExplodeBOMButtons();
-    document.getElementById("empty-state").style.display = "block";
-    renderAISummaryBar(null);
-    // 可选：显示提示
-    showCapacityFeedback('success', '筛选条件已变更，请重新生成方案');
-}
-window._clearFurnaceResults = clearFurnaceResults; // 供 ui.js 调用
-
-/**
- * V2.7: 控制爆炸图和施工清单按钮的显示/隐藏
- * @returns {void}
- */
-function updateExplodeBOMButtons() {
-    const btnExplode = document.getElementById("btn-explode");
-    const btnBOM = document.getElementById("btn-bom");
-    if (btnExplode) btnExplode.style.display = "inline-block";
-    if (btnBOM) btnBOM.style.display = "inline-block";
-}
-
-/**
- * 隐藏爆炸图和施工清单按钮。
- * @returns {void}
- */
-function hideExplodeBOMButtons() {
-    const btnExplode = document.getElementById("btn-explode");
-    const btnBOM = document.getElementById("btn-bom");
-    if (btnExplode) btnExplode.style.display = "none";
-    if (btnBOM) btnBOM.style.display = "none";
-}
-
-/**
- * 导航至上一个或下一个炉膛方案。
- * @param {number} direction - 导航方向，-1 为上一个，1 为下一个。
- * @returns {void}
- */
-function navigateFurnace(direction) {
-    if (!globalFurnacesResult || globalFurnacesResult.length === 0) return;
-    const newIndex = (currentFurnaceIndex + direction + globalFurnacesResult.length) % globalFurnacesResult.length;
-    setCurrentFurnaceIndex(newIndex);
-    // 移动相机到对应炉膛的位置
-    const group = furnaceGroups.get(newIndex);
-    if (group) {
-        controls.target.copy(group.position);
-        controls.update();
-    }
-    const filterName = getSelectedMaterialName();
-    renderSingleFurnace(newIndex, filterName);
-    updateFurnaceNav();
-    updateLeftPanelActiveForIndex(newIndex);
-    renderAISummaryBar(onCenterFurnaceClick);
-    // 新增：刷新缩略图高亮
-    renderFurnaceThumbnails(
-        globalFurnacesResult,
-        currentFurnaceIndex,
-        handleThumbFurnaceClick
-    );
-}
-
-function handleThumbFurnaceClick(clickedIdx) {
-    setCurrentFurnaceIndex(clickedIdx);
-
-    const filterName = getSelectedMaterialName();
-    renderSingleFurnace(clickedIdx, filterName);
-
-    updateFurnaceNav();
-    updateLeftPanelActiveForIndex(clickedIdx);
-    renderAISummaryBar(onCenterFurnaceClick);
-
-    renderFurnaceThumbnails(
-        globalFurnacesResult,
-        clickedIdx,
-        handleThumbFurnaceClick
-    );
-}
-
-/**
- * 点击中心统计面板的炉膛项时触发，切换到对应的炉膛方案。
- * @param {number} idx - 炉膛索引。
- * @returns {void}
- */
-function onCenterFurnaceClick(idx) {
-    setCurrentFurnaceIndex(idx);
-    const filterName = getSelectedMaterialName();
-    renderSingleFurnace(idx, filterName);
-    updateFurnaceNav();
-    updateLeftPanelActiveForIndex(idx);
-    renderAISummaryBar(onCenterFurnaceClick);
-    // 新增：刷新缩略图高亮
-    renderFurnaceThumbnails(
-        globalFurnacesResult,
-        currentFurnaceIndex,
-        handleThumbFurnaceClick
-    );
-}
-
-/**
- * 显示总览视图 (Master View)，初始化或重新渲染主场景。
- * @returns {void}
- */
-function showMasterView() {
-    document.body.classList.add('library-mode');
-
-    document.getElementById("master-view").classList.add("active");
-    document.getElementById("furnace-nav").style.display = "none";
-    document.getElementById("canvas-container").style.display = "none";
-    document.getElementById("anim-control-bar").classList.remove("visible");
-    hideExplodeBOMButtons();
-
-    renderPlanLibraryList();
-}
-
-function renderPlanLibraryList() {
-    const listEl = document.getElementById('master-list');
-    const detailEl = document.getElementById('master-detail-panel');
-
-    if (!listEl || !detailEl) return;
-
-    const items = getPlanLibraryItems();
-
-    if (items.length === 0) {
-        listEl.innerHTML = `
-            <div style="font-size:12px;color:#888;padding:12px;">
-                暂无已保存方案。请先生成方案，然后点击顶部“保存方案”。
-            </div>
-        `;
-        detailEl.innerHTML = '<strong>暂无方案</strong>';
-        return;
-    }
-
-    listEl.innerHTML = `
-        <div style="font-size:11px;color:#666;margin-bottom:10px;padding:4px 0;">
-            共 ${items.length} 个方案
-        </div>
-    `;
-
-    items.forEach((item, idx) => {
-        const s = item.summary || {};
-        const card = document.createElement('div');
-        card.className = 'master-plan-card' + (idx === 0 ? ' active' : '');
-        card.setAttribute('data-plan-id', item.id);
-
-        card.innerHTML = `
-            <button class="mpc-delete" data-action="delete-library-plan" title="删除此方案">✕</button>
-            <div class="mpc-title">${escapeHtmlText(item.title)}</div>
-            <button class="btn-sm" data-action="load-library-plan">加载</button>
-            <div class="mpc-meta">
-                ${escapeHtmlText(s.firstFurnaceName || '-')}<br>
-                ${escapeHtmlText((item.createdAt || '').slice(0, 10))} · ${escapeHtmlText(s.strategy || '-')}<br>
-                ${s.furnaceCount || 0} 炉 · ${s.totalItems || 0} 件 · ${(s.totalWeightKg || 0).toFixed(1)}kg
-            </div>
-            <span class="mpc-tag imported">方案库</span>
-        `;
-
-        card.addEventListener('click', (e) => {
-            if (e.target.closest('[data-action="delete-library-plan"]')) return;
-
-            document.querySelectorAll('.master-plan-card').forEach(c => c.classList.remove('active'));
-            card.classList.add('active');
-            renderPlanLibraryDetail(item.id);
-        });
-
-        card.querySelector('[data-action="delete-library-plan"]').addEventListener('click', (e) => {
-            e.stopPropagation();
-            deletePlanLibraryItem(item.id);
-        });
-
-        const loadBtn = card.querySelector('[data-action="load-library-plan"]');
-        if (loadBtn) {
-            loadBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                loadPlanLibraryItem(item.id);
-            });
-        }
-
-        listEl.appendChild(card);
-    });
-
-    renderPlanLibraryDetail(items[0].id);
-}
-
-function renderPlanLibraryDetail(planId) {
-    const detailEl = document.getElementById('master-detail-panel');
-    if (!detailEl) return;
-
-    const items = getPlanLibraryItems();
-    const item = items.find(x => x.id === planId);
-
-    if (!item) {
-        detailEl.innerHTML = '<strong>方案不存在</strong>';
-        return;
-    }
-
-    const s = item.summary || {};
-
-    // detailEl.innerHTML = `
-    //     <div style="padding:12px;line-height:1.8;font-size:12px;">
-    //         <strong style="font-size:14px;">${escapeHtmlText(item.title)}</strong><br>
-    //         创建时间：${escapeHtmlText(item.createdAt || '-')}<br>
-    //         炉次数量：${s.furnaceCount || 0}<br>
-    //         工件数量：${s.totalItems || 0}<br>
-    //         总重量：${(s.totalWeightKg || 0).toFixed(1)}kg<br>
-    //         首炉尺寸：${escapeHtmlText(s.firstFurnaceSize || '-')}<br>
-    //         策略：${escapeHtmlText(s.strategy || '-')}
-    //         <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
-    //             <button class="btn-sm" id="btn-load-library-plan">加载到工作台</button>
-    //             <button class="btn-sm" id="btn-export-library-plan-json">导出JSON</button>
-    //             <button class="btn-sm btn-reset-danger" id="btn-delete-library-plan">删除</button>
-    //         </div>
-    //     </div>
-    // `;
-    detailEl.innerHTML = `
-        <div style="padding:12px;line-height:1.8;font-size:12px;">
-            <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
-                <button class="btn-sm" id="btn-load-library-plan">加载到工作台</button>
-                <button class="btn-sm" id="btn-export-library-plan-json">导出JSON</button>
-                <button class="btn-sm btn-reset-danger" id="btn-delete-library-plan">删除</button>
-            </div>
-
-            <strong style="font-size:14px;">${escapeHtmlText(item.title)}</strong><br>
-            创建时间：${escapeHtmlText(item.createdAt || '-')}<br>
-            炉次数量：${s.furnaceCount || 0}<br>
-            工件数量：${s.totalItems || 0}<br>
-            总重量：${(s.totalWeightKg || 0).toFixed(1)}kg<br>
-            首炉尺寸：${escapeHtmlText(s.firstFurnaceSize || '-')}<br>
-            策略：${escapeHtmlText(s.strategy || '-')}
-        </div>
-    `;
-    document.getElementById('btn-load-library-plan').addEventListener('click', () => {
-        loadPlanLibraryItem(item.id);
-    });
-
-    document.getElementById('btn-export-library-plan-json').addEventListener('click', () => {
-        downloadJsonFile(item.record, `${safeFileName(item.title)}.json`);
-    });
-
-    document.getElementById('btn-delete-library-plan').addEventListener('click', () => {
-        deletePlanLibraryItem(item.id);
-    });
-}
-
-function deletePlanLibraryItem(planId) {
-    const items = getPlanLibraryItems();
-    const item = items.find(x => x.id === planId);
-
-    if (!item) return;
-    if (!confirm(`确定删除方案「${item.title}」吗？`)) return;
-
-    const nextItems = items.filter(x => x.id !== planId);
-    setPlanLibraryItems(nextItems);
-    renderPlanLibraryList();
 }
 
 /**
@@ -877,7 +722,7 @@ function init() {
     }
     const btnSavePlanLibrary = document.getElementById('btn-save-plan-library');
     if (btnSavePlanLibrary) {
-        btnSavePlanLibrary.addEventListener('click', saveCurrentPlanToLibrary);
+        btnSavePlanLibrary.addEventListener('click', planLibrary.saveCurrentPlanToLibrary);
     }
 
     // V2.7: 爆炸图按钮
@@ -976,8 +821,7 @@ function init() {
             setGlobalUnpackedItems([]);
             setCurrentFurnaceIndex(0);
             clearFurnaceGroups();
-            document.getElementById("btn-export-pdf").style.display = "none";
-            document.getElementById("btn-animate").style.display = "none";
+            hidePlanActionButtons();
             document.getElementById("furnace-nav").style.display = "none";
             document.getElementById("empty-state").style.display = "block";
             hideExplodeBOMButtons();
@@ -1093,20 +937,13 @@ function init() {
         if (isDigitalTwinRecord(window._jiParsedPlan)) {
             const record = window._jiParsedPlan;
 
-            restoreWorkbenchInputsFromRecord(record);
-            loadDigitalTwinRecordToWorkbench(record);
-
-            const analysis = analyzeFurnaces(
-                getRuntimeFurnacesFromRecord(record),
-                record.loadingPlan?.unpackedItems || [],
-                record.predictions || []
-            );
-
-            renderPlanAnalysisPanel(analysis);
-            activateRightPanelTab('analysis');
+            applyDigitalTwinRecordToWorkbench(record, {
+                sourceTitle: record.meta?.title || '导入方案',
+                closeLibrary: true,
+                showSuccess: true
+            });
 
             document.getElementById("json-import-overlay").style.display = "none";
-            hideMasterView();
             return;
         }
 
@@ -1296,22 +1133,8 @@ function loadDigitalTwinRecordToWorkbench(record) {
     setSelectedMaterialCardId(null);
 
     clearFurnaceGroups();
-
-    document.getElementById("empty-state").style.display = "none";
-    document.getElementById("canvas-container").style.display = "block";
-
     if (furnaces.length > 0) {
-        const btnAnimate = document.getElementById("btn-animate");
-        if (btnAnimate) {
-            btnAnimate.style.display = "inline-block";
-            btnAnimate.disabled = false;
-            btnAnimate.style.opacity = "1";
-        }
-
-        const btnExportPdf = document.getElementById("btn-export-pdf");
-        if (btnExportPdf) {
-            btnExportPdf.style.display = "inline-block";
-        }
+        showPlanActionButtons();
         renderSingleFurnace(0, getSelectedMaterialName());
         updateFurnaceNav();
         updateExplodeBOMButtons();
@@ -1331,6 +1154,43 @@ function loadDigitalTwinRecordToWorkbench(record) {
 
     renderAISummaryBar(onCenterFurnaceClick);
     updateTopSummary();
+}
+
+function applyDigitalTwinRecordToWorkbench(record, options = {}) {
+    const {
+        sourceTitle = '',
+        closeLibrary = false,
+        showSuccess = false
+    } = options;
+
+    const savedRules =
+        record.loadingPlan?.rules ||
+        record.process?.rules ||
+        null;
+
+    if (savedRules) {
+        setPlacementRules(savedRules);
+    }
+
+    restoreWorkbenchInputsFromRecord(record);
+    loadDigitalTwinRecordToWorkbench(record);
+
+    const analysis = analyzeFurnaces(
+        getRuntimeFurnacesFromRecord(record),
+        record.loadingPlan?.unpackedItems || [],
+        record.predictions || []
+    );
+
+    renderPlanAnalysisPanel(analysis);
+    activateRightPanelTab('analysis');
+
+    if (closeLibrary) {
+        hideMasterView();
+    }
+
+    if (showSuccess) {
+        showCapacityFeedback('success', `✅ 已加载方案：${sourceTitle || record.meta?.title || '历史方案'}`);
+    }
 }
 
 /**
@@ -1713,8 +1573,7 @@ function clearAllMaterials() {
         while (itemsGroup.children.length > 0) itemsGroup.remove(itemsGroup.children[0]);
     }
     // 5. 隐藏方案相关 UI
-    document.getElementById('btn-export-pdf').style.display = 'none';
-    document.getElementById('btn-animate').style.display = 'none';
+    hidePlanActionButtons();
     document.getElementById('furnace-nav').style.display = 'none';
     hideExplodeBOMButtons();
 
@@ -1778,8 +1637,7 @@ function clearAllFurnaces() {
         while (itemsGroup.children.length > 0) itemsGroup.remove(itemsGroup.children[0]);
     }
     // 6. 隐藏所有方案相关 UI
-    document.getElementById('btn-export-pdf').style.display = 'none';
-    document.getElementById('btn-animate').style.display = 'none';
+    hidePlanActionButtons();
     document.getElementById('furnace-nav').style.display = 'none';
     renderAISummaryBar(null);
     hideExplodeBOMButtons();
@@ -2036,7 +1894,8 @@ function restoreWorkbenchInputsFromRecord(record) {
                     remark: mat.remark || '',
                     customer: mat.customer || '',
                     itemCode: mat.itemCode || '',
-                    showName: mat.name || ''
+                    showName: mat.showName || mat.name || '',
+                    cadImage: mat.cadImage || ''
                 }
             );
         });
@@ -2046,31 +1905,4 @@ function restoreWorkbenchInputsFromRecord(record) {
 
     renderFilterBars(clearFurnaceResults);
     updateTopSummary();
-}
-
-function loadPlanLibraryItem(planId) {
-    const items = getPlanLibraryItems();
-    const item = items.find(x => x.id === planId);
-
-    if (!item || !item.record) {
-        alert('方案数据不存在');
-        return;
-    }
-
-    const record = item.record;
-
-    restoreWorkbenchInputsFromRecord(record);
-    loadDigitalTwinRecordToWorkbench(record);
-
-    const analysis = analyzeFurnaces(
-        getRuntimeFurnacesFromRecord(record),
-        record.loadingPlan?.unpackedItems || [],
-        record.predictions || []
-    );
-
-    renderPlanAnalysisPanel(analysis);
-    activateRightPanelTab('analysis');
-
-    hideMasterView();
-    showCapacityFeedback('success', `✅ 已加载方案：${item.title}`);
 }

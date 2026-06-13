@@ -924,26 +924,6 @@ body {
     color: var(--text-color); border-radius: 8px; font-size: 14px; height: 40px;
 }
 
-/* ==================== PDF HIDDEN TEMPLATE ==================== */
-#pdf-hidden-template { display: none; background: #ffffff; color: #1e293b; font-family: -apple-system, sans-serif; }
-.pdf-page { width: 794px; min-height: 1123px; padding: 40px; box-sizing: border-box; background: #ffffff; page-break-after: always; position: relative; }
-.pdf-page:last-child { page-break-after: avoid; }
-.pdf-header { border-bottom: 3px solid #2563EB; padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-end; }
-.pdf-title { margin: 0; color: #0f172a; font-size: 24px; font-weight: 600; }
-.pdf-subtitle { margin: 4px 0 0 0; color: #64748b; font-size: 12px; }
-.pdf-meta-right { text-align: right; color: #475569; font-size: 12px; line-height: 1.5; }
-.pdf-section-title { font-size: 16px; color: #0f172a; border-left: 4px solid #2563EB; padding-left: 8px; margin: 20px 0 12px 0; font-weight: 600; }
-.pdf-grid-line-x { position:absolute; top:0; width:1px; background:rgba(0,0,0,0.08); }
-.pdf-grid-line-y { position:absolute; left:0; height:1px; background:rgba(0,0,0,0.08); }
-.pdf-ruler-text { position:absolute; font-size:8px; color:#475569; font-weight:bold; pointer-events:none; }
-.pdf-signature-area { margin-top: 40px; border-top: 2px solid #e2e8f0; padding-top: 20px; }
-.pdf-signature-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 30px; margin-top: 16px; }
-.pdf-signature-box { border: 1px solid #cbd5e1; border-radius: 16px; padding: 16px; text-align: center; }
-.pdf-signature-box .sig-title { font-size: 14px; color: #64748b; margin-bottom: 40px; }
-.pdf-signature-box .sig-line { border-top: 1px solid #94a3b8; padding-top: 6px; font-size: 12px; color: #94a3b8; }
-
-/* ==================== 3D SCENE STATS OVERLAY PANEL (REMOVED in V6.0) ==================== */
-
 /* ==================== BOM PANEL (V2.7) ==================== */
 .bom-panel {
     position: fixed;
@@ -2252,64 +2232,6 @@ body {
     font-size: 11px;
     font-weight: 600;
     color: var(--text-secondary);
-}
-
-/* ==================== 方案库独立模式 ==================== */
-
-body.library-mode #left-panel,
-body.library-mode #right-panel,
-body.library-mode #furnace-nav,
-body.library-mode #furnace-thumb-bar,
-body.library-mode #dock-bar,
-body.library-mode #ai-summary-bar {
-    display: none !important;
-}
-
-body.library-mode #main-content {
-    grid-template-columns: 1fr !important;
-}
-
-body.library-mode #canvas-area {
-    width: 100% !important;
-    height: calc(100vh - 56px) !important;
-    grid-column: 1 / -1 !important;
-}
-
-body.library-mode #master-view {
-    position: absolute !important;
-    inset: 0 !important;
-    z-index: 50 !important;
-    background: #f8fbff;
-}
-
-body.library-mode #master-view.active {
-    display: flex !important;
-    flex-direction: column !important;
-}
-
-body.library-mode #master-3d {
-    display: block !important;
-    height: 100% !important;
-    overflow: auto !important;
-    background: #ffffff;
-}
-
-body.library-mode #master-canvas-container {
-    display: none !important;
-}
-
-body.library-mode #master-detail-panel {
-    position: relative !important;
-    left: auto !important;
-    right: auto !important;
-    bottom: auto !important;
-    top: auto !important;
-    width: auto !important;
-    height: auto !important;
-    max-height: none !important;
-    overflow: visible !important;
-    padding: 24px !important;
-    background: #ffffff !important;
 }
 
 /* ==================== 方案库独立模式 ==================== */

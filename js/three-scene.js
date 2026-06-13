@@ -1350,8 +1350,14 @@ export function buildFurnaceGroup(furnace, index, filterMaterialName) {
         }
     });
 
-    // 渲染搁板（传入 layerGroups Map，搁板将加入对应的 LayerGroup）
-    if (placementRules.useShelfLayered && furnace.packedItems.length > 0) {
+    // 渲染搁板：
+    // 1. 当前规则启用了搁板分层；或
+    // 2. 历史方案 / JSON 恢复出来的 furnace 本身已经有 shelvesUsed
+    const hasSavedShelves =
+        Array.isArray(furnace.shelvesUsed) &&
+        furnace.shelvesUsed.length > 0;
+
+    if ((placementRules.useShelfLayered || hasSavedShelves) && furnace.packedItems.length > 0) {
         renderShelvesForFurnace(furnace, furnaceGroup, baseY, layerGroups);
     }
 

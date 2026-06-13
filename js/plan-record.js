@@ -62,6 +62,9 @@ function normalizePlacedItem(item, index) {
         customer: item.customer || '',
         itemCode: item.itemCode || '',
         showName: item.showName || '',
+        orderDate: item.orderDate || '',
+        deliveryDate: item.deliveryDate || '',
+        remark: item.remark || '',
         rotationInfo: item.rotationInfo || '',
         originalDims: item.originalDims || null
     };
