@@ -18,15 +18,15 @@ import {
     isAnimating, animPaused, animStopped,
     globalFurnacesResult, globalUnpackedItems, aggregationStats,
     currentFurnaceIndex, selectedFurnaceCardId,
-    masterRenderer, itemsGroup, usedColors,
-    currentBasketType, displaySettings,
-    defaultToolingType, furnaceTooling, toolingTemplates,
+    itemsGroup, usedColors,
+    displaySettings,
+    defaultToolingType, furnaceTooling,
     setAnimPaused, setAnimStopped, setCurrentFurnaceIndex,
     setFdpCollapsed, setMdpCollapsed,
     placementRules,
     setGlobalFurnacesResult, setGlobalUnpackedItems, setGlobalSpacingValue,
     setGlobalPredictions,
-    setCurrentBasketType, setDisplaySettings, setDefaultToolingType,
+    setDisplaySettings,
     clearFurnaceGroups,
     furnaceGroups, controls, camera,
     setFurnaceCounter, setMaterialCounter,
@@ -35,10 +35,10 @@ import {
     clearUsedColors
 } from './state.js';
 import {
-    initThree, initMasterThree, renderSingleFurnace,
+    initThree, renderSingleFurnace,
     buildFurnaceGroup,
     getSelectedMaterialName,
-    playLoadingAnimation, renderMasterPlan,
+    playLoadingAnimation,
     findResultIndexByFid, generateUniqueColor,
     refreshAllDisplayVisibility,
     toggleExplodedView, showLayeredBOM,
@@ -54,8 +54,8 @@ import {
     updateLeftPanelActiveForIndex, renderAISummaryBar,
     showCapacityFeedback, openRulesModal, saveRulesModal,
     renderFurnaceThumbnails, renderFilterBars,
-    initMasterView, parseExcelData, showImportPreview, applyImportData,
-    openJsonImportModal, parseJsonPlan, renderJsonPreview, importJsonPlanToMaster
+    parseExcelData, showImportPreview, applyImportData,
+    openJsonImportModal, parseJsonPlan, renderJsonPreview, 
 } from './ui.js';
 import { executePacking } from './furnace-engine.js';
 import { showPdfSelectModal, exportSingleFurnacePDF, getSelectedPdfFurnaceIds } from './pdf-export.js';
@@ -179,6 +179,11 @@ function applyCandidatePlan(index) {
 
         document.getElementById("btn-export-pdf").style.display = "inline-block";
         document.getElementById("btn-animate").style.display = "inline-block";
+
+        const btnSavePlanLibrary = document.getElementById("btn-save-plan-library");
+        if (btnSavePlanLibrary) {
+            btnSavePlanLibrary.style.display = "inline-block";
+        }
     } else {
         document.getElementById("empty-state").style.display = "block";
         document.getElementById("furnace-nav").style.display = "none";
@@ -296,6 +301,11 @@ function executeAndRender() {
 
     document.getElementById("btn-export-pdf").style.display = "inline-block";
     document.getElementById("btn-animate").style.display = "inline-block";
+
+    const btnSavePlanLibrary = document.getElementById("btn-save-plan-library");
+    if (btnSavePlanLibrary) {
+        btnSavePlanLibrary.style.display = "inline-block";
+    }
 
     let startIndex = 0;
     if (selectedFurnaceCardId) {
@@ -450,6 +460,109 @@ function exportCurrentPlanJson() {
     downloadJsonFile(record, `${title}.json`);
 }
 
+const PLAN_LIBRARY_STORAGE_KEY = 'heat_treatment_plan_library_v1';
+
+function getPlanLibraryItems() {
+    try {
+        return JSON.parse(localStorage.getItem(PLAN_LIBRARY_STORAGE_KEY) || '[]');
+    } catch (e) {
+        console.warn('读取方案库失败：', e);
+        return [];
+    }
+}
+
+function setPlanLibraryItems(items) {
+    localStorage.setItem(PLAN_LIBRARY_STORAGE_KEY, JSON.stringify(items));
+}
+
+function escapeHtmlText(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (ch) => {
+        const map = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        };
+        return map[ch] || ch;
+    });
+}
+
+function safeFileName(name) {
+    return String(name || '装炉方案').replace(/[\\/:*?"<>|]/g, '_');
+}
+
+function buildPlanLibrarySummary(record) {
+    const furnaces = record.loadingPlan?.furnaces || [];
+    const materials = record.materials || [];
+
+    const totalItems = furnaces.reduce((sum, f) => {
+        return sum + ((f.packedItems && f.packedItems.length) || 0);
+    }, 0);
+
+    const totalWeight = furnaces.reduce((sum, f) => {
+        return sum + Number(f.totalWeightKg ?? f.totalWeight ?? 0);
+    }, 0);
+
+    const firstFurnace = furnaces[0] || {};
+    const dim = firstFurnace.dimensions || {};
+
+    return {
+        furnaceCount: furnaces.length,
+        materialBatchCount: materials.length,
+        totalItems,
+        totalWeightKg: totalWeight,
+        firstFurnaceName: firstFurnace.instanceId || firstFurnace.typeName || '-',
+        firstFurnaceSize: dim.width
+            ? `${dim.width}×${dim.height}×${dim.depth}mm`
+            : '-',
+        strategy: record.loadingPlan?.strategy || placementRules.strategy || '-'
+    };
+}
+
+function saveCurrentPlanToLibrary() {
+    if (!globalFurnacesResult || globalFurnacesResult.length === 0) {
+        alert('请先生成装炉方案，再保存到方案库');
+        return;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const defaultTitle = `装炉方案_${today}`;
+    const inputTitle = prompt('请输入方案名称', defaultTitle);
+
+    if (inputTitle === null) return;
+
+    const title = inputTitle.trim() || defaultTitle;
+
+    const record = buildCurrentDigitalTwinRecord({
+        title,
+        materials: collectMaterialBatchesForRecord(),
+        tooling: collectToolingForRecord()
+    });
+
+    const now = new Date().toISOString();
+
+    const item = {
+        id: `PLAN-${Date.now()}`,
+        title,
+        createdAt: now,
+        updatedAt: now,
+        summary: buildPlanLibrarySummary(record),
+        record
+    };
+
+    const items = getPlanLibraryItems();
+    items.unshift(item);
+
+    try {
+        setPlanLibraryItems(items);
+        showCapacityFeedback('success', `✅ 已保存到方案库：${title}`);
+    } catch (e) {
+        console.error(e);
+        alert('保存失败：浏览器本地存储空间可能不足。可以先导出 JSON 备份。');
+    }
+}
+
 /**
  * 清空所有装炉结果，重置3D场景和UI
  */
@@ -467,7 +580,7 @@ export function clearFurnaceResults() {
     document.getElementById("empty-state").style.display = "block";
     renderAISummaryBar(null);
     // 可选：显示提示
-    showCapacityFeedback('info', '筛选条件已变更，请重新生成方案');
+    showCapacityFeedback('success', '筛选条件已变更，请重新生成方案');
 }
 window._clearFurnaceResults = clearFurnaceResults; // 供 ui.js 调用
 
@@ -563,19 +676,156 @@ function onCenterFurnaceClick(idx) {
  * @returns {void}
  */
 function showMasterView() {
+    document.body.classList.add('library-mode');
+
     document.getElementById("master-view").classList.add("active");
     document.getElementById("furnace-nav").style.display = "none";
     document.getElementById("canvas-container").style.display = "none";
     document.getElementById("anim-control-bar").classList.remove("visible");
     hideExplodeBOMButtons();
-    if (!masterRenderer) {
-        setTimeout(() => {
-            initMasterThree();
-            initMasterView(renderMasterPlan);
-        }, 100);
-    } else {
-        initMasterView(renderMasterPlan);
+
+    renderPlanLibraryList();
+}
+
+function renderPlanLibraryList() {
+    const listEl = document.getElementById('master-list');
+    const detailEl = document.getElementById('master-detail-panel');
+
+    if (!listEl || !detailEl) return;
+
+    const items = getPlanLibraryItems();
+
+    if (items.length === 0) {
+        listEl.innerHTML = `
+            <div style="font-size:12px;color:#888;padding:12px;">
+                暂无已保存方案。请先生成方案，然后点击顶部“保存方案”。
+            </div>
+        `;
+        detailEl.innerHTML = '<strong>暂无方案</strong>';
+        return;
     }
+
+    listEl.innerHTML = `
+        <div style="font-size:11px;color:#666;margin-bottom:10px;padding:4px 0;">
+            共 ${items.length} 个方案
+        </div>
+    `;
+
+    items.forEach((item, idx) => {
+        const s = item.summary || {};
+        const card = document.createElement('div');
+        card.className = 'master-plan-card' + (idx === 0 ? ' active' : '');
+        card.setAttribute('data-plan-id', item.id);
+
+        card.innerHTML = `
+            <button class="mpc-delete" data-action="delete-library-plan" title="删除此方案">✕</button>
+            <div class="mpc-title">${escapeHtmlText(item.title)}</div>
+            <button class="btn-sm" data-action="load-library-plan">加载</button>
+            <div class="mpc-meta">
+                ${escapeHtmlText(s.firstFurnaceName || '-')}<br>
+                ${escapeHtmlText((item.createdAt || '').slice(0, 10))} · ${escapeHtmlText(s.strategy || '-')}<br>
+                ${s.furnaceCount || 0} 炉 · ${s.totalItems || 0} 件 · ${(s.totalWeightKg || 0).toFixed(1)}kg
+            </div>
+            <span class="mpc-tag imported">方案库</span>
+        `;
+
+        card.addEventListener('click', (e) => {
+            if (e.target.closest('[data-action="delete-library-plan"]')) return;
+
+            document.querySelectorAll('.master-plan-card').forEach(c => c.classList.remove('active'));
+            card.classList.add('active');
+            renderPlanLibraryDetail(item.id);
+        });
+
+        card.querySelector('[data-action="delete-library-plan"]').addEventListener('click', (e) => {
+            e.stopPropagation();
+            deletePlanLibraryItem(item.id);
+        });
+
+        const loadBtn = card.querySelector('[data-action="load-library-plan"]');
+        if (loadBtn) {
+            loadBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                loadPlanLibraryItem(item.id);
+            });
+        }
+
+        listEl.appendChild(card);
+    });
+
+    renderPlanLibraryDetail(items[0].id);
+}
+
+function renderPlanLibraryDetail(planId) {
+    const detailEl = document.getElementById('master-detail-panel');
+    if (!detailEl) return;
+
+    const items = getPlanLibraryItems();
+    const item = items.find(x => x.id === planId);
+
+    if (!item) {
+        detailEl.innerHTML = '<strong>方案不存在</strong>';
+        return;
+    }
+
+    const s = item.summary || {};
+
+    // detailEl.innerHTML = `
+    //     <div style="padding:12px;line-height:1.8;font-size:12px;">
+    //         <strong style="font-size:14px;">${escapeHtmlText(item.title)}</strong><br>
+    //         创建时间：${escapeHtmlText(item.createdAt || '-')}<br>
+    //         炉次数量：${s.furnaceCount || 0}<br>
+    //         工件数量：${s.totalItems || 0}<br>
+    //         总重量：${(s.totalWeightKg || 0).toFixed(1)}kg<br>
+    //         首炉尺寸：${escapeHtmlText(s.firstFurnaceSize || '-')}<br>
+    //         策略：${escapeHtmlText(s.strategy || '-')}
+    //         <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+    //             <button class="btn-sm" id="btn-load-library-plan">加载到工作台</button>
+    //             <button class="btn-sm" id="btn-export-library-plan-json">导出JSON</button>
+    //             <button class="btn-sm btn-reset-danger" id="btn-delete-library-plan">删除</button>
+    //         </div>
+    //     </div>
+    // `;
+    detailEl.innerHTML = `
+        <div style="padding:12px;line-height:1.8;font-size:12px;">
+            <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+                <button class="btn-sm" id="btn-load-library-plan">加载到工作台</button>
+                <button class="btn-sm" id="btn-export-library-plan-json">导出JSON</button>
+                <button class="btn-sm btn-reset-danger" id="btn-delete-library-plan">删除</button>
+            </div>
+
+            <strong style="font-size:14px;">${escapeHtmlText(item.title)}</strong><br>
+            创建时间：${escapeHtmlText(item.createdAt || '-')}<br>
+            炉次数量：${s.furnaceCount || 0}<br>
+            工件数量：${s.totalItems || 0}<br>
+            总重量：${(s.totalWeightKg || 0).toFixed(1)}kg<br>
+            首炉尺寸：${escapeHtmlText(s.firstFurnaceSize || '-')}<br>
+            策略：${escapeHtmlText(s.strategy || '-')}
+        </div>
+    `;
+    document.getElementById('btn-load-library-plan').addEventListener('click', () => {
+        loadPlanLibraryItem(item.id);
+    });
+
+    document.getElementById('btn-export-library-plan-json').addEventListener('click', () => {
+        downloadJsonFile(item.record, `${safeFileName(item.title)}.json`);
+    });
+
+    document.getElementById('btn-delete-library-plan').addEventListener('click', () => {
+        deletePlanLibraryItem(item.id);
+    });
+}
+
+function deletePlanLibraryItem(planId) {
+    const items = getPlanLibraryItems();
+    const item = items.find(x => x.id === planId);
+
+    if (!item) return;
+    if (!confirm(`确定删除方案「${item.title}」吗？`)) return;
+
+    const nextItems = items.filter(x => x.id !== planId);
+    setPlanLibraryItems(nextItems);
+    renderPlanLibraryList();
 }
 
 /**
@@ -583,8 +833,11 @@ function showMasterView() {
  * @returns {void}
  */
 function hideMasterView() {
+    document.body.classList.remove('library-mode');
+
     document.getElementById("master-view").classList.remove("active");
     document.getElementById("canvas-container").style.display = "block";
+
     if (globalFurnacesResult && globalFurnacesResult.length > 0) {
         document.getElementById("furnace-nav").style.display = "flex";
         updateExplodeBOMButtons();
@@ -621,6 +874,10 @@ function init() {
     const btnExportJson = document.getElementById('btn-export-json');
     if (btnExportJson) {
         btnExportJson.addEventListener('click', exportCurrentPlanJson);
+    }
+    const btnSavePlanLibrary = document.getElementById('btn-save-plan-library');
+    if (btnSavePlanLibrary) {
+        btnSavePlanLibrary.addEventListener('click', saveCurrentPlanToLibrary);
     }
 
     // V2.7: 爆炸图按钮
@@ -836,6 +1093,7 @@ function init() {
         if (isDigitalTwinRecord(window._jiParsedPlan)) {
             const record = window._jiParsedPlan;
 
+            restoreWorkbenchInputsFromRecord(record);
             loadDigitalTwinRecordToWorkbench(record);
 
             const analysis = analyzeFurnaces(
@@ -852,8 +1110,9 @@ function init() {
             return;
         }
 
-        // 旧格式：继续进入历史方案库
-        importJsonPlanToMaster(window._jiParsedPlan, () => initMasterView(renderMasterPlan));
+        // 旧格式：暂不进入旧历史方案库，避免与新版方案库混用
+        alert('当前方案库仅支持新版“装炉数字孪生 JSON”。旧格式历史方案暂不支持直接导入工作台。');
+
         document.getElementById("json-import-overlay").style.display = "none";
     });
     document.getElementById("btn-ji-cancel").addEventListener("click", () => {
@@ -1710,3 +1969,108 @@ init();
     }
 
 })();
+
+function restoreWorkbenchInputsFromRecord(record) {
+    // 清空当前左侧炉膛卡片和右侧物料卡片
+    document.querySelectorAll('.furnace-card').forEach(c => c.remove());
+    document.querySelectorAll('.material-card').forEach(c => c.remove());
+
+    setSelectedFurnaceCardId(null);
+    setSelectedMaterialCardId(null);
+    setFurnaceCounter(0);
+    setMaterialCounter(0);
+    clearUsedColors();
+
+    clearMaterialFilters();
+    clearProcessFilters();
+    clearHardnessFilters();
+
+    // 避免 createMaterialCard 批量创建时反复清空结果和弹提示
+    const oldClearResults = window._clearFurnaceResults;
+    window._clearFurnaceResults = null;
+
+    try {
+        const toolingList = record.tooling || [];
+        toolingList.forEach(tool => {
+            const dim = tool.dimensions || {};
+
+            const result = createFurnaceCard(
+                tool.toolingName || '历史工装',
+                dim.depth || 900,
+                dim.width || 900,
+                dim.height || 900,
+                tool.maxLoadKg || 1000,
+                tool.availableCount || 1,
+                0,
+                tool.actualSpacingMm ?? 5,
+                tool.basketType || 'grid',
+                tool.toolingType || 'standard-basket'
+            );
+
+            const card = document.getElementById(result.cardId);
+            if (card && tool.params) {
+                card.setAttribute('data-extras', JSON.stringify(tool.params));
+            }
+        });
+
+        const materialList = record.materials || [];
+        materialList.forEach(mat => {
+            const dim = mat.dimensions || {};
+            const color = generateUniqueColor(usedColors);
+
+            createMaterialCard(
+                mat.name || '历史工件',
+                mat.shape || 'cuboid',
+                mat.quantity || 1,
+                dim.length || dim.diameter || dim.width || 50,
+                dim.width || dim.length || 50,
+                dim.height || 50,
+                mat.totalWeightKg || 0,
+                color,
+                {
+                    material: mat.material || '',
+                    process: mat.process || '',
+                    hardness: mat.hardnessTarget || '',
+                    orderDate: mat.orderDate || '',
+                    deliveryDate: mat.deliveryDate || '',
+                    remark: mat.remark || '',
+                    customer: mat.customer || '',
+                    itemCode: mat.itemCode || '',
+                    showName: mat.name || ''
+                }
+            );
+        });
+    } finally {
+        window._clearFurnaceResults = oldClearResults;
+    }
+
+    renderFilterBars(clearFurnaceResults);
+    updateTopSummary();
+}
+
+function loadPlanLibraryItem(planId) {
+    const items = getPlanLibraryItems();
+    const item = items.find(x => x.id === planId);
+
+    if (!item || !item.record) {
+        alert('方案数据不存在');
+        return;
+    }
+
+    const record = item.record;
+
+    restoreWorkbenchInputsFromRecord(record);
+    loadDigitalTwinRecordToWorkbench(record);
+
+    const analysis = analyzeFurnaces(
+        getRuntimeFurnacesFromRecord(record),
+        record.loadingPlan?.unpackedItems || [],
+        record.predictions || []
+    );
+
+    renderPlanAnalysisPanel(analysis);
+    activateRightPanelTab('analysis');
+
+    hideMasterView();
+    showCapacityFeedback('success', `✅ 已加载方案：${item.title}`);
+}

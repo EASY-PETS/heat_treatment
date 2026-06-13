@@ -27,7 +27,7 @@
             <div class="top-logo-title">AI热处理装炉智能体</div>
             <div class="top-logo-subtitle">AI Furnace Loading Agent</div>
         </div>
-        <button class="btn top-nav-btn" id="btn-master">历史方案</button>
+        <button class="btn top-nav-btn" id="btn-master">方案库</button>
         <button class="btn top-nav-btn" id="btn-tooling-mgmt">工装管理</button>
         <button class="btn top-nav-btn" id="btn-material-nav">产品/模具</button>
         <button class="btn top-nav-btn" id="btn-rules">装炉规则</button>
@@ -35,6 +35,7 @@
         <button class="btn top-tool-btn" id="btn-animate">模拟装炉</button>
         <button class="btn top-tool-btn" id="btn-export-pdf">导出PDF</button>
         <button class="btn top-tool-btn" id="btn-export-json">导出JSON</button>
+        <button class="btn top-tool-btn" id="btn-save-plan-library" style="display:none;">保存方案</button>
         <button class="btn top-tool-btn" id="btn-bom" style="display:none;">施工清单</button>
         <button class="btn top-tool-btn" id="btn-explode" style="display:none;">爆炸图</button>
         <button class="btn btn-generate" id="btn-generate-plan">生成方案</button>
@@ -105,9 +106,9 @@
             <div id="master-view">
                 <div id="master-header">
                     <button class="master-back-btn" id="btn-master-back">← 返回</button>
-                    <h3>🏆 装料大师 · 历史装炉方案库</h3>
-                    <span style="font-size:11px;color:#888;">点击方案查看3D预览</span>
-                    <button class="master-import-btn" id="btn-master-import-json">📥 导入历史数据 (JSON)</button>
+                    <h3>📚 方案库</h3>
+                    <span style="font-size:11px;color:#888;">保存、加载、删除历史装炉方案</span>
+                    <button class="master-import-btn" id="btn-master-import-json">📥 导入JSON到工作台</button>
                 </div>
                 <div id="master-content">
                     <div id="master-list"></div>
