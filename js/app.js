@@ -12,7 +12,7 @@
  */
 
 import { analyzeFurnaces } from './plan-analysis.js';
-import { renderPlanAnalysisPanel } from './ui.js';
+import { renderPlanAnalysisPanel, renderCandidatePlanCards } from './ui.js';
 import * as THREE from 'three';
 import {
     isAnimating, animPaused, animStopped,
@@ -67,6 +67,128 @@ import {
     getRuntimeFurnacesFromRecord,
     isDigitalTwinRecord
 } from './plan-record.js';
+
+let candidatePlans = [];
+let currentCandidatePlanIndex = 0;
+
+const STRATEGY_LABELS = {
+    balanced: '均衡方案',
+    spaceUtil: '空间优先',
+    thermalBalance: '热场均衡',
+    surfaceUniform: '表面均匀'
+};
+
+function clonePlain(obj) {
+    return JSON.parse(JSON.stringify(obj));
+}
+
+function generateCandidatePlans(furnacePoolInput, itemsInput, spacing) {
+    const currentStrategy = placementRules.strategy || 'balanced';
+
+    const strategyListRaw = [
+        {
+            key: currentStrategy,
+            label: '当前策略：' + (STRATEGY_LABELS[currentStrategy] || currentStrategy)
+        },
+        { key: 'balanced', label: '均衡方案' },
+        { key: 'spaceUtil', label: '空间优先' },
+        { key: 'thermalBalance', label: '热场均衡' },
+        { key: 'surfaceUniform', label: '表面均匀' }
+    ];
+
+    // 去重：如果当前策略本来就是 balanced / spaceUtil 等，不重复跑
+    const seen = new Set();
+    const strategyList = strategyListRaw.filter(s => {
+        if (seen.has(s.key)) return false;
+        seen.add(s.key);
+        return true;
+    });
+
+    const plans = strategyList.map(strategyInfo => {
+        const result = executePacking(
+            clonePlain(furnacePoolInput),
+            clonePlain(itemsInput),
+            spacing,
+            strategyInfo.key
+        );
+
+        const analysis = analyzeFurnaces(
+            result.completedFurnaces || [],
+            result.unpackedItems || [],
+            result.predictions || []
+        );
+
+        return {
+            strategy: strategyInfo.key,
+            label: strategyInfo.label,
+            result,
+            analysis
+        };
+    });
+
+    // 排序：能全部装入的优先，其次看综合评分
+    plans.sort((a, b) => {
+        const aExecutable = a.analysis.unpackedCount === 0 ? 1 : 0;
+        const bExecutable = b.analysis.unpackedCount === 0 ? 1 : 0;
+
+        if (aExecutable !== bExecutable) {
+            return bExecutable - aExecutable;
+        }
+
+        return b.analysis.compositeScore - a.analysis.compositeScore;
+    });
+
+    return plans;
+}
+
+function applyCandidatePlan(index) {
+    if (!candidatePlans || !candidatePlans[index]) return;
+
+    currentCandidatePlanIndex = index;
+
+    const plan = candidatePlans[index];
+    const result = plan.result;
+
+    setGlobalFurnacesResult(result.completedFurnaces || []);
+    setGlobalUnpackedItems(result.unpackedItems || []);
+
+    if (result.predictions) {
+        setGlobalPredictions(result.predictions);
+    }
+
+    clearFurnaceGroups();
+    setCurrentFurnaceIndex(0);
+
+    renderPlanAnalysisPanel(plan.analysis);
+    renderCandidatePlanCards(candidatePlans, index, applyCandidatePlan);
+    activateRightPanelTab('analysis');
+
+    if (result.completedFurnaces && result.completedFurnaces.length > 0) {
+        document.getElementById("empty-state").style.display = "none";
+
+        renderSingleFurnace(0, getSelectedMaterialName());
+        updateFurnaceNav();
+        updateLeftPanelActiveForIndex(0);
+        updateExplodeBOMButtons();
+
+        renderFurnaceThumbnails(
+            result.completedFurnaces,
+            0,
+            handleThumbFurnaceClick
+        );
+
+        document.getElementById("btn-export-pdf").style.display = "inline-block";
+        document.getElementById("btn-animate").style.display = "inline-block";
+    } else {
+        document.getElementById("empty-state").style.display = "block";
+        document.getElementById("furnace-nav").style.display = "none";
+        hideExplodeBOMButtons();
+    }
+
+    renderAISummaryBar(onCenterFurnaceClick);
+    updateTopSummary();
+}
+
 /**
  * V2.7: executeAndRender — 核心入口函数
  *
@@ -143,8 +265,16 @@ function executeAndRender() {
      * V2.7: 执行装炉算法
      * 移除 xOffset 计算 — 所有炉膛在原点渲染
      */
-    const strategy = placementRules.strategy || 'balanced';
-    const result = executePacking(furnacePoolInput, itemsInput, spacing, strategy);
+    candidatePlans = generateCandidatePlans(
+        furnacePoolInput,
+        itemsInput,
+        spacing
+    );
+
+    currentCandidatePlanIndex = 0;
+
+    const bestPlan = candidatePlans[0];
+    const result = bestPlan.result;
 
     setGlobalFurnacesResult(result.completedFurnaces);
     setGlobalUnpackedItems(result.unpackedItems);
@@ -152,16 +282,17 @@ function executeAndRender() {
     // V5.0 P0: 存储预测结果供后续 UI 渲染使用
     if (result.predictions) {
         setGlobalPredictions(result.predictions);
-
-        const analysis = analyzeFurnaces(
-            result.completedFurnaces || [],
-            result.unpackedItems || [],
-            result.predictions || []
-        );
-
-        renderPlanAnalysisPanel(analysis);
-        activateRightPanelTab('analysis');
     }
+
+    const analysis = analyzeFurnaces(
+        result.completedFurnaces || [],
+        result.unpackedItems || [],
+        result.predictions || []
+    );
+
+    renderPlanAnalysisPanel(analysis);
+    renderCandidatePlanCards(candidatePlans, currentCandidatePlanIndex, applyCandidatePlan);
+    activateRightPanelTab('analysis');
 
     document.getElementById("btn-export-pdf").style.display = "inline-block";
     document.getElementById("btn-animate").style.display = "inline-block";
@@ -703,26 +834,18 @@ function init() {
 
         // 新格式：直接恢复到当前装炉工作台
         if (isDigitalTwinRecord(window._jiParsedPlan)) {
-            loadDigitalTwinRecordToWorkbench(window._jiParsedPlan);
-            if (isDigitalTwinRecord(window._jiParsedPlan)) {
-                const record = window._jiParsedPlan;
+            const record = window._jiParsedPlan;
 
-                loadDigitalTwinRecordToWorkbench(record);
+            loadDigitalTwinRecordToWorkbench(record);
 
-                const analysis = analyzeFurnaces(
-                    getRuntimeFurnacesFromRecord(record),
-                    record.loadingPlan?.unpackedItems || [],
-                    record.predictions || []
-                );
-
-                renderPlanAnalysisPanel(analysis);
-
-                document.getElementById("json-import-overlay").style.display = "none";
-                hideMasterView();
-                return;
-            }
+            const analysis = analyzeFurnaces(
+                getRuntimeFurnacesFromRecord(record),
+                record.loadingPlan?.unpackedItems || [],
+                record.predictions || []
+            );
 
             renderPlanAnalysisPanel(analysis);
+            activateRightPanelTab('analysis');
 
             document.getElementById("json-import-overlay").style.display = "none";
             hideMasterView();

@@ -2190,3 +2190,66 @@ body {
     line-height: 1.5;
     color: #78350F;
 }
+
+/* ==================== CANDIDATE PLAN LIST ==================== */
+.candidate-plan-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.candidate-plan-card {
+    background: #FFFFFF;
+    border: 1px solid var(--border-color);
+    border-left: 4px solid #CBD5E1;
+    border-radius: 14px;
+    padding: 10px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.04);
+}
+
+.candidate-plan-card:hover {
+    background: #F8FAFC;
+    border-left-color: var(--accent-color);
+}
+
+.candidate-plan-card.active {
+    background: #EFF6FF;
+    border-color: #BFDBFE;
+    border-left-color: var(--accent-color);
+}
+
+.candidate-plan-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+}
+
+.candidate-plan-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-color);
+}
+
+.candidate-plan-score {
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--accent-color);
+}
+
+.candidate-plan-meta {
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+.candidate-plan-status {
+    margin-top: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}

@@ -1304,3 +1304,53 @@ export function renderPlanAnalysisPanel(analysis) {
         </div>
     `;
 }
+
+export function renderCandidatePlanCards(plans = [], activeIndex = 0, onSelect) {
+    const el = document.getElementById('candidate-plan-list');
+    if (!el) return;
+
+    if (!plans || plans.length === 0) {
+        el.innerHTML = '';
+        return;
+    }
+
+    el.innerHTML = plans.map((p, idx) => {
+        const a = p.analysis || {};
+        const isBest = idx === 0;
+        const isActive = idx === activeIndex;
+
+        const qualityText = a.qualityScore != null
+            ? a.qualityScore.toFixed(0)
+            : '-';
+
+        const statusText = a.unpackedCount > 0
+            ? `未装 ${a.unpackedCount}`
+            : '全装入';
+
+        return `
+            <div class="candidate-plan-card ${isActive ? 'active' : ''}" data-plan-idx="${idx}">
+                <div class="candidate-plan-top">
+                    <div class="candidate-plan-title">
+                        ${isBest ? '⭐ ' : ''}${p.label}
+                    </div>
+                    <div class="candidate-plan-score">${a.compositeScore || 0}分</div>
+                </div>
+                <div class="candidate-plan-meta">
+                    空间 ${(a.spaceUtilization * 100).toFixed(1)}% ·
+                    重量 ${(a.weightUtilization * 100).toFixed(1)}% ·
+                    质量 ${qualityText}
+                </div>
+                <div class="candidate-plan-status">${statusText}</div>
+            </div>
+        `;
+    }).join('');
+
+    el.querySelectorAll('.candidate-plan-card').forEach(card => {
+        card.addEventListener('click', () => {
+            const idx = parseInt(card.getAttribute('data-plan-idx'));
+            if (!isNaN(idx) && onSelect) {
+                onSelect(idx);
+            }
+        });
+    });
+}
