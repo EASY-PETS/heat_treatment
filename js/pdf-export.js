@@ -707,7 +707,7 @@ export function showPdfSelectModal() {
         unpackedWarning.style.display = 'block';
         unpackedWarning.innerHTML = `<strong>⚠️ 有 ${globalUnpackedItems.length} 件工件无法装入当前炉膛：</strong><br>
             ${Object.entries(summary).map(([k,v]) => `${k}×${v}`).join(' · ')}<br>
-            <span style="color:#ffaaaa;font-size:10px;margin-top:4px;display:block;">导出PDF时将自动附加「未装炉工件清单」页面</span>`;
+            <span style="color:#ffaaaa;font-size:10px;margin-top:4px;display:block;">当前 PDF 将导出已装炉方案；未装炉工件请结合页面容量提示另行安排后续炉次。</span>`;
     } else {
         unpackedWarning.style.display = 'none';
     }
@@ -737,7 +737,7 @@ export function showPdfSelectModal() {
 
 /**
  * V3.1: 获取用户在 PDF 选择弹窗中选中的所有炉膛索引。
- * 用于支持多炉膛批量导出六页式 PDF。
+ * 用于支持多炉膛批量导出三页式 PDF。
  * @returns {number[]} 选中的炉膛索引数组
  */
 export function getSelectedPdfFurnaceIds() {

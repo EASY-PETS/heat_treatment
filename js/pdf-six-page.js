@@ -68,6 +68,7 @@ function buildPage1_TaskOverviewWithShots(furnace, screenshots, pdfWrapper, mult
 
     const uniqueNames = new Set();
     furnace.packedItems.forEach(item => uniqueNames.add(item.name));
+    const executionConclusion = buildExecutionConclusion(furnace, volUtil, weightUtil);
 
     page.innerHTML = `
         <!-- 页眉 -->
@@ -107,6 +108,35 @@ function buildPage1_TaskOverviewWithShots(furnace, screenshots, pdfWrapper, mult
         </div>
 
         <!-- 物料清单表（紧凑版） -->
+        <!-- 执行结论 -->
+        <div style="margin:6px 0 8px 0;padding:8px 10px;border-radius:6px;background:${executionConclusion.bg};border:1px solid ${executionConclusion.border};">
+            <div style="font-size:12px;font-weight:bold;color:${executionConclusion.color};margin-bottom:4px;">
+                ${executionConclusion.title}
+            </div>
+            <div style="font-size:10px;line-height:1.6;color:#334155;">
+                ${executionConclusion.desc}
+            </div>
+        </div>
+
+        <!-- 炉膛 / 工装确认 -->
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:6px;">
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;padding:6px;">
+                <div style="font-size:9px;color:#64748b;">炉膛尺寸</div>
+                <div style="font-size:11px;font-weight:bold;">${furnace.w}×${furnace.h}×${furnace.d} mm</div>
+            </div>
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;padding:6px;">
+                <div style="font-size:9px;color:#64748b;">最大承重</div>
+                <div style="font-size:11px;font-weight:bold;">${furnace.max_weight || '—'} kg</div>
+            </div>
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;padding:6px;">
+                <div style="font-size:9px;color:#64748b;">工装类型</div>
+                <div style="font-size:11px;font-weight:bold;">${escapeHtml(furnace.toolingType || furnace.basketType || '标准工装')}</div>
+            </div>
+            <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;padding:6px;">
+                <div style="font-size:9px;color:#64748b;">执行状态</div>
+                <div style="font-size:11px;font-weight:bold;color:${executionConclusion.color};">${executionConclusion.status}</div>
+            </div>
+        </div>
         <div class="pdf-section-divider" style="margin: 6px 0 !important;"></div>
                 <div style="font-size:12px;font-weight:bold;margin-bottom:4px;">📦 物料清单</div>
                 <table class="pdf-material-table pdf-material-table-compact">
@@ -142,30 +172,11 @@ function buildPage1_TaskOverviewWithShots(furnace, screenshots, pdfWrapper, mult
             <!-- 右侧：爆炸图 -->
             <div class="pdf-overview-right-panel">
                 <div class="pdf-thumb-label">💥 爆炸视图（垂直展开 · 侧45°透视）</div>
-                <div class="pdf-thumb-box pdf-thumb-box-large" style="height: 320px; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+                <div class="pdf-thumb-box pdf-thumb-box-large" style="height: 360px; display: flex; align-items: center; justify-content: center; overflow: hidden;">
                     ${screenshots.explode ? `<img src="${screenshots.explode}" alt="爆炸视图">` : '<span class="no-shot-text">生成中...</span>'}
                 </div>
             </div>
         </div>
-
-        <!-- 签字区（紧凑） -->
-        <div class="pdf-signature-section pdf-signature-compact" style="margin-top: 6px !important; padding: 4px 0 !important;">
-            <div class="pdf-signature-grid">
-                <div class="pdf-signature-box">
-                    <div class="sig-role">编制人<br>Prepared by</div>
-                    <div class="sig-line">签名 / 日期</div>
-                </div>
-                <div class="pdf-signature-box">
-                    <div class="sig-role">审核人<br>Reviewed by</div>
-                    <div class="sig-line">签名 / 日期</div>
-                </div>
-                <div class="pdf-signature-box">
-                    <div class="sig-role">批准人<br>Approved by</div>
-                    <div class="sig-line">签名 / 日期</div>
-                </div>
-            </div>
-        </div>
-
         <div class="pdf-page-footer">第 1 页 · 任务总览</div>
     `;
 
@@ -218,6 +229,42 @@ function buildMaterialTableRows(furnace) {
     }).join('');
 }
 
+function buildExecutionConclusion(furnace, volUtil, weightUtil) {
+    const v = parseFloat(volUtil) || 0;
+    const w = parseFloat(weightUtil) || 0;
+
+    if (w > 95) {
+        return {
+            status: '需复核',
+            title: '⚠️ 执行结论：承重接近上限，装炉前必须复核',
+            desc: `本炉承重利用率为 ${weightUtil}%，已接近设备承重上限。请现场确认料框、搁板和工件实际重量，必要时拆分炉次。`,
+            bg: '#fef2f2',
+            border: '#fca5a5',
+            color: '#dc2626'
+        };
+    }
+
+    if (v > 85) {
+        return {
+            status: '紧凑装炉',
+            title: '⚠️ 执行结论：空间利用率较高，注意气流通道',
+            desc: `本炉空间利用率为 ${volUtil}%，摆放较紧凑。请按分层图执行，避免现场随意改变位置导致遮挡或气流不均。`,
+            bg: '#fff7ed',
+            border: '#fdba74',
+            color: '#c2410c'
+        };
+    }
+
+    return {
+        status: '可执行',
+        title: '✅ 执行结论：当前方案可作为现场装炉指导',
+        desc: `本炉共装入 ${furnace.packedItems.length} 件工件，总重量 ${furnace.totalWeight.toFixed(1)} kg，空间利用率 ${volUtil}%，承重利用率 ${weightUtil}%。请按照第 2 页分层步骤自下而上装炉。`,
+        bg: '#f0fdf4',
+        border: '#86efac',
+        color: '#166534'
+    };
+}
+
 // ==================== PAGE 2: 装炉步骤图 ====================
 
 function buildPage2_StepByStep(furnace, layeredShots, pdfWrapper, multiLabel) {
@@ -230,6 +277,10 @@ function buildPage2_StepByStep(furnace, layeredShots, pdfWrapper, multiLabel) {
         layeredShots.forEach((shot, idx) => {
             const stepNum = idx + 1;
             const layerLabel = shot.layerLabel || ('第 ' + shot.layerIndex + ' 层');
+
+            const operationTitle = shot.hasShelf
+                ? `Step ${stepNum}：安装搁板并放置 ${layerLabel} 工件`
+                : `Step ${stepNum}：放置 ${layerLabel} 工件`;
 
             let itemsHTML = '';
             if (shot.items && shot.items.length > 0) {
@@ -262,7 +313,7 @@ function buildPage2_StepByStep(furnace, layeredShots, pdfWrapper, multiLabel) {
             <div class="pdf-step-block" style="margin-bottom: 8px !important; padding: 8px !important; border-radius: 4px !important;">
                 <div class="pdf-step-block-header" style="padding-bottom: 3px !important; margin-bottom: 6px !important;">
                     <span class="pdf-step-number">${stepNum}</span>
-                    <span class="pdf-step-layer-label">${layerLabel}</span>
+                    <span class="pdf-step-layer-label">${operationTitle}</span>
                     <span class="pdf-step-layer-meta">${shot.itemCount || 0} 件 · ${(shot.totalWeight || 0).toFixed(1)} kg</span>
                 </div>
                 <div class="pdf-step-block-body" style="flex-direction:column;">
@@ -289,6 +340,10 @@ function buildPage2_StepByStep(furnace, layeredShots, pdfWrapper, multiLabel) {
                         <div class="info-row" style="margin-bottom: 2px !important; font-size: 11px !important;">
                             <span class="info-label">本层总重</span>
                             <span class="info-value">${(shot.totalWeight || 0).toFixed(1)} kg</span>
+                        </div>
+                        <div class="info-row" style="margin-bottom: 2px !important; font-size: 11px !important;">
+                            <span class="info-label">现场动作</span>
+                            <span class="info-value">${shot.hasShelf ? '先确认搁板放置到位，再摆放本层工件' : '按俯视图位置摆放本层工件'}</span>
                         </div>
                         ${shelfLine ? shelfLine.replace(/class="info-row"/g, 'class="info-row" style="margin-bottom: 2px !important; font-size: 11px !important;"') : ''}
                         <div class="info-items-list" style="margin-top: 4px !important; padding-top: 4px !important;">
@@ -381,8 +436,8 @@ function buildPage3_AIScoring(furnace, pdfWrapper, multiLabel) {
 
     page.innerHTML = `
         <div class="pdf-ai-header">
-            <div class="pdf-ai-title">AI 智能评分${multiLabel}</div>
-            <div class="pdf-ai-subtitle">装炉方案综合评估 · 炉次：${escapeHtml(furnace.instanceId)}</div>
+            <div class="pdf-ai-title">AI 评分与现场注意事项${multiLabel}</div>
+            <div class="pdf-ai-subtitle">装炉方案综合评估 · 现场执行确认 · 炉次：${escapeHtml(furnace.instanceId)}</div>
         </div>
 
         <!-- 装炉策略信息 -->
@@ -447,7 +502,33 @@ function buildPage3_AIScoring(furnace, pdfWrapper, multiLabel) {
                 <span class="score-item-value" style="width:50px;">${weightUtil}%</span>
             </div>
         </div>
-        <div class="pdf-page-footer">第 3 页 · AI 评分</div>
+                <div style="margin-top:18px;padding:14px;border:1px solid #cbd5e1;border-radius:6px;background:#f8fafc;">
+            <div style="font-size:13px;font-weight:bold;color:#0f172a;margin-bottom:10px;">📌 现场装炉注意事项</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:11px;line-height:1.6;color:#334155;">
+                <div>□ 装炉前确认炉膛 / 工装方向与第 1 页视图一致</div>
+                <div>□ 按第 2 页步骤自下而上装炉</div>
+                <div>□ 每层工件摆放完成后再安装下一层搁板</div>
+                <div>□ 同色物料对应同一批次，禁止混料</div>
+                <div>□ 若现场尺寸、数量、重量与清单不一致，停止装炉并反馈工艺员</div>
+                <div>□ 若承重或间距存在疑问，优先选择拆分炉次</div>
+            </div>
+        </div>
+
+        <div style="margin-top:14px;border-top:1px solid #e2e8f0;padding-top:12px;display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
+            <div style="border:1px solid #cbd5e1;border-radius:6px;padding:12px;text-align:center;">
+                <div style="font-size:10px;color:#64748b;margin-bottom:30px;">装炉执行人</div>
+                <div style="border-top:1px solid #94a3b8;padding-top:5px;font-size:9px;color:#94a3b8;">签名 / 日期</div>
+            </div>
+            <div style="border:1px solid #cbd5e1;border-radius:6px;padding:12px;text-align:center;">
+                <div style="font-size:10px;color:#64748b;margin-bottom:30px;">工艺复核人</div>
+                <div style="border-top:1px solid #94a3b8;padding-top:5px;font-size:9px;color:#94a3b8;">签名 / 日期</div>
+            </div>
+            <div style="border:1px solid #cbd5e1;border-radius:6px;padding:12px;text-align:center;">
+                <div style="font-size:10px;color:#64748b;margin-bottom:30px;">现场确认人</div>
+                <div style="border-top:1px solid #94a3b8;padding-top:5px;font-size:9px;color:#94a3b8;">签名 / 日期</div>
+            </div>
+        </div>
+        <div class="pdf-page-footer">第 3 页· AI评分与现场注意事项</div>
     `;
 
     pdfWrapper.appendChild(page);
@@ -581,15 +662,14 @@ export async function generateSixPagePDF(selectedFurnaceIds) {
 // ==================== UTILITY ====================
 
 function escapeHtml(str) {
-    if (!str) return '';
+    if (str === null || str === undefined) return '';
     return String(str)
-        .replace(/&/g, '&')
-        .replace(/</g, '<')
-        .replace(/>/g, '>')
-        .replace(/"/g, '"')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
 }
-
 /**
  * 根据当前策略键返回显示名称和简短描述
  */

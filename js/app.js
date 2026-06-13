@@ -957,7 +957,7 @@ function init() {
         }
         document.getElementById("pdf-select-overlay").style.display = "none";
 
-        // 🔧 V3.1: 使用六页式 PDF 生成器
+        // 🔧 V3.1: 使用三页式 PDF 生成器
         generateSixPagePDF(selectedIds);
     });
     document.getElementById("btn-ji-parse").addEventListener("click", () => {
