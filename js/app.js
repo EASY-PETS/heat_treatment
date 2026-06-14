@@ -442,7 +442,7 @@ function executeAndRender() {
     if (globalUnpackedItems.length === 0) {
         const totalItemsIn = result.completedFurnaces.reduce((s, f) => s + f.packedItems.length, 0);
         showCapacityFeedback("success",
-            "✅ 料框容量充足：" + totalItemsIn + " 件物料已全部装框，共使用 " +
+            "✅ 设备与工装容量充足：" + totalItemsIn + " 件工件已全部装载，共使用 " +
             result.completedFurnaces.length + " 个炉次" + aggInfo);
     } else {
         let summary = {};
@@ -454,9 +454,9 @@ function executeAndRender() {
 
         showCapacityFeedback("danger",
             "⚠️ 装炉失败：当前可用炉膛容量不足\n" +
-            globalUnpackedItems.length + " 件物料未能装炉（" + uList + "）\n" +
+            globalUnpackedItems.length + " 件工件未能装炉（" + uList + "）\n" +
             (missingInfo ? missingInfo + "\n" : "") +
-            "建议：增加炉膛台数 / 提高承重上限 / 减少物料数量" +
+            "建议：增加炉膛设备台数 / 提高承重上限 / 减少工件数量" +
             aggInfo);
 
         // 渲染底部缩略图栏
@@ -699,17 +699,18 @@ function updateEmptyStateCopy({ hasFurnaces, hasMaterials, hasPlan }) {
     if (!hasFurnaces && !hasMaterials) {
         msg.innerHTML = `
             <b style="color:#1E293B;">开始创建装炉方案</b><br>
-            ① 左侧添加炉膛 / 工装<br>
-            ② 右侧添加或导入物料<br>
-            ③ 点击右上角 <b style="color:#2563EB;">生成方案</b>
+            ① 左侧添加炉膛设备，配置尺寸与工艺<br>
+            ② 在“装载工装”确认料框/料盘/网篮<br>
+            ③ 左侧“工件详情”添加或导入工件<br>
+            ④ 点击右上角 <b style="color:#2563EB;">生成方案</b>
         `;
         return;
     }
 
     if (hasFurnaces && !hasMaterials) {
         msg.innerHTML = `
-            <b style="color:#1E293B;">炉膛 / 工装已准备</b><br>
-            请在右侧添加或导入物料<br>
+            <b style="color:#1E293B;">炉膛设备已准备</b><br>
+            请在“装载工装”确认料框/料盘/网篮，并在左侧“工件详情”添加或导入工件<br>
             完成后点击右上角 <b style="color:#2563EB;">生成方案</b>
         `;
         return;
@@ -717,8 +718,8 @@ function updateEmptyStateCopy({ hasFurnaces, hasMaterials, hasPlan }) {
 
     if (!hasFurnaces && hasMaterials) {
         msg.innerHTML = `
-            <b style="color:#1E293B;">物料已准备</b><br>
-            请在左侧添加炉膛 / 工装<br>
+            <b style="color:#1E293B;">工件已准备</b><br>
+            请在左侧添加炉膛设备，配置尺寸与可执行工艺<br>
             完成后点击右上角 <b style="color:#2563EB;">生成方案</b>
         `;
         return;
@@ -946,22 +947,7 @@ function onCenterFurnaceClick(idx) {
  * 显示方案库视图
  */
 function showMasterView() {
-    document.body.classList.add('library-mode');
-
-    const masterView = document.getElementById("master-view");
-    if (masterView) masterView.classList.add("active");
-
-    const furnaceNav = document.getElementById("furnace-nav");
-    if (furnaceNav) furnaceNav.style.display = "none";
-
-    const canvasContainer = document.getElementById("canvas-container");
-    if (canvasContainer) canvasContainer.style.display = "none";
-
-    const animControlBar = document.getElementById("anim-control-bar");
-    if (animControlBar) animControlBar.classList.remove("visible");
-
-    hideExplodeBOMButtons();
-
+    activateRightPanelTab('library');
     planLibrary.renderPlanLibraryList();
 }
 
@@ -988,17 +974,17 @@ function exportCurrentPlanJson() {
  * @returns {void}
  */
 function hideMasterView() {
-    document.body.classList.remove('library-mode');
-
-    document.getElementById("master-view").classList.remove("active");
-    document.getElementById("canvas-container").style.display = "block";
+    const masterView = document.getElementById("master-view");
+    if (masterView) masterView.classList.add("active");
 
     if (globalFurnacesResult && globalFurnacesResult.length > 0) {
-        document.getElementById("furnace-nav").style.display = "flex";
+        activateRightPanelTab('analysis');
+        const furnaceNav = document.getElementById("furnace-nav");
+        if (furnaceNav) furnaceNav.style.display = "flex";
         updateExplodeBOMButtons();
     }
 
-     updateWorkbenchUiMode();
+    updateWorkbenchUiMode();
 }
 
 /**
@@ -1009,7 +995,9 @@ function init() {
     initThree();
     updateTopSummary();
     hideExplodeBOMButtons();
+    initLeftPanelTabs();
     initRightPanelTabs();
+    planLibrary.renderPlanLibraryList();
 
     bindWorkbenchUiModeAutoRefresh();
     updateWorkbenchUiMode();
@@ -1018,9 +1006,17 @@ function init() {
 
     // ==================== EVENT LISTENERS ====================
 
-    document.getElementById("btn-master").addEventListener("click", showMasterView);
-    document.getElementById("btn-master-back").addEventListener("click", hideMasterView);
-    document.getElementById("btn-master-import-json").addEventListener("click", openJsonImportModal);
+    const btnMaster = document.getElementById("btn-master");
+    if (btnMaster) btnMaster.addEventListener("click", showMasterView);
+    const btnMasterBack = document.getElementById("btn-master-back");
+    if (btnMasterBack) btnMasterBack.addEventListener("click", hideMasterView);
+    const btnMasterImportJson = document.getElementById("btn-master-import-json");
+    if (btnMasterImportJson) btnMasterImportJson.addEventListener("click", openJsonImportModal);
+
+    const btnToolingMgmt = document.getElementById("btn-tooling-mgmt");
+    if (btnToolingMgmt) btnToolingMgmt.addEventListener("click", () => activateLeftPanelTab('tooling'));
+    const btnMaterialNav = document.getElementById("btn-material-nav");
+    if (btnMaterialNav) btnMaterialNav.addEventListener("click", () => activateLeftPanelTab('material'));
     document.getElementById("btn-rules").addEventListener("click", openRulesModal);
     document.getElementById("btn-rules-cancel").addEventListener("click", () => {
         document.getElementById("rules-modal-overlay").style.display = "none";
@@ -1056,6 +1052,8 @@ function init() {
     }
 
     document.getElementById("btn-add-furnace").addEventListener("click", toolingModal.openToolingAddModal);
+    const btnAddToolingInline = document.getElementById("btn-add-tooling-inline");
+    if (btnAddToolingInline) btnAddToolingInline.addEventListener("click", addUnlinkedToolingCard);
     document.querySelectorAll(".sort-btn").forEach(btn => {
         btn.addEventListener("click", () => sortFurnaceCards(btn.getAttribute("data-field")));
     });
@@ -1347,6 +1345,50 @@ function init() {
     renderFilterBars(clearFurnaceResults);
 }
 
+function initLeftPanelTabs() {
+    const tabBtns = document.querySelectorAll('.left-tab-btn');
+    const panes = document.querySelectorAll('.left-tab-pane');
+
+    if (!tabBtns.length || !panes.length) return;
+
+    tabBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tab = btn.getAttribute('data-tab');
+
+            tabBtns.forEach(b => b.classList.remove('active'));
+            panes.forEach(p => p.classList.remove('active'));
+
+            btn.classList.add('active');
+
+            const pane = document.getElementById('left-tab-' + tab);
+            if (pane) {
+                pane.classList.add('active');
+            }
+        });
+    });
+}
+
+function activateLeftPanelTab(tab) {
+    const btn = document.querySelector('.left-tab-btn[data-tab="' + tab + '"]');
+    if (btn) btn.click();
+}
+
+function addUnlinkedToolingCard() {
+    const container = document.getElementById('tooling-cards-container');
+    if (!container) return;
+
+    const toolingName = prompt('请输入装载工装名称，例如：1#标准料框、井式炉环形工装', '未命名装载工装');
+    if (!toolingName) return;
+
+    const card = document.createElement('div');
+    card.className = 'tooling-instance-card';
+    card.innerHTML =
+        '<div class="tooling-instance-head"><strong>' + toolingName + '</strong><span>未链接设备</span></div>' +
+        '<div class="tooling-instance-meta">待配置类型 / 尺寸 / 搁板 / 间距 · 后续可链接炉膛设备</div>';
+
+    container.appendChild(card);
+}
+
 function initRightPanelTabs() {
     const tabBtns = document.querySelectorAll('.right-tab-btn');
     const panes = document.querySelectorAll('.right-tab-pane');
@@ -1365,6 +1407,10 @@ function initRightPanelTabs() {
             const pane = document.getElementById('right-tab-' + tab);
             if (pane) {
                 pane.classList.add('active');
+            }
+
+            if (tab === 'library') {
+                planLibrary.renderPlanLibraryList();
             }
         });
     });
@@ -1425,7 +1471,7 @@ function showGenerationOptions() {
     let hasFurnaces = document.querySelectorAll(".furnace-card").length > 0;
     let hasMaterials = document.querySelectorAll(".material-card").length > 0;
     if (!hasFurnaces || !hasMaterials) {
-        alert("请先在左侧添加料框配置，在右侧添加待处理物料");
+        alert("请先在左侧添加炉膛设备，确认装载工装列表，再在左侧“工件详情”添加待处理工件");
         return;
     }
 
@@ -1485,18 +1531,18 @@ async function executeWithAILoading() {
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
-// ==================== 工装添加弹窗逻辑 ====================
+// ==================== 设备新增 / 装载工装列表逻辑 ====================
 
 /**
- * 右按钮 — 清空所有待摆放物料（保留料框）
+ * 清空所有待摆放工件（保留炉膛设备与装载工装）
  */
 function clearAllMaterials() {
-    if (!confirm('确定要清空所有待摆放物料吗？\n这将清除方案统计和 3D 工件，但料框将保留。')) return;
+    if (!confirm('确定要清空所有待摆放工件吗？\n这将清除方案统计和 3D 工件，但炉膛设备与装载工装将保留。')) return;
 
-    // 1. 移除所有物料卡片
+    // 1. 移除所有工件卡片
     document.querySelectorAll('.material-card').forEach(c => c.remove());
 
-    // 2. 重置物料状态
+    // 2. 重置工件状态
     setSelectedMaterialCardId(null);
     setMaterialCounter(0);
     clearUsedColors();
@@ -1522,12 +1568,12 @@ function clearAllMaterials() {
     // 6. 显示空状态
     document.getElementById('empty-state').style.display = 'block';
 
-    // 7. 重置物料详情面板
+    // 7. 重置工件详情面板
     document.getElementById('mdp-placeholder').style.display = 'block';
     document.getElementById('mdp-body').style.display = 'none';
     document.getElementById('mdp-title').textContent = '📋 工件详情';
 
-    // 8. 如果还有料框，渲染空料框
+    // 8. 如果还有炉膛设备，渲染空工装
     const hasFurnaces = document.querySelectorAll('.furnace-card').length > 0;
     if (hasFurnaces) {
         toolingModal.renderEmptyToolingOnly();
@@ -1538,7 +1584,7 @@ function clearAllMaterials() {
     clearProcessFilters();
     clearHardnessFilters();
 
-    // 刷新筛选条（此时物料卡片已清空，筛选条应显示“全部 (0)”）
+    // 刷新筛选条（此时工件卡片已清空，筛选条应显示“全部 (0)”）
     renderFilterBars(clearFurnaceResults);
 
     // 9. 更新顶部摘要
@@ -1548,15 +1594,15 @@ function clearAllMaterials() {
 }
 
 /**
- * 左按钮 — 清空所有料盘和物料（完全重置）
+ * 清空所有炉膛设备、装载工装和工件（完全重置）
  */
 function clearAllFurnaces() {
-    if (!confirm('确定要清空所有料盘吗？\n这将清除所有料框、物料、方案统计和 3D 场景。')) return;
+    if (!confirm('确定要清空所有炉膛设备吗？\n这将清除所有设备、工件、方案统计和 3D 场景。装载工装列表会保留为未链接状态。')) return;
 
     // 1. 移除所有炉膛卡片
     document.querySelectorAll('.furnace-card').forEach(c => c.remove());
 
-    // 2. 移除所有物料卡片
+    // 2. 移除所有工件卡片
     document.querySelectorAll('.material-card').forEach(c => c.remove());
 
     // 3. 重置所有状态

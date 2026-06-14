@@ -2358,19 +2358,19 @@ body:not(.ui-has-multiple-furnaces) .sort-bar {
     display: none !important;
 }
 
-/* 没有物料时，隐藏材质 / 工艺 / 硬度筛选条 */
+/* 没有工件时，隐藏材质 / 工艺 / 硬度筛选条 */
 body:not(.ui-has-materials) #material-filter-bar,
 body:not(.ui-has-materials) #process-filter-bar,
 body:not(.ui-has-materials) #hardness-filter-bar {
     display: none !important;
 }
 
-/* 没有选中炉膛时，隐藏左下角进炉方向 / 工装详情面板 */
+/* 没有选中炉膛设备时，隐藏设备参数面板 */
 body:not(.ui-has-selected-furnace) #furnace-detail-panel {
     display: none !important;
 }
 
-/* 没有选中物料时，隐藏右下角工件详情面板 */
+/* 没有选中工件时，隐藏工件详情面板 */
 body:not(.ui-has-selected-material) #material-detail-panel {
     display: none !important;
 }
@@ -2389,7 +2389,7 @@ body:not(.ui-plan-ready) .right-tab-btn[data-tab="simulation"] {
 
 /* 左侧空状态提示 */
 #furnace-cards-container:empty::before {
-    content: "暂无炉膛或工装，请点击上方“增加”创建料框";
+    content: "暂无炉膛设备，请点击上方“增加设备”创建";
     display: block;
     padding: 18px 10px;
     text-align: center;
@@ -2400,7 +2400,7 @@ body:not(.ui-plan-ready) .right-tab-btn[data-tab="simulation"] {
 
 /* 右侧空状态提示 */
 #material-cards-container:empty::before {
-    content: "暂无物料，请点击“增加”或“导入”添加工件";
+    content: "暂无工件，请点击“增加”或“导入”添加";
     display: block;
     padding: 18px 10px;
     text-align: center;
@@ -3860,4 +3860,380 @@ body:has(#right-panel.collapsed) {
 #dock-gravity,
 #dock-thermal {
     display: none !important;
+}
+/* ==================== V6.1 PANEL RESTRUCTURE: left resources + right plan workbench ==================== */
+.left-panel-tabs,
+.right-panel-tabs {
+    display: flex;
+    gap: 6px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-color);
+    background: #FAFBFC;
+    flex-shrink: 0;
+}
+
+.left-tab-btn,
+.right-tab-btn {
+    flex: 1;
+    height: 30px;
+    border: none;
+    border-radius: 8px;
+    background: #F1F5F9;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.left-tab-btn:hover,
+.right-tab-btn:hover {
+    background: #E2E8F0;
+    color: var(--text-color);
+}
+
+.left-tab-btn.active,
+.right-tab-btn.active {
+    background: #EFF6FF;
+    color: var(--accent-color);
+}
+
+.left-tab-pane,
+.right-tab-pane {
+    display: none;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.left-tab-pane.active,
+.right-tab-pane.active {
+    display: flex;
+    flex-direction: column;
+}
+
+.left-tab-toolbar,
+.plan-action-bar {
+    display: flex;
+    gap: 8px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-color);
+    background: #FFFFFF;
+    flex-shrink: 0;
+}
+
+.left-tab-intro {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color);
+    background: linear-gradient(135deg, #FFFFFF, #F8FAFC);
+    flex-shrink: 0;
+}
+
+.left-tab-intro strong {
+    display: block;
+    font-size: 13px;
+    color: var(--text-color);
+    margin-bottom: 4px;
+}
+
+.left-tab-intro span {
+    display: block;
+    font-size: 11px;
+    line-height: 1.55;
+    color: var(--text-secondary);
+}
+
+.tooling-resource-panel {
+    padding: 12px;
+    overflow-y: auto;
+    min-height: 0;
+}
+
+.tooling-resource-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-color);
+    margin-bottom: 10px;
+}
+
+.tooling-resource-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+}
+
+.tooling-resource-card {
+    background: #FFFFFF;
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    padding: 10px;
+    box-shadow: 0 4px 18px rgba(15, 23, 42, 0.04);
+}
+
+.tooling-resource-card strong {
+    display: block;
+    font-size: 13px;
+    color: var(--accent-color);
+    margin-bottom: 4px;
+}
+
+.tooling-resource-card span {
+    display: block;
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+}
+
+.tooling-resource-action {
+    width: 100%;
+    margin-top: 12px;
+    height: 34px;
+    color: #FFFFFF !important;
+    background: var(--accent-color) !important;
+    border-color: var(--accent-color) !important;
+}
+
+.tooling-resource-note {
+    margin-top: 10px;
+    padding: 9px 10px;
+    border-radius: 12px;
+    background: #EFF6FF;
+    color: var(--text-secondary);
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.material-actions-toolbar .btn-sm {
+    flex: 1;
+}
+
+#left-tab-furnace #furnace-detail-panel {
+    display: flex !important;
+    flex-direction: column;
+    flex: 1;
+    max-height: none;
+    border-top: none;
+    min-height: 0;
+}
+
+#left-tab-furnace #furnace-detail-panel .fdp-body,
+#left-tab-furnace #furnace-detail-panel #fdp-body-wrapper {
+    min-height: 0;
+}
+
+#left-tab-material #material-detail-panel {
+    flex-shrink: 0;
+    max-height: 300px;
+}
+
+#right-tab-library {
+    padding: 0;
+}
+
+#right-tab-library #master-view,
+#right-tab-library #master-view.active {
+    display: flex !important;
+    flex: 1;
+    min-height: 0;
+    background: #F8FAFC;
+}
+
+#right-tab-library #master-header {
+    padding: 10px;
+    gap: 8px;
+    background: #FFFFFF;
+    border-bottom: 1px solid var(--border-color);
+}
+
+#right-tab-library #master-header h3 {
+    width: 100%;
+    font-size: 14px;
+}
+
+#right-tab-library #master-header span {
+    flex: 1;
+    line-height: 1.4;
+}
+
+#right-tab-library #master-header .master-import-btn {
+    width: 100%;
+    padding: 7px 10px;
+    font-size: 12px;
+}
+
+#right-tab-library #master-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+
+#right-tab-library #master-list {
+    width: 100%;
+    min-width: 0;
+    flex: 1;
+    padding: 10px;
+    border-right: none;
+    overflow-y: auto;
+}
+
+#right-tab-library #master-3d {
+    flex: 0 0 190px;
+    min-height: 190px;
+    border-top: 1px solid var(--border-color);
+    background: #FFFFFF;
+}
+
+#right-tab-library #master-canvas-container {
+    display: none;
+}
+
+#right-tab-library #master-detail-panel {
+    position: relative;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    max-height: 190px;
+    height: 100%;
+    overflow-y: auto;
+    border-top: none;
+    padding: 12px;
+}
+
+.plan-action-bar {
+    flex-wrap: wrap;
+}
+
+.plan-action-btn {
+    flex: 1;
+    min-width: 92px;
+    height: 32px;
+    border: none;
+    border-radius: 9px;
+    background: #EFF6FF;
+    color: var(--accent-color);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.plan-action-btn:hover {
+    background: #DBEAFE;
+}
+
+.plan-action-btn.primary {
+    background: var(--accent-color);
+    color: #FFFFFF;
+}
+
+.plan-action-btn.primary:hover {
+    background: var(--accent-hover);
+}
+
+/* 右侧工作台现在始终展示三个子页面，未生成方案时由页面空状态承接 */
+body:not(.ui-plan-ready) .right-tab-btn[data-tab="analysis"],
+body:not(.ui-plan-ready) .right-tab-btn[data-tab="simulation"],
+.right-tab-btn[data-tab="simulation"] {
+    display: block !important;
+}
+
+#right-tab-simulation.active {
+    display: flex !important;
+}
+
+/* 旧的独立方案库模式不再使用，避免遮挡左右面板 */
+body.library-mode #left-panel,
+body.library-mode #right-panel,
+body.library-mode #furnace-nav,
+body.library-mode #furnace-thumb-bar,
+body.library-mode #dock-bar,
+body.library-mode #ai-summary-bar {
+    display: initial !important;
+}
+
+/* ==================== Equipment / Tooling Separation Refinement ==================== */
+.tooling-actions-toolbar {
+    padding: 8px 10px 0 10px;
+}
+
+.tooling-instance-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.tooling-instance-card {
+    background: #FFFFFF;
+    border-left: 4px solid var(--material-accent);
+    border-radius: 14px;
+    padding: 10px 12px;
+    box-shadow: 0 4px 18px rgba(15, 23, 42, 0.06);
+}
+
+.tooling-instance-card:hover {
+    background: #EFF6FF;
+}
+
+.tooling-instance-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 5px;
+}
+
+.tooling-instance-head strong {
+    font-size: 14px;
+    color: var(--text-color);
+}
+
+.tooling-instance-head span {
+    font-size: 11px;
+    color: #D97706;
+    background: #FEF3C7;
+    border: 1px solid #FDE68A;
+    border-radius: 999px;
+    padding: 2px 7px;
+    white-space: nowrap;
+}
+
+.tooling-instance-meta {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-muted);
+}
+
+.fdp-device-note {
+    margin: 8px 0 10px 0;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: #F8FAFC;
+    border: 1px dashed var(--border-color);
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.tooling-unlinked-placeholder {
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.6;
+    padding: 12px;
+    background: #F8FAFC;
+    border: 1px dashed var(--border-color);
+    border-radius: 12px;
+    text-align: center;
+}
+
+.tooling-add-field select {
+    width: 100%;
+    height: 40px;
+    border: 1px solid var(--border-color);
+    background: var(--input-bg);
+    border-radius: 8px;
+    padding: 4px 8px;
+    font-size: 14px;
+    color: var(--text-color);
 }
