@@ -1971,7 +1971,7 @@ body {
 }
 
 .thumb-card {
-    flex: 0 0 80px;
+    flex: 0 0 92px;
     background: transparent;     /* 半透明暗色背景，增强对比度 */
     border: 1px solid rgba(255, 255, 255, 0.25);
     border-radius: 6px;
@@ -1997,7 +1997,7 @@ body {
 
 .thumb-preview {
     width: 100%;
-    height: 35px;
+    height: 26px;
     background: #F1F5F9;
     border-radius: 6px;
     margin-bottom: 3px;
@@ -2022,10 +2022,7 @@ body {
 }
 
 .thumb-stats {
-    font-size: 8px;
-    color: var(--text-muted);
-    margin-top: 2px;
-    white-space: nowrap;
+    display: none !important;
 }
 
 /* ==================== 筛选条样式 ==================== */
@@ -2171,34 +2168,36 @@ body {
     color: #78350F;
 }
 
-/* ==================== CANDIDATE PLAN LIST ==================== */
+/* 右侧候选方案卡片精简版：只做方案切换，不重复展示详细指标 */
 .candidate-plan-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 7px;
     margin-bottom: 12px;
 }
 
 .candidate-plan-card {
     background: #FFFFFF;
     border: 1px solid var(--border-color);
-    border-left: 4px solid #CBD5E1;
-    border-radius: 14px;
-    padding: 10px;
+    border-left: 3px solid #CBD5E1;
+    border-radius: 12px;
+    padding: 9px 10px;
     cursor: pointer;
     transition: all 0.15s ease;
-    box-shadow: 0 4px 18px rgba(0,0,0,0.04);
+    box-shadow: 0 3px 14px rgba(15, 23, 42, 0.04);
 }
 
 .candidate-plan-card:hover {
     background: #F8FAFC;
     border-left-color: var(--accent-color);
+    transform: translateX(-1px);
 }
 
 .candidate-plan-card.active {
     background: #EFF6FF;
     border-color: #BFDBFE;
     border-left-color: var(--accent-color);
+    box-shadow: 0 5px 18px rgba(37, 99, 235, 0.12);
 }
 
 .candidate-plan-top {
@@ -2209,29 +2208,36 @@ body {
 }
 
 .candidate-plan-title {
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 700;
     color: var(--text-color);
+    line-height: 1.3;
 }
 
 .candidate-plan-score {
-    font-size: 18px;
+    font-size: 16px;
     font-weight: 800;
     color: var(--accent-color);
+    white-space: nowrap;
 }
 
 .candidate-plan-meta {
-    margin-top: 4px;
-    font-size: 11px;
-    color: var(--text-muted);
-    line-height: 1.4;
+    display: none !important;
 }
 
 .candidate-plan-status {
-    margin-top: 4px;
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-secondary);
+    margin-top: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-muted);
+}
+
+.candidate-plan-status.success {
+    color: #16A34A;
+}
+
+.candidate-plan-status.warning {
+    color: #DC2626;
 }
 
 /* ==================== 方案库独立模式 ==================== */
@@ -2306,4 +2312,318 @@ body.library-mode #master-detail-panel {
     overflow: visible !important;
     padding: 24px !important;
     background: #ffffff !important;
+}
+
+/* ==================== UI MODE CLEANUP / WORKBENCH STATES ==================== */
+
+/* 暂时隐藏未完成的顶部入口 */
+#btn-tooling-mgmt,
+#btn-material-nav {
+    display: none !important;
+}
+
+/* 没有生成方案前，隐藏方案级按钮 */
+body:not(.ui-plan-ready) #btn-animate,
+body:not(.ui-plan-ready) #btn-export-pdf,
+body:not(.ui-plan-ready) #btn-export-json,
+body:not(.ui-plan-ready) #btn-save-plan-library,
+body:not(.ui-plan-ready) #btn-bom,
+body:not(.ui-plan-ready) #btn-explode {
+    display: none !important;
+}
+
+/* 没有生成方案前，隐藏方案级 3D 工具 */
+body:not(.ui-plan-ready) #dock-top-view,
+body:not(.ui-plan-ready) #dock-front-view,
+body:not(.ui-plan-ready) #dock-side-view,
+body:not(.ui-plan-ready) #dock-explode,
+body:not(.ui-plan-ready) #dock-gravity,
+body:not(.ui-plan-ready) #dock-thermal {
+    display: none !important;
+}
+
+/* 基础 3D 工具保留：网格、坐标轴、标尺 */
+body:not(.ui-plan-ready) #dock-toggle-grid,
+body:not(.ui-plan-ready) #dock-toggle-axes,
+body:not(.ui-plan-ready) #dock-toggle-rulers {
+    display: inline-flex !important;
+}
+
+/* 炉膛少于 2 个时，隐藏排序条 */
+body:not(.ui-has-multiple-furnaces) .sort-bar {
+    display: none !important;
+}
+
+/* 没有物料时，隐藏材质 / 工艺 / 硬度筛选条 */
+body:not(.ui-has-materials) #material-filter-bar,
+body:not(.ui-has-materials) #process-filter-bar,
+body:not(.ui-has-materials) #hardness-filter-bar {
+    display: none !important;
+}
+
+/* 没有选中炉膛时，隐藏左下角进炉方向 / 工装详情面板 */
+body:not(.ui-has-selected-furnace) #furnace-detail-panel {
+    display: none !important;
+}
+
+/* 没有选中物料时，隐藏右下角工件详情面板 */
+body:not(.ui-has-selected-material) #material-detail-panel {
+    display: none !important;
+}
+
+/* 没有生成方案前，只保留工件详情 Tab，隐藏方案分析 / 模拟数据 */
+body:not(.ui-plan-ready) .right-tab-btn[data-tab="analysis"],
+body:not(.ui-plan-ready) .right-tab-btn[data-tab="simulation"] {
+    display: none !important;
+}
+
+/* 模拟数据目前没有真实内容，先暂时隐藏 */
+.right-tab-btn[data-tab="simulation"],
+#right-tab-simulation {
+    display: none !important;
+}
+
+/* 左侧空状态提示 */
+#furnace-cards-container:empty::before {
+    content: "暂无炉膛或工装，请点击上方“增加”创建料框";
+    display: block;
+    padding: 18px 10px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+/* 右侧空状态提示 */
+#material-cards-container:empty::before {
+    content: "暂无物料，请点击“增加”或“导入”添加工件";
+    display: block;
+    padding: 18px 10px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+/* 空状态下 AI 顶部条更轻 */
+body.ui-empty #ai-summary-bar {
+    opacity: 0.72;
+}
+
+/* 输入已准备但未生成方案时，突出生成按钮 */
+body.ui-input-ready #btn-generate-plan {
+    box-shadow: 0 6px 18px rgba(37, 99, 235, 0.22) !important;
+}
+
+/* 中间炉次导航只保留当前炉次名称，详细指标放到顶部和右侧 */
+#furnace-nav .nav-info {
+    display: none !important;
+}
+
+#furnace-nav {
+    height: 42px;
+    gap: 14px;
+}
+
+#furnace-nav .nav-title {
+    min-width: 220px;
+    color: var(--furnace-accent);
+    font-size: 14px;
+    font-weight: 700;
+}
+
+/* 炉膛缩略卡片弱化：只承担炉次切换，不再显示重复统计 */
+#furnace-thumb-bar {
+    margin-bottom: 58px;
+    opacity: 0.92;
+}
+
+.thumb-card {
+    background: rgba(255, 255, 255, 0.72);
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+}
+
+.thumb-card.active {
+    background: #EFF6FF;
+    border: 1.5px solid var(--accent-color);
+    box-shadow: 0 6px 18px rgba(37, 99, 235, 0.16);
+}
+
+.thumb-preview {
+    height: 26px;
+    margin-bottom: 2px;
+    background: transparent;
+    font-size: 13px;
+}
+
+.thumb-name {
+    font-size: 10px;
+    line-height: 1.25;
+    max-width: 86px;
+    margin: 0 auto;
+}
+
+.thumb-stats {
+    display: none !important;
+}
+
+/* 当前选中方案详情卡片：区别于顶部全局评分 */
+.analysis-current-plan-card {
+    text-align: left;
+    padding: 14px 16px;
+}
+
+.analysis-current-plan-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+
+.analysis-score-row {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+}
+
+.analysis-score-row .analysis-score {
+    font-size: 42px;
+    line-height: 1;
+}
+
+.analysis-score-unit {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--accent-color);
+}
+
+.analysis-current-plan-card .analysis-score-label {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+/* 信息层级收口：中间区域弱化文字，右侧承担解释 */
+#furnace-nav {
+    background: rgba(255, 255, 255, 0.82);
+    backdrop-filter: blur(10px);
+}
+
+#furnace-nav .nav-info {
+    display: none !important;
+}
+
+#furnace-thumb-bar {
+    opacity: 0.86;
+}
+
+#furnace-thumb-bar:hover {
+    opacity: 1;
+}
+
+#dock-bar {
+    opacity: 0.88;
+}
+
+#dock-bar:hover {
+    opacity: 1;
+}
+
+/* ==================== CENTER TOP SAFE AREA FIX ==================== */
+/* 修复顶部 AI 摘要条 / 炉次导航被左右面板遮挡的问题 */
+
+:root {
+    --left-panel-safe-width: 36px;
+    --right-panel-safe-width: 280px;
+}
+
+/* 当左侧面板展开时，中心顶部内容避开 260px */
+body:not(.left-panel-collapsed) {
+    --left-panel-safe-width: 260px;
+}
+
+/* 当右侧面板折叠时，中心顶部内容只避开 36px */
+body.right-panel-collapsed {
+    --right-panel-safe-width: 36px;
+}
+
+/* AI 摘要条避开左右面板 */
+#ai-summary-bar {
+    margin-left: var(--left-panel-safe-width);
+    margin-right: var(--right-panel-safe-width);
+    width: calc(100% - var(--left-panel-safe-width) - var(--right-panel-safe-width));
+}
+
+/* 炉次导航同样避开左右面板 */
+#furnace-nav {
+    margin-left: var(--left-panel-safe-width);
+    margin-right: var(--right-panel-safe-width);
+    width: calc(100% - var(--left-panel-safe-width) - var(--right-panel-safe-width));
+}
+
+/* 避免内容过长时被硬裁切 */
+.ai-bar-content {
+    min-width: 0;
+    overflow: hidden;
+}
+
+/* 顶部摘要条内部允许横向压缩 */
+.ai-bar-metric,
+.ai-bar-summary,
+.ai-bar-score {
+    flex-shrink: 0;
+}
+
+/* 小屏或窗口较窄时，隐藏优先级较低的信息 */
+@media (max-width: 1360px) {
+    .ai-bar-metric:nth-of-type(3) {
+        display: none;
+    }
+}
+
+@media (max-width: 1200px) {
+    .ai-bar-summary {
+        display: none;
+    }
+}
+
+/* ==================== ANIMATION BAR SAFE AREA FIX ==================== */
+/* 模拟装炉控制条避开左右面板，避免速度/暂停按钮被右侧面板遮挡 */
+
+#anim-control-bar {
+    margin-left: var(--left-panel-safe-width);
+    margin-right: var(--right-panel-safe-width);
+    width: calc(100% - var(--left-panel-safe-width) - var(--right-panel-safe-width));
+    box-sizing: border-box;
+    min-width: 0;
+}
+
+#anim-control-bar .acb-progress {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#anim-control-bar select,
+#anim-control-bar button {
+    flex-shrink: 0;
+}
+
+/* ==================== HIDE DUPLICATED AI BAR DROPDOWN ==================== */
+/* 右上角展开炉次明细与施工清单/缩略炉次功能重复，先隐藏 */
+
+#ai-bar-toggle,
+.ai-bar-toggle,
+.ai-bar-dropdown {
+    display: none !important;
+}
+
+/* ==================== TOP EXPORT ACTION CLEANUP ==================== */
+/* JSON 并入 PDF 导出弹窗，爆炸图保留在 3D Dock 中，顶部不再重复显示 */
+
+#btn-export-json,
+#btn-explode {
+    display: none !important;
 }

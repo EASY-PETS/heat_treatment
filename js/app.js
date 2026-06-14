@@ -230,6 +230,8 @@ function applyCandidatePlan(index) {
     clearFurnaceGroups();
     setCurrentFurnaceIndex(0);
 
+    window._currentPlanAnalysis = plan.analysis;
+
     renderPlanAnalysisPanel(plan.analysis);
     renderCandidatePlanCards(candidatePlans, index, applyCandidatePlan);
     activateRightPanelTab('analysis');
@@ -258,6 +260,7 @@ function applyCandidatePlan(index) {
 
     renderAISummaryBar(onCenterFurnaceClick);
     updateTopSummary();
+    updateWorkbenchUiMode();
 }
 
 /**
@@ -377,6 +380,8 @@ function executeAndRender() {
         result.predictions || []
     );
 
+    window._currentPlanAnalysis = analysis;
+
     renderPlanAnalysisPanel(analysis);
     renderCandidatePlanCards(candidatePlans, currentCandidatePlanIndex, applyCandidatePlan);
     activateRightPanelTab('analysis');
@@ -417,6 +422,7 @@ function executeAndRender() {
     }
     renderAISummaryBar(onCenterFurnaceClick);
     updateTopSummary();
+    updateWorkbenchUiMode();
 
     const agg = aggregationStats;
     let aggInfo = "";
@@ -543,6 +549,8 @@ const planLibrary = createPlanLibraryController({
             closeLibrary: true,
             showSuccess: true
         });
+
+        updateWorkbenchUiMode();
     }
 });
 
@@ -550,6 +558,8 @@ const planLibrary = createPlanLibraryController({
  * 清空所有装炉结果，重置3D场景和UI
  */
 export function clearFurnaceResults() {
+    window._currentPlanAnalysis = null;
+
     setGlobalFurnacesResult(null);
     setGlobalUnpackedItems([]);
     clearFurnaceGroups();
@@ -575,6 +585,7 @@ export function clearFurnaceResults() {
 
     renderAISummaryBar(null);
     showCapacityFeedback('success', '筛选条件已变更，请重新生成方案');
+    updateWorkbenchUiMode();
 }
 
 window._clearFurnaceResults = clearFurnaceResults;
@@ -583,22 +594,22 @@ window._clearFurnaceResults = clearFurnaceResults;
  * 控制爆炸图和施工清单按钮的显示
  */
 function updateExplodeBOMButtons() {
-    const btnExplode = document.getElementById("btn-explode");
     const btnBOM = document.getElementById("btn-bom");
 
-    if (btnExplode) btnExplode.style.display = "inline-block";
-    if (btnBOM) btnBOM.style.display = "inline-block";
+    if (btnBOM) {
+        btnBOM.style.display = "inline-block";
+    }
 }
 
 /**
  * 隐藏爆炸图和施工清单按钮
  */
 function hideExplodeBOMButtons() {
-    const btnExplode = document.getElementById("btn-explode");
     const btnBOM = document.getElementById("btn-bom");
 
-    if (btnExplode) btnExplode.style.display = "none";
-    if (btnBOM) btnBOM.style.display = "none";
+    if (btnBOM) {
+        btnBOM.style.display = "none";
+    }
 }
 
 function showPlanActionButtons() {
@@ -631,6 +642,103 @@ function hidePlanActionButtons() {
             el.style.display = 'none';
         }
     });
+}
+
+let workbenchUiModeTimer = null;
+
+function scheduleWorkbenchUiModeUpdate() {
+    if (workbenchUiModeTimer) {
+        clearTimeout(workbenchUiModeTimer);
+    }
+
+    workbenchUiModeTimer = setTimeout(() => {
+        updateWorkbenchUiMode();
+    }, 0);
+}
+
+function updateWorkbenchUiMode() {
+    const furnaceCount = document.querySelectorAll('.furnace-card').length;
+    const materialCount = document.querySelectorAll('.material-card').length;
+
+    const hasFurnaces = furnaceCount > 0;
+    const hasMaterials = materialCount > 0;
+    const hasPlan = !!(globalFurnacesResult && globalFurnacesResult.length > 0);
+
+    const hasSelectedFurnace = !!document.querySelector('.furnace-card.active');
+    const hasSelectedMaterial = !!document.querySelector('.material-card.active');
+
+    document.body.classList.toggle('ui-empty', !hasFurnaces && !hasMaterials && !hasPlan);
+    document.body.classList.toggle('ui-has-furnaces', hasFurnaces);
+    document.body.classList.toggle('ui-has-materials', hasMaterials);
+    document.body.classList.toggle('ui-has-multiple-furnaces', furnaceCount >= 2);
+    document.body.classList.toggle('ui-input-ready', hasFurnaces && hasMaterials && !hasPlan);
+    document.body.classList.toggle('ui-plan-ready', hasPlan);
+    document.body.classList.toggle('ui-has-selected-furnace', hasSelectedFurnace);
+    document.body.classList.toggle('ui-has-selected-material', hasSelectedMaterial);
+
+    updateEmptyStateCopy({
+        hasFurnaces,
+        hasMaterials,
+        hasPlan
+    });
+}
+
+function updateEmptyStateCopy({ hasFurnaces, hasMaterials, hasPlan }) {
+    const msg = document.querySelector('#empty-state .msg');
+    if (!msg || hasPlan) return;
+
+    if (!hasFurnaces && !hasMaterials) {
+        msg.innerHTML = `
+            <b style="color:#1E293B;">开始创建装炉方案</b><br>
+            ① 左侧添加炉膛 / 工装<br>
+            ② 右侧添加或导入物料<br>
+            ③ 点击右上角 <b style="color:#2563EB;">生成方案</b>
+        `;
+        return;
+    }
+
+    if (hasFurnaces && !hasMaterials) {
+        msg.innerHTML = `
+            <b style="color:#1E293B;">炉膛 / 工装已准备</b><br>
+            请在右侧添加或导入物料<br>
+            完成后点击右上角 <b style="color:#2563EB;">生成方案</b>
+        `;
+        return;
+    }
+
+    if (!hasFurnaces && hasMaterials) {
+        msg.innerHTML = `
+            <b style="color:#1E293B;">物料已准备</b><br>
+            请在左侧添加炉膛 / 工装<br>
+            完成后点击右上角 <b style="color:#2563EB;">生成方案</b>
+        `;
+        return;
+    }
+
+    msg.innerHTML = `
+        <b style="color:#1E293B;">输入数据已准备</b><br>
+        点击右上角 <b style="color:#2563EB;">生成方案</b> 开始智能排布
+    `;
+}
+
+function bindWorkbenchUiModeAutoRefresh() {
+    const observer = new MutationObserver(scheduleWorkbenchUiModeUpdate);
+
+    ['furnace-cards-container', 'material-cards-container', 'furnace-thumb-bar'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            observer.observe(el, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                attributeFilter: ['class', 'style']
+            });
+        }
+    });
+
+    document.addEventListener('click', scheduleWorkbenchUiModeUpdate, true);
+    document.addEventListener('change', scheduleWorkbenchUiModeUpdate, true);
+    document.addEventListener('input', scheduleWorkbenchUiModeUpdate, true);
 }
 
 /**
@@ -757,6 +865,8 @@ function hideMasterView() {
         document.getElementById("furnace-nav").style.display = "flex";
         updateExplodeBOMButtons();
     }
+
+     updateWorkbenchUiMode();
 }
 
 /**
@@ -768,6 +878,10 @@ function init() {
     updateTopSummary();
     hideExplodeBOMButtons();
     initRightPanelTabs();
+
+    bindWorkbenchUiModeAutoRefresh();
+    updateWorkbenchUiMode();
+    syncPanelCollapsedBodyClasses();
 
     // ==================== EVENT LISTENERS ====================
 
@@ -786,10 +900,11 @@ function init() {
     document.getElementById("btn-generate-plan").addEventListener("click", showGenerationOptions);
     document.getElementById("btn-animate").addEventListener("click", playLoadingAnimation);
     document.getElementById("btn-export-pdf").addEventListener("click", showPdfSelectModal);
-    const btnExportJson = document.getElementById('btn-export-json');
-    if (btnExportJson) {
-        btnExportJson.addEventListener('click', exportCurrentPlanJson);
-    }
+    // JSON 导出并入 PDF 导出弹窗，顶部不再单独提供入口
+    // const btnExportJson = document.getElementById('btn-export-json');
+    // if (btnExportJson) {
+    //     btnExportJson.addEventListener('click', exportCurrentPlanJson);
+    // }
     const btnSavePlanLibrary = document.getElementById('btn-save-plan-library');
     if (btnSavePlanLibrary) {
         btnSavePlanLibrary.addEventListener('click', planLibrary.saveCurrentPlanToLibrary);
@@ -881,6 +996,7 @@ function init() {
         const color = generateUniqueColor(usedColors);
         createMaterialCard("新工件批次", "cuboid", 50, 150, 150, 60, 10, color);
         updateTopSummary();
+        updateWorkbenchUiMode();
     });
     document.getElementById("nav-prev").addEventListener("click", () => navigateFurnace(-1));
     document.getElementById("nav-next").addEventListener("click", () => navigateFurnace(1));
@@ -940,8 +1056,15 @@ function init() {
     document.getElementById("btn-import-cancel").addEventListener("click", () => {
         document.getElementById("import-preview-overlay").style.display = "none";
     });
-    document.getElementById("btn-import-replace").addEventListener("click", () => applyImportData(true));
-    document.getElementById("btn-import-append").addEventListener("click", () => applyImportData(false));
+    document.getElementById("btn-import-replace").addEventListener("click", () => {
+        applyImportData(true);
+        scheduleWorkbenchUiModeUpdate();
+    });
+
+    document.getElementById("btn-import-append").addEventListener("click", () => {
+        applyImportData(false);
+        scheduleWorkbenchUiModeUpdate();
+    });
     document.getElementById("btn-pdf-cancel").addEventListener("click", () => {
         document.getElementById("pdf-select-overlay").style.display = "none";
     });
@@ -955,10 +1078,16 @@ function init() {
             alert("请至少选择一个炉膛方案");
             return;
         }
+
+        const shouldExportJson = !!document.getElementById('pdf-opt-json')?.checked;
+
         document.getElementById("pdf-select-overlay").style.display = "none";
 
-        // 🔧 V3.1: 使用三页式 PDF 生成器
         generateSixPagePDF(selectedIds);
+
+        if (shouldExportJson) {
+            exportCurrentPlanJson();
+        }
     });
     document.getElementById("btn-ji-parse").addEventListener("click", () => {
         const jsonStr = document.getElementById("ji-json-textarea").value.trim();
@@ -1012,6 +1141,8 @@ function init() {
                 closeLibrary: true,
                 showSuccess: true
             });
+
+            updateWorkbenchUiMode();
 
             document.getElementById("json-import-overlay").style.display = "none";
             return;
@@ -1282,6 +1413,7 @@ function clearAllMaterials() {
     // 9. 更新顶部摘要
     setCurrentFurnaceIndex(0);
     updateTopSummary();
+    updateWorkbenchUiMode();
 }
 
 /**
@@ -1341,6 +1473,7 @@ function clearAllFurnaces() {
 
     setCurrentFurnaceIndex(0);
     updateTopSummary();
+    updateWorkbenchUiMode();
 }
 
 /**
@@ -1351,17 +1484,25 @@ function toggleLeftPanel() {
     const btn = document.getElementById('btn-toggle-left-panel');
     const expandBtn = document.getElementById('panel-expand-btn-left');
 
+    if (!panel) return;
+
     if (panel.classList.contains('collapsed')) {
         // 展开
         panel.classList.remove('collapsed');
+        document.body.classList.remove('left-panel-collapsed');
+
         if (btn) btn.textContent = '◀';
         if (expandBtn) expandBtn.style.display = 'none';
     } else {
         // 折叠
         panel.classList.add('collapsed');
+        document.body.classList.add('left-panel-collapsed');
+
         if (btn) btn.textContent = '▶';
         if (expandBtn) expandBtn.style.display = 'flex';
     }
+
+    updateWorkbenchUiMode();
 }
 
 /**
@@ -1372,17 +1513,40 @@ function toggleRightPanel() {
     const btn = document.getElementById('btn-toggle-right-panel');
     const expandBtn = document.getElementById('panel-expand-btn-right');
 
+    if (!panel) return;
+
     if (panel.classList.contains('collapsed')) {
         // 展开
         panel.classList.remove('collapsed');
+        document.body.classList.remove('right-panel-collapsed');
+
         if (btn) btn.textContent = '▶';
         if (expandBtn) expandBtn.style.display = 'none';
     } else {
         // 折叠
         panel.classList.add('collapsed');
+        document.body.classList.add('right-panel-collapsed');
+
         if (btn) btn.textContent = '◀';
         if (expandBtn) expandBtn.style.display = 'flex';
     }
+
+    updateWorkbenchUiMode();
+}
+
+function syncPanelCollapsedBodyClasses() {
+    const leftPanel = document.getElementById('left-panel');
+    const rightPanel = document.getElementById('right-panel');
+
+    document.body.classList.toggle(
+        'left-panel-collapsed',
+        !!leftPanel && leftPanel.classList.contains('collapsed')
+    );
+
+    document.body.classList.toggle(
+        'right-panel-collapsed',
+        !!rightPanel && rightPanel.classList.contains('collapsed')
+    );
 }
 
 /**

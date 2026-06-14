@@ -130,7 +130,12 @@
             <div id="canvas-container">
                 <div id="empty-state">
                     <div class="big-icon">📦</div>
-                    <div class="msg">配置左侧炉膛资产与右侧物料明细<br>点击顶部 <b style="color:#0066cc;">⚡ 生成方案</b> 开始智能排布</div>
+                    <div class="msg">
+                        <b style="color:#1E293B;">开始创建装炉方案</b><br>
+                        ① 左侧添加炉膛 / 工装<br>
+                        ② 右侧添加或导入物料<br>
+                        ③ 点击右上角 <b style="color:#2563EB;">生成方案</b>
+                    </div>
                 </div>
             </div>
             <!-- 炉膛缩略图栏 -->
@@ -319,19 +324,25 @@
     <!-- PDF Select Modal -->
     <div id="pdf-select-overlay">
         <div id="pdf-select-modal">
-            <h3>📄 导出热处理装炉 PDF</h3>
-            <p style="font-size:11px;color:#888;margin:0 0 14px 0;">勾选一个或多个炉膛方案，每个炉膛将生成 3 页标准化作业指导书：任务总览 · 分层步骤 · AI评分与注意事项（总览 · 3D视图 · 步骤图 · AI评分）</p>
+            <h3>📄 导出作业指导书</h3>
+            <p style="font-size:11px;color:#888;margin:0 0 14px 0;">选择需要交付的炉次。系统将生成三页式热处理装炉作业指导书：任务总览、分层步骤、AI评分与现场注意事项。</p>
             <div id="pdf-unpacked-warning" class="pdf-unpacked-badge" style="display:none;"></div>
             <div id="pdf-furnace-list"></div>
             <div class="pdf-options-section">
-                <div class="opt-title">📋 导出内容选项</div>
+                <div class="opt-title">📋 附加交付物</div>
                 <div class="pdf-opt-item">
                     <input type="checkbox" id="pdf-opt-json">
-                    <label for="pdf-opt-json">导出装炉方案 JSON（装料大师格式，供机械臂/系统导入）<span class="opt-desc">包含炉膛信息、工件三维坐标，按装料大师 JSON 格式输出</span></label>
+                    <label for="pdf-opt-json">
+                        同时导出装炉方案 JSON
+                        <span class="opt-desc">用于系统备份、后续导入工作台或对接自动化设备。</span>
+                    </label>
                 </div>
                 <div class="pdf-opt-item">
                     <input type="checkbox" id="pdf-opt-worklist" checked>
-                    <label for="pdf-opt-worklist">包含工件清单（基于料框的三维坐标）<span class="opt-desc">详细列表含每件工件的 X/Y/Z 坐标，未来供机械臂摆料使用</span></label>
+                    <label for="pdf-opt-worklist">
+                        PDF 内包含工件坐标清单
+                        <span class="opt-desc">在作业指导书中展示每件工件的 X / Y / Z 坐标，便于现场复核。</span>
+                    </label>
                 </div>
             </div>
             <div style="display:flex;gap:10px;margin-top:16px;">

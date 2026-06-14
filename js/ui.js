@@ -448,7 +448,34 @@ export function rgbToHex(rgb) { if (!rgb) return '#888888'; if (rgb.startsWith('
 
 export function updateTopSummary() { document.getElementById('top-furnace-count').textContent = document.querySelectorAll('.furnace-card').length; document.getElementById('top-item-count').textContent = document.querySelectorAll('.material-card').length; }
 
-export function updateFurnaceNav() { const navDiv = document.getElementById('furnace-nav'); if (!globalFurnacesResult || globalFurnacesResult.length === 0) { navDiv.style.display = 'none'; return; } navDiv.style.display = 'flex'; if (currentFurnaceIndex < 0 || currentFurnaceIndex >= globalFurnacesResult.length) setCurrentFurnaceIndex(0); const furnace = globalFurnacesResult[currentFurnaceIndex]; document.getElementById('nav-title').textContent = furnace.instanceId; const packedVol = furnace.packedItems.reduce((acc, curr) => acc + (curr.w * curr.h * curr.d), 0); const totalVol = furnace.w * furnace.h * furnace.d; document.getElementById('nav-info').textContent = furnace.packedItems.length + '件 · ' + furnace.totalWeight.toFixed(1) + 'kg · 利用率 ' + ((packedVol / totalVol) * 100).toFixed(1) + '%'; }
+export function updateFurnaceNav() {
+    const navDiv = document.getElementById('furnace-nav');
+    if (!navDiv) return;
+
+    if (!globalFurnacesResult || globalFurnacesResult.length === 0) {
+        navDiv.style.display = 'none';
+        return;
+    }
+
+    navDiv.style.display = 'flex';
+
+    if (currentFurnaceIndex < 0 || currentFurnaceIndex >= globalFurnacesResult.length) {
+        setCurrentFurnaceIndex(0);
+    }
+
+    const furnace = globalFurnacesResult[currentFurnaceIndex];
+
+    const navTitle = document.getElementById('nav-title');
+    if (navTitle) {
+        navTitle.textContent = furnace.instanceId || `炉次 #${currentFurnaceIndex + 1}`;
+    }
+
+    const navInfo = document.getElementById('nav-info');
+    if (navInfo) {
+        navInfo.textContent = '';
+        navInfo.style.display = 'none';
+    }
+}
 
 export function updateLeftPanelActiveForIndex(index) { document.querySelectorAll('.furnace-card').forEach(c => c.classList.remove('active')); if (!globalFurnacesResult || index >= globalFurnacesResult.length) return; const furnace = globalFurnacesResult[index]; document.querySelectorAll('.furnace-card').forEach(card => { if (card.querySelector('.f-card-name').textContent === furnace.typeName) card.classList.add('active'); }); }
 
@@ -615,12 +642,16 @@ export function renderAISummaryBar(onFurnaceClick) {
     const estimatedHeats = globalFurnacesResult.length;
     
     // === 综合评分计算（加权） ===
-    const compositeScore = Math.round(
-        spaceUtilization * 0.35 +
-        thermalUniformity * 0.30 +
-        deliveryRate * 0.25 +
-        weightUtilization * 0.10
-    );
+    const activePlanAnalysis = window._currentPlanAnalysis || null;
+
+    const compositeScore = activePlanAnalysis && activePlanAnalysis.compositeScore != null
+        ? activePlanAnalysis.compositeScore
+        : Math.round(
+            spaceUtilization * 0.35 +
+            thermalUniformity * 0.30 +
+            deliveryRate * 0.25 +
+            weightUtilization * 0.10
+        );
     
     // === 构建水平信息条 HTML ===
     let html = '';
@@ -919,7 +950,6 @@ export function renderFurnaceThumbnails(furnaces, currentIdx, onClickCallback) {
         const totalVol = f.w * f.h * f.d;
         const packedVol = (f.packedItems || []).reduce((acc, curr) => acc + (curr.w * curr.h * curr.d), 0);
         const utilization = totalVol > 0 ? ((packedVol / totalVol) * 100).toFixed(0) : '0';
-        const itemCount = (f.packedItems || []).length;
 
         let emoji = '📦';
         if (utilization >= 80) emoji = '🟩';
@@ -934,7 +964,6 @@ export function renderFurnaceThumbnails(furnaces, currentIdx, onClickCallback) {
         card.innerHTML = `
             <div class="thumb-preview">${emoji}</div>
             <div class="thumb-name" title="${f.instanceId}">${f.instanceId}</div>
-            <div class="thumb-stats">${itemCount}件 · ${utilization}%</div>
         `;
 
         card.addEventListener('click', (e) => {
@@ -1236,10 +1265,25 @@ export function renderPlanAnalysisPanel(analysis) {
             ? 'danger'
             : (analysis.status === '需人工确认' ? 'warning' : 'success');
 
+    const scoreText = analysis.compositeScore != null
+            ? analysis.compositeScore
+            : '-';
+
+    const selectedPlanStatus =
+        analysis.unpackedCount > 0
+            ? `未装 ${analysis.unpackedCount} 件`
+            : '全部装入';
+
     el.innerHTML = `
-        <div class="analysis-score-card">
-            <div class="analysis-score">${analysis.compositeScore}</div>
-            <div class="analysis-score-label">综合评分</div>
+        <div class="analysis-score-card analysis-current-plan-card">
+            <div class="analysis-current-plan-title">当前选中方案</div>
+            <div class="analysis-score-row">
+                <div class="analysis-score">${scoreText}</div>
+                <div class="analysis-score-unit">分</div>
+            </div>
+            <div class="analysis-score-label">
+                ${selectedPlanStatus} · ${analysis.status || '待评估'}
+            </div>
         </div>
 
         <div class="analysis-diagnosis-card ${statusClass}">
@@ -1319,13 +1363,15 @@ export function renderCandidatePlanCards(plans = [], activeIndex = 0, onSelect) 
         const isBest = idx === 0;
         const isActive = idx === activeIndex;
 
-        const qualityText = a.qualityScore != null
-            ? a.qualityScore.toFixed(0)
-            : '-';
+        const score = a.compositeScore != null ? a.compositeScore : 0;
 
         const statusText = a.unpackedCount > 0
             ? `未装 ${a.unpackedCount}`
             : '全装入';
+
+        const statusClass = a.unpackedCount > 0
+            ? 'warning'
+            : 'success';
 
         return `
             <div class="candidate-plan-card ${isActive ? 'active' : ''}" data-plan-idx="${idx}">
@@ -1333,14 +1379,11 @@ export function renderCandidatePlanCards(plans = [], activeIndex = 0, onSelect) 
                     <div class="candidate-plan-title">
                         ${isBest ? '⭐ ' : ''}${p.label}
                     </div>
-                    <div class="candidate-plan-score">${a.compositeScore || 0}分</div>
+                    <div class="candidate-plan-score">${score}分</div>
                 </div>
-                <div class="candidate-plan-meta">
-                    空间 ${(a.spaceUtilization * 100).toFixed(1)}% ·
-                    重量 ${(a.weightUtilization * 100).toFixed(1)}% ·
-                    质量 ${qualityText}
+                <div class="candidate-plan-status ${statusClass}">
+                    ${isActive ? '当前查看 · ' : ''}${statusText}
                 </div>
-                <div class="candidate-plan-status">${statusText}</div>
             </div>
         `;
     }).join('');
