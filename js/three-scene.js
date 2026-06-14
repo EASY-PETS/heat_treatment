@@ -2385,23 +2385,64 @@ export function renderMasterPlan(plan) {
  * @param {THREE.Vector3} direction - 相机方向向量（归一化后使用），如 (1, 1, 1) 或 (0, 0.6, 1.5)
  * @param {number} marginRatio - 边距比例，默认 0.02 (2%)
  */
-export function setTightFitCamera(direction, marginRatio = 0.02) {
+export function setTightFitCamera(direction, marginRatio = 0.18) {
     const group = furnaceGroups.get(currentFurnaceIndex);
-    if (!group) return;
+    if (!group || !camera || !controls) return;
 
+    // 1. 确保当前炉次可见
+    group.visible = true;
+
+    // 2. 计算当前炉膛/工装/工件的包围盒
     const box = new THREE.Box3().setFromObject(group);
+    if (box.isEmpty()) return;
+
     const center = new THREE.Vector3();
     box.getCenter(center);
+
     const size = new THREE.Vector3();
     box.getSize(size);
 
-    const maxDim = Math.max(size.x, size.y, size.z);
-    const fovRad = (camera.fov * Math.PI) / 180;
-    const distance = (maxDim * (1 + marginRatio)) / (2 * Math.tan(fovRad / 2));
+    // 3. 用包围球半径计算距离，比只取 maxDim 更稳，三视图都能看全
+    const sphere = new THREE.Sphere();
+    box.getBoundingSphere(sphere);
 
     const dir = direction.clone().normalize();
-    camera.position.copy(center.clone().add(dir.clone().multiplyScalar(distance)));
+
+    const fovRad = THREE.MathUtils.degToRad(camera.fov);
+    const aspect = renderer && renderer.domElement
+        ? renderer.domElement.clientWidth / renderer.domElement.clientHeight
+        : camera.aspect || 1;
+
+    // 同时考虑垂直 FOV 和水平 FOV，避免宽屏下正视/侧视被裁切
+    const verticalDistance = sphere.radius / Math.sin(fovRad / 2);
+    const horizontalFovRad = 2 * Math.atan(Math.tan(fovRad / 2) * aspect);
+    const horizontalDistance = sphere.radius / Math.sin(horizontalFovRad / 2);
+
+    const distance = Math.max(verticalDistance, horizontalDistance) * (1 + marginRatio);
+
+    // 4. 设置相机位置
+    camera.position.copy(center.clone().add(dir.multiplyScalar(distance)));
+
+    // 5. 修正相机 up，避免俯视时画面旋转/翻转
+    if (Math.abs(direction.y) > 0.8) {
+        // 俯视时，让画面上方对应场景 -Z 方向
+        camera.up.set(0, 0, -1);
+    } else {
+        // 正视/侧视恢复正常 Y 向上
+        camera.up.set(0, 1, 0);
+    }
+
+    // 6. 对准中心
     controls.target.copy(center);
+
+    // 7. 根据模型大小设置合理的 Orbit 距离范围
+    controls.minDistance = Math.max(sphere.radius * 0.15, 10);
+    controls.maxDistance = Math.max(sphere.radius * 8, 3000);
+
+    camera.near = Math.max(distance / 1000, 0.1);
+    camera.far = Math.max(distance * 10, 10000);
+    camera.updateProjectionMatrix();
+
     controls.update();
 }
 

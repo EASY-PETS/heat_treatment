@@ -1716,14 +1716,49 @@ init();
     const dockTopView = document.getElementById('dock-top-view');
     const dockFrontView = document.getElementById('dock-front-view');
     const dockSideView = document.getElementById('dock-side-view');
+    const dockRotate90 = document.getElementById('dock-rotate-90');
     const dockExplode = document.getElementById('dock-explode');
-    const dockGravity = document.getElementById('dock-gravity');
-    const dockThermal = document.getElementById('dock-thermal');
+    // const dockGravity = document.getElementById('dock-gravity');
+    // const dockThermal = document.getElementById('dock-thermal');
 
     if (dockTopView) {
         dockTopView.addEventListener('click', () => {
             setTightFitCamera(new THREE.Vector3(0, 1, 0));
             highlightDockBtn(dockTopView);
+        });
+    }
+    function rotateCurrentView90() {
+        if (!camera || !controls) {
+            setTightFitCamera(new THREE.Vector3(1, 0, 0));
+            return;
+        }
+
+        // 当前相机相对观察中心的方向
+        const dir = camera.position.clone().sub(controls.target);
+
+        if (dir.lengthSq() < 0.0001) {
+            dir.set(0, 0, 1);
+        }
+
+        dir.normalize();
+
+        // 如果当前是纯俯视，绕Y轴旋转视觉变化不明显，所以回到水平视角再旋转
+        if (Math.abs(dir.y) > 0.92) {
+            dir.set(0, 0, 1);
+        }
+
+        // 绕世界Y轴旋转90度
+        dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2);
+        dir.normalize();
+
+        // 复用第一步的完整场景适配逻辑
+        setTightFitCamera(dir, 0.18);
+    }
+
+    if (dockRotate90) {
+        dockRotate90.addEventListener('click', () => {
+            rotateCurrentView90();
+            highlightDockBtn(dockRotate90);
         });
     }
     if (dockFrontView) {
@@ -1738,31 +1773,71 @@ init();
             highlightDockBtn(dockSideView);
         });
     }
+    let dockExplodeMode = 'none'; // none | vertical | horizontal
+
+    function updateDockExplodeButton() {
+        if (!dockExplode) return;
+
+        const icon = dockExplode.querySelector('.dock-icon');
+        const label = dockExplode.querySelector('.dock-label');
+
+        dockExplode.classList.toggle('active', dockExplodeMode !== 'none');
+
+        if (dockExplodeMode === 'vertical') {
+            if (icon) icon.textContent = '↕';
+            if (label) label.textContent = '垂直爆炸';
+            dockExplode.title = '当前：垂直爆炸。点击切换为水平爆炸';
+        } else if (dockExplodeMode === 'horizontal') {
+            if (icon) icon.textContent = '↔';
+            if (label) label.textContent = '水平爆炸';
+            dockExplode.title = '当前：水平爆炸。点击关闭爆炸图';
+        } else {
+            if (icon) icon.textContent = '💥';
+            if (label) label.textContent = '爆炸';
+            dockExplode.title = '点击开启垂直爆炸';
+        }
+    }
+
+    function resetDockExplodeButton() {
+        dockExplodeMode = 'none';
+        updateDockExplodeButton();
+    }
+
     if (dockExplode) {
-        dockExplode.addEventListener('click', () => {
-            toggleExplodedView();
-            highlightDockBtn(dockExplode);
+        dockExplode.addEventListener('click', async () => {
+            if (!globalFurnacesResult || globalFurnacesResult.length === 0) {
+                dockExplodeMode = 'none';
+                updateDockExplodeButton();
+                return;
+            }
+
+            await toggleExplodedView();
+
+            if (dockExplodeMode === 'none') {
+                dockExplodeMode = 'vertical';
+            } else if (dockExplodeMode === 'vertical') {
+                dockExplodeMode = 'horizontal';
+            } else {
+                dockExplodeMode = 'none';
+            }
+
+            updateDockExplodeButton();
+
         });
-    }
-    if (dockGravity) {
-        let gravityActive = false;
-        dockGravity.addEventListener('click', () => {
-            gravityActive = !gravityActive;
-            dockGravity.classList.toggle('active', gravityActive);
-            showCapacityFeedback('success', gravityActive ? '⚖️ 重心标记已显示' : '⚖️ 重心标记已隐藏');
-        });
-    }
-    if (dockThermal) {
-        let thermalActive = false;
-        dockThermal.addEventListener('click', () => {
-            thermalActive = !thermalActive;
-            dockThermal.classList.toggle('active', thermalActive);
-            showCapacityFeedback('success', thermalActive ? '🔥 热场可视化已开启' : '🔥 热场可视化已关闭');
-        });
+
+        updateDockExplodeButton();
     }
 
     function highlightDockBtn(activeBtn) {
-        document.querySelectorAll('.dock-btn').forEach(b => b.classList.remove('active'));
+        [
+            dockTopView,
+            dockFrontView,
+            dockSideView,
+            dockRotate90
+        ].forEach(btn => {
+            if (btn) btn.classList.remove('active');
+        });
+
         if (activeBtn) activeBtn.classList.add('active');
     }
 

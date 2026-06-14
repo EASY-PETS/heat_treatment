@@ -16,6 +16,9 @@
     --orange: #F59E0B;
     --furnace-accent: #F59E0B;
     --material-accent: #2563EB;
+    --left-panel-width: 270px;
+    --right-panel-width: 360px;
+    --collapsed-panel-width: 40px;
 }
 
 /* ==================== BASE RESET ==================== */
@@ -142,9 +145,9 @@ body {
     bottom: 0;
     left: 0;
     z-index: 20;
-    width: 260px;           /* 保持原有宽度 */
-    min-width: 260px;
-    max-width: 260px;
+    width: var(--left-panel-width);
+    min-width: var(--left-panel-width);
+    max-width: var(--left-panel-width);
     background: rgba(255, 255, 255, 0.92);
     backdrop-filter: blur(12px);
     border-right: none;
@@ -449,9 +452,9 @@ body {
     bottom: 0;
     right: 0;
     z-index: 20;
-    width: 280px;
-    min-width: 280px;
-    max-width: 280px;
+    width: var(--right-panel-width);
+    min-width: var(--right-panel-width);
+    max-width: var(--right-panel-width);
     background: rgba(255, 255, 255, 0.92);
     backdrop-filter: blur(12px);
     border-left: none;
@@ -2336,6 +2339,7 @@ body:not(.ui-plan-ready) #btn-explode {
 body:not(.ui-plan-ready) #dock-top-view,
 body:not(.ui-plan-ready) #dock-front-view,
 body:not(.ui-plan-ready) #dock-side-view,
+body:not(.ui-plan-ready) #dock-rotate-90,
 body:not(.ui-plan-ready) #dock-explode,
 body:not(.ui-plan-ready) #dock-gravity,
 body:not(.ui-plan-ready) #dock-thermal {
@@ -2591,12 +2595,13 @@ body.right-panel-collapsed {
 /* ==================== ANIMATION BAR SAFE AREA FIX ==================== */
 /* 模拟装炉控制条避开左右面板，避免速度/暂停按钮被右侧面板遮挡 */
 
+#ai-summary-bar,
+#furnace-nav,
 #anim-control-bar {
-    margin-left: var(--left-panel-safe-width);
-    margin-right: var(--right-panel-safe-width);
-    width: calc(100% - var(--left-panel-safe-width) - var(--right-panel-safe-width));
+    left: var(--left-panel-width);
+    right: var(--right-panel-width);
+    width: auto;
     box-sizing: border-box;
-    min-width: 0;
 }
 
 #anim-control-bar .acb-progress {
@@ -2878,4 +2883,981 @@ body.right-panel-collapsed {
 .sim-play-btn:hover {
     transform: translateY(-1px);
     box-shadow: 0 8px 20px rgba(37, 99, 235, 0.28);
+}
+
+/* =========================================================
+   V7.0 UI VISUAL REFINEMENT OVERRIDES
+   第二轮整体 UI 视觉优化：资源库 / 数字孪生视窗 / 方案工作台
+   说明：本段放在 main.css 最后，覆盖前面的旧样式
+========================================================= */
+
+/* ---------- 1. 统一布局变量与安全区 ---------- */
+:root {
+    --left-panel-width: 270px;
+    --right-panel-width: 360px;
+    --collapsed-panel-width: 36px;
+
+    --left-panel-safe-width: var(--left-panel-width);
+    --right-panel-safe-width: var(--right-panel-width);
+}
+
+/* 兼容 body class 和面板自身 collapsed 两种写法 */
+body.left-panel-collapsed,
+body:has(#left-panel.collapsed) {
+    --left-panel-safe-width: var(--collapsed-panel-width);
+}
+
+body.right-panel-collapsed,
+body:has(#right-panel.collapsed) {
+    --right-panel-safe-width: var(--collapsed-panel-width);
+}
+
+/* 顶部 AI 条 / 炉次导航 / 动画控制条避开左右面板 */
+#ai-summary-bar,
+#furnace-nav,
+#anim-control-bar {
+    margin-left: var(--left-panel-safe-width) !important;
+    margin-right: var(--right-panel-safe-width) !important;
+    width: calc(100% - var(--left-panel-safe-width) - var(--right-panel-safe-width)) !important;
+    left: auto !important;
+    right: auto !important;
+    box-sizing: border-box;
+}
+
+
+/* ---------- 2. 顶部栏更轻 ---------- */
+#top-bar {
+    height: 60px;
+    min-height: 60px;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(18px);
+    border-bottom: 1px solid rgba(226, 232, 240, 0.75);
+    box-shadow: 0 1px 10px rgba(15, 23, 42, 0.035);
+}
+
+.top-logo-title {
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: -0.2px;
+}
+
+.top-logo-subtitle {
+    font-size: 10px;
+    color: #94A3B8;
+}
+
+.top-nav-btn,
+.top-tool-btn {
+    height: 32px;
+    border-radius: 9px !important;
+    font-weight: 700 !important;
+}
+
+.btn-generate {
+    height: 34px;
+    border-radius: 10px !important;
+    font-weight: 800 !important;
+    box-shadow: 0 6px 16px rgba(37, 99, 235, 0.20) !important;
+}
+
+
+/* ---------- 3. AI 摘要条变成轻量状态条 ---------- */
+.ai-summary-bar,
+#ai-summary-bar {
+    min-height: 38px !important;
+    height: 38px;
+    padding: 0 18px !important;
+    background: rgba(255, 255, 255, 0.82) !important;
+    backdrop-filter: blur(14px);
+    border-bottom: 1px solid rgba(226, 232, 240, 0.70) !important;
+    box-shadow: none !important;
+}
+
+.ai-bar-content {
+    height: 100%;
+    align-items: center;
+    gap: 18px;
+    flex-wrap: nowrap;
+}
+
+.ai-bar-score {
+    height: 26px;
+    padding: 0 10px;
+    border-radius: 999px;
+    background: #FFF7ED;
+    border: 1px solid #FED7AA;
+}
+
+.ai-bar-score-num {
+    font-size: 18px;
+    color: #EA580C;
+}
+
+.ai-bar-score-label {
+    font-size: 10px;
+    color: #C2410C;
+}
+
+.ai-bar-metric {
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.ai-bar-summary {
+    font-size: 11px;
+}
+
+
+/* ---------- 4. 左侧资源库视觉 ---------- */
+#left-panel {
+    width: var(--left-panel-width);
+    min-width: var(--left-panel-width);
+    max-width: var(--left-panel-width);
+    background: rgba(255, 255, 255, 0.86);
+    backdrop-filter: blur(18px);
+    box-shadow: 8px 0 28px rgba(15, 23, 42, 0.08);
+}
+
+#left-panel .panel-header {
+    height: 52px;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.78);
+    border-bottom: 1px solid rgba(226, 232, 240, 0.75);
+}
+
+#left-panel .panel-header h3 {
+    font-size: 15px;
+    font-weight: 850;
+    letter-spacing: -0.2px;
+}
+
+#left-panel .panel-scroll {
+    padding: 10px 10px 12px;
+}
+
+.furnace-card {
+    border-left: none !important;
+    border-radius: 18px;
+    padding: 12px 12px 12px 14px;
+    margin-bottom: 9px;
+    background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%);
+    border: 1px solid rgba(226, 232, 240, 0.85);
+    box-shadow: 0 8px 26px rgba(15, 23, 42, 0.06);
+    overflow: hidden;
+}
+
+.furnace-card::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 12px;
+    bottom: 12px;
+    width: 3px;
+    border-radius: 999px;
+    background: #F59E0B;
+}
+
+.furnace-card:hover {
+    background: linear-gradient(180deg, #FFFFFF 0%, #FFF7ED 100%);
+    transform: translateX(2px);
+    border-color: #FDBA74;
+}
+
+.furnace-card.active {
+    background: linear-gradient(180deg, #FFF7ED 0%, #FFFFFF 100%) !important;
+    border-color: #FDBA74 !important;
+    box-shadow: 0 10px 30px rgba(245, 158, 11, 0.16) !important;
+}
+
+.furnace-card.active::before {
+    background: #2563EB;
+}
+
+.furnace-card .f-card-name {
+    font-size: 14px;
+    font-weight: 850;
+    color: #0F172A;
+}
+
+.furnace-card .f-card-meta {
+    gap: 5px;
+}
+
+.furnace-card .f-card-meta span {
+    background: #EEF2FF;
+    color: #64748B;
+    border-radius: 8px;
+    padding: 3px 6px;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.furnace-card .f-card-status {
+    margin-top: 6px;
+    font-size: 11px;
+    color: #94A3B8;
+}
+
+
+/* ---------- 5. 右侧方案工作台视觉 ---------- */
+#right-panel {
+    width: var(--right-panel-width);
+    min-width: var(--right-panel-width);
+    max-width: var(--right-panel-width);
+    background: rgba(255, 255, 255, 0.88);
+    backdrop-filter: blur(18px);
+    box-shadow: -8px 0 28px rgba(15, 23, 42, 0.08);
+}
+
+#right-panel .panel-header {
+    height: 52px;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.78);
+    border-bottom: 1px solid rgba(226, 232, 240, 0.75);
+}
+
+#right-panel .panel-header h3 {
+    font-size: 15px;
+    font-weight: 850;
+    letter-spacing: -0.2px;
+}
+
+/* 右侧 Tab 改成轻量 segmented control */
+.right-panel-tabs {
+    margin: 10px 12px;
+    padding: 4px;
+    gap: 4px;
+    border: none;
+    border-radius: 14px;
+    background: #F1F5F9;
+}
+
+.right-tab-btn {
+    height: 32px;
+    border-radius: 11px;
+    background: transparent;
+    color: #64748B;
+    font-size: 12px;
+    font-weight: 850;
+}
+
+.right-tab-btn:hover {
+    background: rgba(255,255,255,0.65);
+    color: #334155;
+}
+
+.right-tab-btn.active {
+    background: #FFFFFF;
+    color: #2563EB;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+}
+
+/* 右侧内容区留白 */
+#right-tab-analysis,
+#right-tab-simulation {
+    padding: 10px 12px 14px;
+}
+
+
+/* ---------- 6. 方案分析卡片高级化 ---------- */
+.analysis-score-card {
+    border: none;
+    border-radius: 22px;
+    padding: 18px;
+    background:
+        radial-gradient(circle at top right, rgba(37, 99, 235, 0.13), transparent 42%),
+        linear-gradient(135deg, #EFF6FF 0%, #F8FAFC 100%);
+    box-shadow: 0 10px 30px rgba(37, 99, 235, 0.10);
+}
+
+.analysis-current-plan-card {
+    text-align: left;
+    padding: 16px 18px;
+}
+
+.analysis-current-plan-title {
+    font-size: 12px;
+    font-weight: 850;
+    color: #64748B;
+}
+
+.analysis-score {
+    font-size: 48px;
+    letter-spacing: -1px;
+}
+
+.analysis-score-row .analysis-score {
+    font-size: 46px;
+}
+
+.analysis-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.analysis-item {
+    border: 1px solid rgba(226, 232, 240, 0.85);
+    border-radius: 16px;
+    padding: 12px;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
+}
+
+.analysis-item span {
+    font-size: 11px;
+    color: #94A3B8;
+    font-weight: 750;
+}
+
+.analysis-item strong {
+    font-size: 16px;
+    color: #0F172A;
+}
+
+.analysis-diagnosis-card {
+    border-radius: 18px;
+    background: linear-gradient(180deg, #FFFBEB 0%, #FFF7ED 100%);
+    border: 1px solid #FDE68A;
+    box-shadow: 0 8px 22px rgba(180, 83, 9, 0.08);
+}
+
+
+/* ---------- 7. 装炉仿真卡片更像作业指导 ---------- */
+.sim-header-card {
+    border: none;
+    border-radius: 18px;
+    background:
+        radial-gradient(circle at top right, rgba(37, 99, 235, 0.10), transparent 42%),
+        linear-gradient(135deg, #EFF6FF 0%, #FFFFFF 100%);
+    box-shadow: 0 8px 24px rgba(37, 99, 235, 0.08);
+}
+
+.sim-mode-row {
+    background: #F1F5F9;
+    border-radius: 999px;
+    padding: 3px;
+    gap: 3px;
+}
+
+.sim-mode-pill {
+    height: 28px;
+    border: none;
+    background: transparent;
+    border-radius: 999px;
+}
+
+.sim-mode-pill.active,
+.sim-mode-pill[data-sim-view-mode].active {
+    background: #FFFFFF;
+    color: #2563EB;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+}
+
+.sim-play-btn {
+    height: 38px;
+    border-radius: 13px;
+    box-shadow: 0 8px 20px rgba(37, 99, 235, 0.24);
+}
+
+.sim-step-card {
+    border-radius: 16px;
+    padding: 11px 12px;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
+}
+
+.sim-step-card.active {
+    background: #EFF6FF;
+    border-color: #93C5FD;
+}
+
+.sim-step-card.playing {
+    background: linear-gradient(180deg, #DBEAFE 0%, #EFF6FF 100%);
+}
+
+
+/* ---------- 8. 中间 3D 视窗增强数字孪生感 ---------- */
+#canvas-container {
+    background:
+        radial-gradient(circle at center 46%, rgba(37, 99, 235, 0.08), transparent 34%),
+        linear-gradient(180deg, #F8FAFC 0%, #F1F5F9 100%);
+}
+
+/* 炉次导航弱化 */
+#furnace-nav {
+    min-height: 38px;
+    height: 38px;
+    background: rgba(255, 255, 255, 0.78) !important;
+    backdrop-filter: blur(14px);
+    border-bottom: 1px solid rgba(226, 232, 240, 0.65);
+}
+
+#furnace-nav .nav-title {
+    font-size: 13px;
+    font-weight: 850;
+}
+
+
+/* ---------- 9. Dock 更轻更高级 ---------- */
+#dock-bar {
+    border-radius: 18px;
+    padding: 7px 10px;
+    gap: 3px;
+    background: rgba(255, 255, 255, 0.88);
+    backdrop-filter: blur(18px) saturate(180%);
+    -webkit-backdrop-filter: blur(18px) saturate(180%);
+    box-shadow: 0 12px 36px rgba(15, 23, 42, 0.14);
+    border: 1px solid rgba(226, 232, 240, 0.85);
+    opacity: 0.92;
+}
+
+#dock-bar:hover {
+    opacity: 1;
+}
+
+.dock-btn {
+    min-width: 46px;
+    padding: 5px 8px;
+    border-radius: 12px;
+}
+
+.dock-icon {
+    font-size: 15px;
+}
+
+.dock-label {
+    font-size: 10px;
+    font-weight: 650;
+}
+
+
+/* ---------- 10. 折叠状态宽度同步 ---------- */
+#left-panel.collapsed,
+#right-panel.collapsed {
+    width: var(--collapsed-panel-width) !important;
+    min-width: var(--collapsed-panel-width) !important;
+    max-width: var(--collapsed-panel-width) !important;
+}
+
+/* =========================================================
+   V7.1 UI REFINEMENT
+   第三轮：右侧工件详情 + 中间炉次导航优化
+========================================================= */
+
+
+/* ---------- 1. 右侧工件筛选条轻量化 ---------- */
+
+.filter-bar {
+    margin: 0 0 6px 0;
+    padding: 7px 0 8px;
+    border-bottom: 1px solid rgba(226, 232, 240, 0.72);
+    background: transparent;
+}
+
+.filter-bar-title {
+    font-size: 11px;
+    font-weight: 850;
+    color: #475569;
+    margin-bottom: 5px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.filter-bar-header {
+    padding: 0 2px;
+}
+
+.filter-tags {
+    gap: 5px;
+    padding: 0 2px;
+}
+
+.filter-tag {
+    min-height: 22px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    border: none;
+    background: #F1F5F9;
+    color: #64748B;
+    font-size: 10px;
+    font-weight: 800;
+    box-shadow: inset 0 0 0 1px rgba(226, 232, 240, 0.8);
+}
+
+.filter-tag:hover {
+    background: #E2E8F0;
+    border-color: transparent;
+}
+
+.filter-tag.active {
+    box-shadow: none;
+}
+
+
+/* ---------- 2. 右侧工件卡片高级化 ---------- */
+
+.material-card {
+    border-left: none !important;
+    border-radius: 18px;
+    padding: 11px 12px;
+    margin-bottom: 8px;
+    background: linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%);
+    border: 1px solid rgba(226, 232, 240, 0.86);
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.055);
+    overflow: hidden;
+}
+
+.material-card::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 12px;
+    bottom: 12px;
+    width: 3px;
+    border-radius: 999px;
+    background: var(--material-accent);
+}
+
+.material-card:hover {
+    background: linear-gradient(180deg, #FFFFFF 0%, #EFF6FF 100%);
+    border-color: #BFDBFE;
+    transform: translateX(-2px);
+}
+
+.material-card.active {
+    background: linear-gradient(180deg, #EFF6FF 0%, #FFFFFF 100%) !important;
+    border-color: #93C5FD !important;
+    box-shadow: 0 10px 28px rgba(37, 99, 235, 0.13) !important;
+}
+
+.material-card.active::before {
+    background: #F59E0B;
+}
+
+.material-card .m-color-swatch {
+    width: 26px;
+    height: 26px;
+    min-width: 26px;
+    border-radius: 9px;
+    border: 2px solid rgba(255, 255, 255, 0.95);
+    box-shadow: 0 3px 10px rgba(15, 23, 42, 0.16);
+}
+
+.material-card .m-name {
+    font-size: 13px;
+    font-weight: 850;
+    color: #0F172A;
+}
+
+.material-card .m-meta {
+    margin-top: 2px;
+    font-size: 11px;
+    color: #94A3B8;
+    font-weight: 650;
+}
+
+.material-card .m-delete {
+    top: 8px;
+    right: 8px;
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    background: transparent;
+    color: #FCA5A5;
+    opacity: 0.75;
+}
+
+.material-card .m-delete:hover {
+    background: #FEE2E2;
+    color: #DC2626;
+    opacity: 1;
+}
+
+
+/* ---------- 3. 右侧详情面板更像底部属性抽屉 ---------- */
+
+#material-detail-panel {
+    border-top: 1px solid rgba(226, 232, 240, 0.78);
+    background: rgba(248, 250, 252, 0.82);
+}
+
+#material-detail-panel .mdp-header {
+    background: rgba(255, 255, 255, 0.82);
+}
+
+#material-detail-panel .mdp-header span {
+    font-size: 13px;
+    font-weight: 850;
+}
+
+.mdp-field label {
+    font-size: 11px;
+    font-weight: 750;
+    color: #64748B;
+}
+
+.mdp-field input,
+.mdp-field select,
+.mdp-field textarea {
+    height: 36px;
+    border-radius: 10px;
+    background: #FFFFFF;
+    border: 1px solid rgba(203, 213, 225, 0.9);
+    font-size: 13px;
+}
+
+
+/* ---------- 4. 中间炉次导航改成悬浮胶囊 ---------- */
+
+#furnace-nav {
+    position: absolute;
+    top: 44px;
+    left: 50% !important;
+    right: auto !important;
+    transform: translateX(-50%);
+    z-index: 16;
+
+    width: auto !important;
+    min-width: 420px;
+    max-width: min(560px, calc(100vw - var(--left-panel-safe-width) - var(--right-panel-safe-width) - 48px));
+
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+
+    height: 38px;
+    min-height: 38px;
+    padding: 0 10px;
+    gap: 10px;
+
+    border: 1px solid rgba(226, 232, 240, 0.88);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.86) !important;
+    backdrop-filter: blur(16px);
+    box-shadow: 0 8px 28px rgba(15, 23, 42, 0.08);
+}
+
+#furnace-nav .nav-arrow {
+    height: 28px;
+    padding: 0 12px;
+    border-radius: 999px;
+    background: #F8FAFC;
+    border: 1px solid rgba(203, 213, 225, 0.85);
+    font-size: 12px;
+    font-weight: 800;
+}
+
+#furnace-nav .nav-title {
+    min-width: 180px;
+    font-size: 13px;
+    font-weight: 900;
+    color: #F59E0B;
+}
+
+
+/* ---------- 5. 让 3D 视窗上方更干净 ---------- */
+
+#canvas-container {
+    padding-top: 0;
+}
+
+/* 因为炉次导航变成 absolute，不再占用布局高度 */
+#canvas-area {
+    position: relative;
+}
+
+
+/* ---------- 6. 缩略炉次卡进一步弱化，避免和 Dock 抢视觉 ---------- */
+
+#furnace-thumb-bar {
+    opacity: 0.76;
+    transform: scale(0.96);
+    transform-origin: center bottom;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+#furnace-thumb-bar:hover {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.thumb-card {
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.66);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.thumb-card.active {
+    background: rgba(239, 246, 255, 0.96);
+    border-color: #2563EB;
+}
+
+.thumb-preview {
+    display: none;
+}
+
+.thumb-name {
+    padding: 4px 6px;
+    font-size: 10px;
+    font-weight: 800;
+}
+
+
+/* ---------- 7. Dock 再降低一点高度 ---------- */
+
+#dock-bar {
+    bottom: 14px;
+    padding: 6px 10px;
+}
+
+.dock-btn {
+    min-width: 44px;
+    padding: 4px 8px;
+}
+
+.dock-icon {
+    font-size: 14px;
+}
+
+.dock-label {
+    font-size: 9px;
+}
+
+/* =========================================================
+   V7.2 UI REFINEMENT
+   顶部 KPI / 右侧工件区 / 3D 中心区细节收口
+========================================================= */
+
+
+/* ---------- 1. 炉次导航按中间 3D 区域真正居中 ---------- */
+
+#furnace-nav {
+    left: calc(
+        var(--left-panel-safe-width) +
+        (100vw - var(--left-panel-safe-width) - var(--right-panel-safe-width)) / 2
+    ) !important;
+    transform: translateX(-50%) !important;
+}
+
+
+/* ---------- 2. 顶部 KPI 条更像状态仪表 ---------- */
+
+.ai-summary-bar,
+#ai-summary-bar {
+    height: 36px !important;
+    min-height: 36px !important;
+    padding: 0 14px !important;
+}
+
+.ai-bar-content {
+    gap: 14px;
+}
+
+.ai-bar-score {
+    height: 24px;
+    padding: 0 9px;
+    border-radius: 999px;
+}
+
+.ai-bar-score-num {
+    font-size: 17px;
+}
+
+.ai-bar-score-label {
+    font-size: 9px;
+    font-weight: 800;
+}
+
+.ai-bar-metric {
+    height: 24px;
+    padding: 0 8px;
+    border-radius: 999px;
+    background: rgba(248, 250, 252, 0.85);
+    box-shadow: inset 0 0 0 1px rgba(226, 232, 240, 0.75);
+    font-size: 11px;
+}
+
+.ai-bar-metric-icon {
+    font-size: 12px;
+}
+
+.ai-bar-separator {
+    display: none;
+}
+
+.ai-bar-summary {
+    padding-left: 2px;
+    font-size: 11px;
+}
+
+
+/* ---------- 3. 左侧排序按钮再轻一点 ---------- */
+
+.sort-bar {
+    padding: 6px 10px;
+    gap: 5px;
+    background: rgba(248, 250, 252, 0.65);
+    border-bottom: 1px solid rgba(226, 232, 240, 0.65);
+}
+
+.sort-btn {
+    height: 24px;
+    padding: 0 9px;
+    border-radius: 8px;
+    background: #FFFFFF;
+    border-color: rgba(226, 232, 240, 0.9);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+
+/* ---------- 4. 右侧筛选区压缩，避免占太多高度 ---------- */
+
+.filter-bar {
+    padding: 5px 0 6px;
+    margin-bottom: 4px;
+}
+
+.filter-bar-title {
+    font-size: 10px;
+    margin-bottom: 4px;
+}
+
+.filter-collapse-btn {
+    font-size: 10px;
+}
+
+.filter-tags {
+    gap: 4px;
+}
+
+.filter-tag {
+    min-height: 20px;
+    padding: 2px 8px;
+    font-size: 10px;
+    font-weight: 800;
+}
+
+.filter-tag .tag-count {
+    font-size: 9px;
+}
+
+
+/* ---------- 5. 右侧物料卡片减高，信息更克制 ---------- */
+
+.material-card {
+    min-height: 58px;
+    padding: 9px 12px;
+    margin-bottom: 7px;
+    border-radius: 16px;
+}
+
+.material-card::before {
+    top: 10px;
+    bottom: 10px;
+}
+
+.material-card .m-color-swatch {
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    border-radius: 8px;
+}
+
+.material-card .m-name {
+    font-size: 13px;
+    line-height: 1.25;
+}
+
+.material-card .m-meta {
+    font-size: 10px;
+    line-height: 1.35;
+    color: #94A3B8;
+}
+
+/* 编码 / 客户这一行弱化 */
+.material-card .item-meta {
+    margin-top: 2px;
+    font-size: 10px;
+    color: #64748B;
+    line-height: 1.3;
+    opacity: 0.86;
+}
+
+.material-card .m-delete {
+    top: 7px;
+    right: 8px;
+}
+
+
+/* ---------- 6. 右侧面板内容滚动更顺滑 ---------- */
+
+#right-panel .panel-scroll,
+#right-tab-analysis,
+#right-tab-simulation {
+    scrollbar-width: thin;
+}
+
+#right-panel .panel-scroll::-webkit-scrollbar,
+#right-tab-analysis::-webkit-scrollbar,
+#right-tab-simulation::-webkit-scrollbar {
+    width: 5px;
+}
+
+#right-panel .panel-scroll::-webkit-scrollbar-thumb,
+#right-tab-analysis::-webkit-scrollbar-thumb,
+#right-tab-simulation::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.55);
+    border-radius: 999px;
+}
+
+
+/* ---------- 7. 中间 3D 网格弱化，模型更突出 ---------- */
+
+#canvas-container {
+    background:
+        radial-gradient(circle at center 44%, rgba(37, 99, 235, 0.075), transparent 34%),
+        linear-gradient(180deg, #F8FAFC 0%, #F1F5F9 100%);
+}
+
+/* WebGL canvas 自身透明度不动，只给底部缩略和 Dock 更明确层级 */
+#furnace-thumb-bar {
+    margin-bottom: 52px;
+}
+
+#dock-bar {
+    bottom: 12px;
+    box-shadow: 0 14px 38px rgba(15, 23, 42, 0.16);
+}
+
+
+/* ---------- 8. 右侧 Tab 与内容之间减少断层 ---------- */
+
+.right-panel-tabs {
+    margin-bottom: 8px;
+}
+
+#right-panel .panel-scroll {
+    padding-top: 6px;
+}
+
+/* ==================== EXPLODE MODE BUTTON STATE ==================== */
+
+#dock-explode.active {
+    background: rgba(245, 158, 11, 0.16);
+    color: #D97706;
+}
+
+#dock-explode.active .dock-icon {
+    transform: scale(1.08);
+}
+
+#dock-explode .dock-label {
+    min-width: 38px;
+}
+
+/* ==================== DOCK CLEANUP V1 ==================== */
+/* 重心 / 热场暂时从 3D Dock 移除，后续迁移到右侧工作台 */
+
+#dock-gravity,
+#dock-thermal {
+    display: none !important;
 }
