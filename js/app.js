@@ -453,10 +453,10 @@ function executeAndRender() {
         const missingInfo = missingWeight > 0 ? ("缺少容量: " + missingWeight.toFixed(1) + "kg") : "";
 
         showCapacityFeedback("danger",
-            "⚠️ 装炉失败：当前可用炉膛容量不足\n" +
+            "⚠️ 装炉失败：当前可用工装容量不足\n" +
             globalUnpackedItems.length + " 件工件未能装炉（" + uList + "）\n" +
             (missingInfo ? missingInfo + "\n" : "") +
-            "建议：增加炉膛设备台数 / 提高承重上限 / 减少工件数量" +
+            "建议：增加装载工装数量 / 提高工装承重上限 / 减少工件数量" +
             aggInfo);
 
         // 渲染底部缩略图栏
@@ -690,6 +690,9 @@ function updateWorkbenchUiMode() {
         hasMaterials,
         hasPlan
     });
+
+    updateSelectedEquipmentForTooling();
+    syncLeftPanelActionButton();
 }
 
 function updateEmptyStateCopy({ hasFurnaces, hasMaterials, hasPlan }) {
@@ -699,19 +702,19 @@ function updateEmptyStateCopy({ hasFurnaces, hasMaterials, hasPlan }) {
     if (!hasFurnaces && !hasMaterials) {
         msg.innerHTML = `
             <b style="color:#1E293B;">开始创建装炉方案</b><br>
-            ① 左侧添加炉膛设备，配置尺寸与工艺<br>
-            ② 在“装载工装”确认料框/料盘/网篮<br>
+            ① 左侧增加装载工装，配置工装尺寸、数量、承重与类型<br>
+            ② 当前暂不配置真实炉膛，按“工装空间”测试装载能力<br>
             ③ 左侧“工件详情”添加或导入工件<br>
-            ④ 点击右上角 <b style="color:#2563EB;">生成方案</b>
+            ④ 点击左侧 <b style="color:#2563EB;">生成方案</b>
         `;
         return;
     }
 
     if (hasFurnaces && !hasMaterials) {
         msg.innerHTML = `
-            <b style="color:#1E293B;">炉膛设备已准备</b><br>
-            请在“装载工装”确认料框/料盘/网篮，并在左侧“工件详情”添加或导入工件<br>
-            完成后点击右上角 <b style="color:#2563EB;">生成方案</b>
+            <b style="color:#1E293B;">装载工装已准备</b><br>
+            请在左侧“工件详情”添加或导入工件；当前算法会将工件装入已配置工装中<br>
+            完成后点击左侧 <b style="color:#2563EB;">生成方案</b>
         `;
         return;
     }
@@ -719,15 +722,15 @@ function updateEmptyStateCopy({ hasFurnaces, hasMaterials, hasPlan }) {
     if (!hasFurnaces && hasMaterials) {
         msg.innerHTML = `
             <b style="color:#1E293B;">工件已准备</b><br>
-            请在左侧添加炉膛设备，配置尺寸与可执行工艺<br>
-            完成后点击右上角 <b style="color:#2563EB;">生成方案</b>
+            请在左侧增加装载工装，配置工装尺寸、数量、承重与适用工艺<br>
+            完成后点击左侧 <b style="color:#2563EB;">生成方案</b>
         `;
         return;
     }
 
     msg.innerHTML = `
         <b style="color:#1E293B;">输入数据已准备</b><br>
-        点击右上角 <b style="color:#2563EB;">生成方案</b> 开始智能排布
+        点击左侧 <b style="color:#2563EB;">生成方案</b> 开始智能排布
     `;
 }
 
@@ -1014,19 +1017,24 @@ function init() {
     if (btnMasterImportJson) btnMasterImportJson.addEventListener("click", openJsonImportModal);
 
     const btnToolingMgmt = document.getElementById("btn-tooling-mgmt");
-    if (btnToolingMgmt) btnToolingMgmt.addEventListener("click", () => activateLeftPanelTab('tooling'));
+    if (btnToolingMgmt) btnToolingMgmt.addEventListener("click", () => activateLeftPanelTab('furnace'));
     const btnMaterialNav = document.getElementById("btn-material-nav");
     if (btnMaterialNav) btnMaterialNav.addEventListener("click", () => activateLeftPanelTab('material'));
-    document.getElementById("btn-rules").addEventListener("click", openRulesModal);
-    document.getElementById("btn-rules-cancel").addEventListener("click", () => {
+    const btnRules = document.getElementById("btn-rules");
+    if (btnRules) btnRules.addEventListener("click", openRulesModal);
+    const btnRulesCancel = document.getElementById("btn-rules-cancel");
+    if (btnRulesCancel) btnRulesCancel.addEventListener("click", () => {
         document.getElementById("rules-modal-overlay").style.display = "none";
     });
-    document.getElementById("rules-modal-overlay").addEventListener("click", (e) => {
-        if (e.target === document.getElementById("rules-modal-overlay"))
-            document.getElementById("rules-modal-overlay").style.display = "none";
+    const rulesOverlay = document.getElementById("rules-modal-overlay");
+    if (rulesOverlay) rulesOverlay.addEventListener("click", (e) => {
+        if (e.target === rulesOverlay)
+            rulesOverlay.style.display = "none";
     });
-    document.getElementById("btn-rules-save").addEventListener("click", saveRulesModal);
-    document.getElementById("btn-generate-plan").addEventListener("click", showGenerationOptions);
+    const btnRulesSave = document.getElementById("btn-rules-save");
+    if (btnRulesSave) btnRulesSave.addEventListener("click", saveRulesModal);
+    const btnGeneratePlan = document.getElementById("btn-generate-plan");
+    if (btnGeneratePlan) btnGeneratePlan.addEventListener("click", showGenerationOptions);
     document.getElementById("btn-animate").addEventListener("click", playCurrentSimulation);
     document.getElementById("btn-export-pdf").addEventListener("click", showPdfSelectModal);
     // JSON 导出并入 PDF 导出弹窗，顶部不再单独提供入口
@@ -1051,17 +1059,25 @@ function init() {
         btnBOM.addEventListener("click", showLayeredBOM);
     }
 
-    document.getElementById("btn-add-furnace").addEventListener("click", toolingModal.openToolingAddModal);
+    const btnAddFurnace = document.getElementById("btn-add-furnace") || document.getElementById("btn-add-equipmente");
+    if (btnAddFurnace) btnAddFurnace.addEventListener("click", handleLeftPanelPrimaryAction);
     const btnAddToolingInline = document.getElementById("btn-add-tooling-inline");
-    if (btnAddToolingInline) btnAddToolingInline.addEventListener("click", addUnlinkedToolingCard);
+    if (btnAddToolingInline) btnAddToolingInline.addEventListener("click", () => addToolingForSelectedEquipment());
+    document.querySelectorAll(".tooling-type-template").forEach(btn => {
+        btn.addEventListener("click", () => addToolingForSelectedEquipment(btn.getAttribute("data-tooling-type")));
+    });
     document.querySelectorAll(".sort-btn").forEach(btn => {
         btn.addEventListener("click", () => sortFurnaceCards(btn.getAttribute("data-field")));
     });
-    document.getElementById("fdp-toggle-btn").addEventListener("click", () => {
-        const collapsed = !document.getElementById("furnace-detail-panel").classList.contains("collapsed");
+    const fdpToggleBtn = document.getElementById("fdp-toggle-btn");
+    if (fdpToggleBtn) fdpToggleBtn.addEventListener("click", () => {
+        const detailPanel = document.getElementById("furnace-detail-panel") || document.getElementById("equipment-detail-panel");
+        if (!detailPanel) return;
+        const collapsed = !detailPanel.classList.contains("collapsed");
         setFdpCollapsed(collapsed);
-        document.getElementById("furnace-detail-panel").classList.toggle("collapsed", collapsed);
-        document.getElementById("fdp-toggle-icon").textContent = collapsed ? "▼" : "▲";
+        detailPanel.classList.toggle("collapsed", collapsed);
+        const icon = document.getElementById("fdp-toggle-icon");
+        if (icon) icon.textContent = collapsed ? "▼" : "▲";
     });
     document.getElementById("mdp-toggle-btn").addEventListener("click", () => {
         const collapsed = !document.getElementById("material-detail-panel").classList.contains("collapsed");
@@ -1069,7 +1085,8 @@ function init() {
         document.getElementById("material-detail-panel").classList.toggle("collapsed", collapsed);
         document.getElementById("mdp-toggle-icon").textContent = collapsed ? "▼" : "▲";
     });
-    document.getElementById("furnace-cards-container").addEventListener("click", (e) => {
+    const furnaceCardsContainer = document.getElementById("furnace-cards-container") || document.getElementById("equipment-cards-container");
+    if (furnaceCardsContainer) furnaceCardsContainer.addEventListener("click", (e) => {
         const btn = e.target.closest("[data-action=\"delete-furnace\"]");
         if (btn) {
             e.stopPropagation();
@@ -1206,7 +1223,7 @@ function init() {
     document.getElementById("btn-pdf-confirm").addEventListener("click", () => {
         const selectedIds = getSelectedPdfFurnaceIds();
         if (selectedIds.length === 0) {
-            alert("请至少选择一个炉膛方案");
+            alert("请至少选择一个装炉方案");
             return;
         }
 
@@ -1364,8 +1381,14 @@ function initLeftPanelTabs() {
             if (pane) {
                 pane.classList.add('active');
             }
+
+            syncLeftPanelActionButton(tab);
+            updateSelectedEquipmentForTooling();
         });
     });
+
+    syncLeftPanelActionButton();
+    updateSelectedEquipmentForTooling();
 }
 
 function activateLeftPanelTab(tab) {
@@ -1373,20 +1396,177 @@ function activateLeftPanelTab(tab) {
     if (btn) btn.click();
 }
 
-function addUnlinkedToolingCard() {
+function getActiveLeftPanelTab() {
+    const activeBtn = document.querySelector('.left-tab-btn.active');
+    return activeBtn ? activeBtn.getAttribute('data-tab') : 'furnace';
+}
+
+function syncLeftPanelActionButton(tab = getActiveLeftPanelTab()) {
+    const btn = document.getElementById('btn-add-furnace') || document.getElementById('btn-add-equipmente');
+    if (!btn) return;
+
+    if (tab === 'furnace') {
+        btn.textContent = '增加工装';
+        btn.title = '新增标准料框、料盘、网篮、环形工装等装载工装';
+        btn.disabled = false;
+        return;
+    }
+
+    if (tab === 'tooling') {
+        btn.textContent = '待链接设备';
+        btn.title = '生产车间模块暂不配置，后续用于链接车间、设备与炉膛';
+        btn.disabled = true;
+        return;
+    }
+
+    if (tab === 'material') {
+        btn.textContent = '新增工件';
+        btn.title = '新增待热处理工件';
+        btn.disabled = false;
+        return;
+    }
+
+    btn.textContent = '增加工装';
+    btn.title = '新增装载工装';
+    btn.disabled = false;
+}
+
+function handleLeftPanelPrimaryAction() {
+    const tab = getActiveLeftPanelTab();
+
+    if (tab === 'furnace') {
+        // 内部仍复用 furnace-card 作为装载工装卡片；UI 上只呈现为“装载工装”。
+        toolingModal.openToolingAddModal();
+        return;
+    }
+
+    if (tab === 'tooling') {
+        showCapacityFeedback('success', '生产车间模块暂未启用：后续用于链接车间、设备与真实炉膛。当前先测试“工件装入工装”。');
+        return;
+    }
+
+    if (tab === 'material') {
+        const btn = document.getElementById('btn-add-item');
+        if (btn) btn.click();
+        return;
+    }
+}
+
+const TOOLING_TYPE_OPTIONS = {
+    'standard-basket': {
+        label: '标准料框',
+        meta: '搁板 / 层间距 / 安全间距 · 用于承载批量工件'
+    },
+    'material-tray': {
+        label: '料盘',
+        meta: '平铺大件 · 强调表面暴露与重心稳定'
+    },
+    'mesh-basket': {
+        label: '网篮',
+        meta: '小件批量装载 · 强调气流通过性'
+    },
+    'ring-tooling': {
+        label: '环形工装',
+        meta: '井式炉 / 回转炉 · 极坐标排布与中心避障'
+    }
+};
+
+function getSelectedEquipmentCard() {
+    if (selectedFurnaceCardId) {
+        const card = document.getElementById(selectedFurnaceCardId);
+        if (card) return card;
+    }
+    return document.querySelector('.furnace-card.active');
+}
+
+function getSelectedEquipmentName() {
+    const card = getSelectedEquipmentCard();
+    return card ? (card.querySelector('.f-card-name')?.textContent || '已选设备') : '';
+}
+
+function updateSelectedEquipmentForTooling() {
+    const nameEl = document.getElementById('tooling-selected-equipment-name');
+    const hintEl = document.getElementById('tooling-selected-equipment-hint');
+    const statusEl = document.getElementById('tooling-link-status');
+    if (!nameEl || !hintEl || !statusEl) return;
+
+    const eqName = getSelectedEquipmentName();
+    if (eqName) {
+        statusEl.classList.add('has-equipment');
+        nameEl.textContent = eqName;
+        hintEl.textContent = '当前阶段工装暂不链接真实设备；后续可在生产车间中绑定设备。';
+    } else {
+        statusEl.classList.remove('has-equipment');
+        nameEl.textContent = '未选定设备';
+        hintEl.textContent = '当前版本可直接新增装载工装；真实设备后续在生产车间中链接。';
+    }
+}
+
+function chooseToolingTypeByPrompt() {
+    const raw = prompt(
+        '请选择工装类型：\n1 标准料框\n2 料盘\n3 网篮\n4 环形工装',
+        '1'
+    );
+    if (raw === null) return null;
+
+    const value = String(raw).trim();
+    const map = {
+        '1': 'standard-basket',
+        '标准料框': 'standard-basket',
+        '2': 'material-tray',
+        '料盘': 'material-tray',
+        '3': 'mesh-basket',
+        '网篮': 'mesh-basket',
+        '4': 'ring-tooling',
+        '环形工装': 'ring-tooling'
+    };
+    return map[value] || 'standard-basket';
+}
+
+function addToolingForSelectedEquipment(toolingType) {
     const container = document.getElementById('tooling-cards-container');
     if (!container) return;
 
-    const toolingName = prompt('请输入装载工装名称，例如：1#标准料框、井式炉环形工装', '未命名装载工装');
-    if (!toolingName) return;
+    const type = toolingType || chooseToolingTypeByPrompt();
+    if (!type) return;
+
+    const option = TOOLING_TYPE_OPTIONS[type] || TOOLING_TYPE_OPTIONS['standard-basket'];
+    const equipmentCard = getSelectedEquipmentCard();
+    const equipmentName = equipmentCard ? (equipmentCard.querySelector('.f-card-name')?.textContent || '已选设备') : '';
+    const linkLabel = equipmentName ? ('已链接：' + equipmentName) : '未链接设备';
+
+    const empty = document.getElementById('tooling-empty-state');
+    if (empty) empty.remove();
 
     const card = document.createElement('div');
     card.className = 'tooling-instance-card';
+    card.setAttribute('data-tooling-type', type);
+    if (equipmentCard) {
+        card.setAttribute('data-linked-fid', equipmentCard.getAttribute('data-fid') || '');
+        card.classList.add('linked');
+    }
+
     card.innerHTML =
-        '<div class="tooling-instance-head"><strong>' + toolingName + '</strong><span>未链接设备</span></div>' +
-        '<div class="tooling-instance-meta">待配置类型 / 尺寸 / 搁板 / 间距 · 后续可链接炉膛设备</div>';
+        '<div class="tooling-instance-head"><strong>' + option.label + '</strong><span>' + linkLabel + '</span></div>' +
+        '<div class="tooling-instance-meta">' + option.meta + '</div>';
 
     container.appendChild(card);
+
+    // 当前算法仍复用 furnace-card 读取工装参数；新增工装时把该卡片的默认工装类型同步为最新选择。
+    if (equipmentCard) {
+        const cfg = furnaceTooling[type] || furnaceTooling['standard-basket'];
+        equipmentCard.setAttribute('data-tooling-type', type);
+        equipmentCard.setAttribute('data-basket-type', cfg.basketType || 'grid');
+        equipmentCard.setAttribute('data-max-layers', cfg.maxLayers || 5);
+        equipmentCard.setAttribute('data-placement-mode', cfg.placementMode || 'free');
+        equipmentCard.setAttribute('data-linked-tooling-label', option.label);
+        showCapacityFeedback('success', '已为设备“' + equipmentName + '”新增装载工装：' + option.label);
+    } else {
+        showCapacityFeedback('success', '已新增未链接设备的装载工装：' + option.label + '。后续可再链接到具体热处理设备。');
+    }
+
+    updateSelectedEquipmentForTooling();
+    updateWorkbenchUiMode();
 }
 
 function initRightPanelTabs() {
@@ -1471,7 +1651,7 @@ function showGenerationOptions() {
     let hasFurnaces = document.querySelectorAll(".furnace-card").length > 0;
     let hasMaterials = document.querySelectorAll(".material-card").length > 0;
     if (!hasFurnaces || !hasMaterials) {
-        alert("请先在左侧添加炉膛设备，确认装载工装列表，再在左侧“工件详情”添加待处理工件");
+        alert("请先在左侧增加装载工装，再在左侧“工件详情”添加待处理工件");
         return;
     }
 
@@ -1534,10 +1714,10 @@ function sleep(ms) {
 // ==================== 设备新增 / 装载工装列表逻辑 ====================
 
 /**
- * 清空所有待摆放工件（保留炉膛设备与装载工装）
+ * 清空所有待摆放工件（保留装载工装）
  */
 function clearAllMaterials() {
-    if (!confirm('确定要清空所有待摆放工件吗？\n这将清除方案统计和 3D 工件，但炉膛设备与装载工装将保留。')) return;
+    if (!confirm('确定要清空所有待摆放工件吗？\n这将清除方案统计和 3D 工件，但装载工装将保留。')) return;
 
     // 1. 移除所有工件卡片
     document.querySelectorAll('.material-card').forEach(c => c.remove());
@@ -1573,7 +1753,7 @@ function clearAllMaterials() {
     document.getElementById('mdp-body').style.display = 'none';
     document.getElementById('mdp-title').textContent = '📋 工件详情';
 
-    // 8. 如果还有炉膛设备，渲染空工装
+    // 8. 如果还有装载工装，渲染空工装
     const hasFurnaces = document.querySelectorAll('.furnace-card').length > 0;
     if (hasFurnaces) {
         toolingModal.renderEmptyToolingOnly();
@@ -1594,12 +1774,12 @@ function clearAllMaterials() {
 }
 
 /**
- * 清空所有炉膛设备、装载工装和工件（完全重置）
+ * 清空所有装载工装和工件（完全重置）
  */
 function clearAllFurnaces() {
-    if (!confirm('确定要清空所有炉膛设备吗？\n这将清除所有设备、工件、方案统计和 3D 场景。装载工装列表会保留为未链接状态。')) return;
+    if (!confirm('确定要清空所有装载工装吗？\n这将清除所有工装、工件、方案统计和 3D 场景。')) return;
 
-    // 1. 移除所有炉膛卡片
+    // 1. 移除所有装载工装卡片
     document.querySelectorAll('.furnace-card').forEach(c => c.remove());
 
     // 2. 移除所有工件卡片
@@ -1637,7 +1817,7 @@ function clearAllFurnaces() {
     // 8. 重置详情面板
     document.getElementById('fdp-placeholder').style.display = 'block';
     document.getElementById('fdp-body').style.display = 'none';
-    document.getElementById('fdp-title').textContent = '📋 进炉方向';
+    document.getElementById('fdp-title').textContent = '📋 工装参数';
     document.getElementById('mdp-placeholder').style.display = 'block';
     document.getElementById('mdp-body').style.display = 'none';
     document.getElementById('mdp-title').textContent = '📋 工件详情';

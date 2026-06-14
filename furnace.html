@@ -27,13 +27,9 @@
             <div class="top-logo-title">AI热处理装炉智能体</div>
             <div class="top-logo-subtitle">AI Furnace Loading Agent</div>
         </div>
-        <button class="btn top-nav-btn" id="btn-tooling-mgmt">工装管理</button>
-        <button class="btn top-nav-btn" id="btn-material-nav">工件详情</button>
-        <button class="btn top-nav-btn" id="btn-rules">装炉规则</button>
         <div class="top-spacer"></div>
-        <button class="btn btn-generate" id="btn-generate-plan">生成方案</button>
         <div id="top-summary" style="display:none;">
-            就绪 · <span id="top-furnace-count">0</span> 炉膛 · <span id="top-item-count">0</span> 批次待装
+            就绪 · <span id="top-furnace-count">0</span> 工装 · <span id="top-item-count">0</span> 批次待装
         </div>
     </div>
 
@@ -47,21 +43,26 @@
                 <div class="panel-header-actions">
                     <span class="panel-expand-btn-left" id="panel-expand-btn-left" title="展开面板" style="display:none;">▶</span>
                     <button class="btn-sm btn-toggle-panel" id="btn-toggle-left-panel" title="折叠/展开面板">◀</button>
-                    <button class="btn-sm" id="btn-add-furnace" title="新增热处理设备">增加设备</button>
-                    <button class="btn-sm btn-reset-danger" id="btn-clear-all-furnaces" title="清空热处理设备与装炉结果">清空</button>
+                    <button class="btn-sm" id="btn-add-furnace" title="按当前页面执行主要操作">增加工装</button>
+                    <button class="btn-sm btn-reset-danger" id="btn-clear-all-furnaces" title="清空资源配置与装炉结果">清空</button>
                 </div>
             </div>
 
+            <div class="left-generate-action">
+                <button class="btn btn-generate left-generate-btn" id="btn-generate-plan">生成方案</button>
+                <div class="left-generate-hint">配置工装与工件后，生成装炉方案</div>
+            </div>
+
             <div class="left-panel-tabs">
-                <button class="left-tab-btn active" data-tab="furnace">炉膛设备</button>
-                <button class="left-tab-btn" data-tab="tooling">装载工装</button>
+                <button class="left-tab-btn active" data-tab="furnace">装载工装</button>
+                <button class="left-tab-btn" data-tab="tooling">生产车间</button>
                 <button class="left-tab-btn" data-tab="material">工件详情</button>
             </div>
 
             <div class="left-tab-pane active" id="left-tab-furnace">
                 <div class="left-tab-intro">
-                    <strong>炉膛 = 热处理设备</strong>
-                    <span>管理设备名称、设备类型、炉膛尺寸、进炉方向、承重上限与可执行加工工艺。</span>
+                    <strong>装载工装 = 承载工件的一级载具</strong>
+                    <span>当前阶段不建真实炉膛，只用工装尺寸作为装载空间，测试不同数量、不同类型料框/料盘/网篮的装载效果。</span>
                 </div>
                 <div class="sort-bar">
                     <span style="font-size:10px;color:#666;margin-right:2px;"></span>
@@ -73,11 +74,11 @@
                 <div class="panel-scroll" id="furnace-cards-container"></div>
                 <div id="furnace-detail-panel">
                     <div class="fdp-header" id="fdp-toggle-btn">
-                        <span id="fdp-title">📋 设备参数</span>
+                        <span id="fdp-title">📋 工装参数</span>
                         <span class="fdp-toggle" id="fdp-toggle-icon">▲</span>
                     </div>
                     <div id="fdp-body-wrapper">
-                        <div class="fdp-placeholder" id="fdp-placeholder">选择炉膛设备后配置设备类型、炉膛尺寸、进炉方向与可执行加工工艺</div>
+                        <div class="fdp-placeholder" id="fdp-placeholder">选择装载工装后配置工装类型、尺寸、承重、数量与适用工艺</div>
                         <div class="fdp-body" id="fdp-body" style="display:none;"></div>
                     </div>
                 </div>
@@ -85,33 +86,13 @@
 
             <div class="left-tab-pane" id="left-tab-tooling">
                 <div class="left-tab-intro tooling-intro">
-                    <strong>工装 = 装载工件的载具</strong>
-                    <span>标准料框、料盘、网篮、环形工装等属于装载工装；它们决定搁板、层高、网格、支撑方式和工件摆放约束。</span>
+                    <strong>生产车间</strong>
+                    <span>车间是设备的上级层级；当前版本暂不配置具体炉膛/设备关系。</span>
                 </div>
-                <div class="left-tab-toolbar tooling-actions-toolbar">
-                    <button class="btn-sm" id="btn-add-tooling-inline" title="新增料框、料盘、网篮等装载工装">新增工装</button>
-                </div>
-                <div class="tooling-resource-panel">
-                    <div class="tooling-resource-title">装载工装列表</div>
-                    <div class="tooling-resource-note">料框、料盘、网篮、环形工装等都在这里管理；当前阶段可以先不绑定炉膛设备，统一显示为“未链接设备”。</div>
-                    <div class="tooling-instance-list" id="tooling-cards-container">
-                        <div class="tooling-instance-card" data-tooling-type="standard-basket">
-                            <div class="tooling-instance-head"><strong>标准料框</strong><span>未链接设备</span></div>
-                            <div class="tooling-instance-meta">搁板 / 层间距 / 安全间距 · 用于承载批量工件</div>
-                        </div>
-                        <div class="tooling-instance-card" data-tooling-type="material-tray">
-                            <div class="tooling-instance-head"><strong>料盘</strong><span>未链接设备</span></div>
-                            <div class="tooling-instance-meta">平铺大件 · 强调表面暴露与重心稳定</div>
-                        </div>
-                        <div class="tooling-instance-card" data-tooling-type="mesh-basket">
-                            <div class="tooling-instance-head"><strong>网篮</strong><span>未链接设备</span></div>
-                            <div class="tooling-instance-meta">小件批量装载 · 强调气流通过性</div>
-                        </div>
-                        <div class="tooling-instance-card" data-tooling-type="ring-tooling">
-                            <div class="tooling-instance-head"><strong>环形工装</strong><span>未链接设备</span></div>
-                            <div class="tooling-instance-meta">井式炉 / 回转炉 · 极坐标排布与中心避障</div>
-                        </div>
-                    </div>
+                <div class="workshop-placeholder">
+                    <div class="workshop-placeholder-icon">🏭</div>
+                    <div class="workshop-placeholder-title">待链接工厂设备</div>
+                    <div class="workshop-placeholder-desc">后续可在这里维护车间 → 设备 → 炉膛的真实关系。当前装炉算法只测试“工件装入工装”的空间排布。</div>
                 </div>
             </div>
 
@@ -167,7 +148,7 @@
         <div id="canvas-area">
             <!-- AI 推荐方案水平信息条（V6.0：移出3D场景，置于顶部） -->
             <div id="ai-summary-bar" class="ai-summary-bar">
-                <div class="ai-bar-empty" id="ai-bar-empty">点击顶部 <b>生成方案</b> 查看AI推荐</div>
+                <div class="ai-bar-empty" id="ai-bar-empty">点击左侧 <b>生成方案</b> 查看AI推荐</div>
                 <div class="ai-bar-content" id="ai-bar-content" style="display:none;"></div>
                 <div class="ai-bar-toggle" id="ai-bar-toggle" style="display:none;" title="展开炉次明细">📋</div>
             </div>
@@ -195,9 +176,9 @@
                     <div class="big-icon">📦</div>
                     <div class="msg">
                         <b style="color:#1E293B;">开始创建装炉方案</b><br>
-                        ① 左侧添加炉膛设备，配置尺寸与工艺<br>
-                        ② 在“装载工装”确认料框/料盘/网篮<br>③ 左侧“工件详情”添加或导入工件<br>
-                        ④ 点击右上角 <b style="color:#2563EB;">生成方案</b>
+                        ① 左侧“装载工装”增加料框/料盘/网篮/环形工装<br>
+                        ② 左侧“工件详情”添加或导入工件<br>
+                        ③ 点击左侧 <b style="color:#2563EB;">生成方案</b>
                     </div>
                 </div>
             </div>
@@ -272,8 +253,7 @@
             <div id="master-view">
                 <div id="master-header">
                     <button class="master-back-btn" id="btn-master-back" style="display:none;">← 返回</button>
-                    <h3>📚 方案库</h3>
-                    <span style="font-size:11px;color:#888;">保存、加载、删除历史装炉方案</span>
+                    <span class="master-library-hint">保存、加载、删除历史装炉方案</span>
                     <button class="master-import-btn" id="btn-master-import-json">📥 导入JSON到工作台</button>
                 </div>
                 <div id="master-content">
@@ -286,6 +266,10 @@
                     </div>
                 </div>
             </div>
+                <div class="library-rules-footer">
+                    <button class="btn-sm library-rule-btn" id="btn-rules">装炉规则</button>
+                    <div class="library-rule-hint">调整承重余量、分层搁板、摆放策略和姿态优化</div>
+                </div>
             </div>
 
             <div class="right-tab-pane" id="right-tab-analysis">
@@ -475,17 +459,17 @@
         </div>
     </div>
 
-    <!-- Furnace Add Overlay - 热处理设备参数配置 -->
+    <!-- Tooling Add Overlay - 装载工装参数配置 -->
     <div id="tooling-add-overlay">
         <div id="tooling-add-modal">
-            <h3>新增热处理设备</h3>
-            <p class="tooling-add-subtitle">这里只配置热处理设备本体：设备名称、炉膛尺寸、进炉方向、承重与可执行加工工艺；装载工装在左侧“装载工装”页单独管理。</p>
+            <h3>增加装载工装</h3>
+            <p class="tooling-add-subtitle">当前阶段只维护装载工装：工装名称、类型、装载空间尺寸、承重、数量、适用工艺与安全间距。真实炉膛/设备/车间关系后续再链接。</p>
             <div class="tooling-add-body">
-                <!-- 左侧：装载工装占位提示（后续用于设备-工装链接） -->
+                <!-- 左侧：工装类型说明 -->
                 <div class="tooling-add-left">
-                    <div class="tooling-type-label">设备-工装链接</div>
+                    <div class="tooling-type-label">工装类型</div>
                     <div class="tooling-type-cards" id="tooling-type-cards">
-                        <div class="tooling-unlinked-placeholder">当前可先不链接装载工装<br><b>未链接设备</b></div>
+                        <div class="tooling-unlinked-placeholder">标准料框 / 料盘 / 网篮 / 环形工装<br><b>当前未链接真实设备</b></div>
                     </div>
                 </div>
                 <!-- 右侧：尺寸配置 -->
@@ -494,27 +478,27 @@
                         <div class="tooling-add-section-title"></div>
                         <div class="tooling-add-dim-row">
                             <div class="tooling-add-field">
-                                <label>设备名称</label>
+                                <label>工装名称</label>
                                 <input type="text" id="ta-name" value="">
                             </div>
                         </div>
                         <div class="tooling-add-dim-row">
                             <div class="tooling-add-field">
-                                <label>炉膛宽度 X (mm)</label>
+                                <label>工装宽度 X (mm)</label>
                                 <input type="number" id="ta-width" value="900" min="100" max="5000">
                             </div>
                             <div class="tooling-add-field">
-                                <label>炉膛高度 Y (mm)</label>
+                                <label>工装高度 Y (mm)</label>
                                 <input type="number" id="ta-height" value="1200" min="100" max="5000">
                             </div>
                             <div class="tooling-add-field">
-                                <label>炉膛纵深 Z (mm)</label>
+                                <label>工装纵深 Z (mm)</label>
                                 <input type="number" id="ta-depth" value="900" min="100" max="5000">
                             </div>
                         </div>
                         <div class="tooling-add-dim-row">
                             <div class="tooling-add-field">
-                                <label>设备承重上限 (kg)</label>
+                                <label>工装承重上限 (kg)</label>
                                 <input type="number" id="ta-weight" value="1000" min="1" max="50000">
                             </div>
                             <div class="tooling-add-field">
@@ -524,11 +508,11 @@
                         </div>
                         <div class="tooling-add-dim-row">
                             <div class="tooling-add-field">
-                                <label>可执行加工工艺</label>
+                                <label>适用加工工艺</label>
                                 <input type="text" id="ta-processes" value="渗碳淬火" placeholder="如：渗碳淬火、氮化、真空淬火">
                             </div>
                             <div class="tooling-add-field">
-                                <label>进炉方向</label>
+                                <label>装载方向</label>
                                 <select id="ta-load-direction">
                                     <option value="前进前出">前进前出</option>
                                     <option value="前进后出">前进后出</option>
@@ -539,16 +523,16 @@
                         </div>
                         <div class="tooling-add-dim-row">
                             <div class="tooling-add-field">
-                                <label>设备安全边界 (mm) <span style="color:#666;font-size:9px;">留空=默认</span></label>
+                                <label>工装安全间距 (mm) <span style="color:#666;font-size:9px;">留空=默认</span></label>
                                 <input type="number" id="ta-spacing" value="" placeholder="默认5mm">
                             </div>
                         </div>
                     </div>
                     <!-- 工装预览信息 -->
                     <div class="tooling-add-section">
-                        <div class="tooling-add-section-title">设备链接状态</div>
+                        <div class="tooling-add-section-title">当前链接状态</div>
                         <div class="tooling-add-preview" id="ta-preview">
-                            <span style="color:#666;">未链接装载工装。后续在“装载工装”页选择料框/料盘/网篮并链接设备。</span>
+                            <span style="color:#666;">当前工装未链接真实热处理设备；系统会先按该工装尺寸进行装载测试。</span>
                         </div>
                     </div>
                     <!-- 工装实拍图预览 -->

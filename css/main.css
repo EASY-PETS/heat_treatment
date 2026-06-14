@@ -4237,3 +4237,199 @@ body.library-mode #ai-summary-bar {
     font-size: 14px;
     color: var(--text-color);
 }
+
+/* ==================== Equipment-linked Tooling Workflow ==================== */
+.tooling-link-status {
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    border-radius: 14px;
+    border: 1px dashed #CBD5E1;
+    background: #F8FAFC;
+}
+
+.tooling-link-status.has-equipment {
+    border-color: #BFDBFE;
+    background: linear-gradient(135deg, #EFF6FF, #F8FAFC);
+}
+
+.tooling-link-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+
+.tooling-link-name {
+    font-size: 14px;
+    font-weight: 800;
+    color: var(--text-color);
+    margin-bottom: 4px;
+}
+
+.tooling-link-status.has-equipment .tooling-link-name {
+    color: var(--accent-color);
+}
+
+.tooling-link-hint {
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+}
+
+.tooling-type-template-list {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.tooling-type-template {
+    text-align: left;
+    border: 1px solid var(--border-color);
+    background: #FFFFFF;
+    border-radius: 14px;
+    padding: 10px 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    box-shadow: 0 4px 18px rgba(15, 23, 42, 0.04);
+}
+
+.tooling-type-template:hover {
+    border-color: var(--accent-color);
+    background: #EFF6FF;
+    transform: translateX(2px);
+}
+
+.tooling-type-template strong {
+    display: block;
+    font-size: 13px;
+    color: var(--text-color);
+    margin-bottom: 4px;
+}
+
+.tooling-type-template span {
+    display: block;
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+}
+
+.tooling-instance-title {
+    margin-top: 16px;
+}
+
+.tooling-empty-state {
+    padding: 18px 12px;
+    border: 1px dashed var(--border-color);
+    border-radius: 14px;
+    background: #F8FAFC;
+    color: var(--text-muted);
+    font-size: 12px;
+    text-align: center;
+    line-height: 1.6;
+}
+
+.tooling-instance-card.linked .tooling-instance-head span {
+    color: #16A34A;
+    background: #DCFCE7;
+    border-color: #BBF7D0;
+}
+
+
+/* ==================== WORKSHOP PLACEHOLDER ==================== */
+.workshop-placeholder {
+    margin: 12px 10px;
+    padding: 24px 16px;
+    border-radius: 16px;
+    background: #F8FAFC;
+    border: 1px dashed #CBD5E1;
+    text-align: center;
+    color: var(--text-muted);
+}
+.workshop-placeholder-icon { font-size: 34px; margin-bottom: 10px; }
+.workshop-placeholder-title { font-size: 15px; font-weight: 700; color: var(--text-color); margin-bottom: 6px; }
+.workshop-placeholder-desc { font-size: 12px; line-height: 1.6; }
+
+/* 兼容误改名：如果 HTML 暂时用了 equipment-detail-panel，也沿用原详情样式 */
+#equipment-detail-panel {
+    flex-shrink: 0;
+    border-top: 1px solid var(--border-color);
+    background: #FAFBFC;
+    max-height: 280px;
+    overflow-y: auto;
+    transition: max-height 0.3s ease;
+}
+#equipment-detail-panel.collapsed { max-height: 36px; overflow: hidden; }
+
+
+/* ==================== P9: Left Generate + Library Rules Cleanup ==================== */
+.left-generate-action {
+    flex-shrink: 0;
+    padding: 10px 12px 8px 12px;
+    background: #FFFFFF;
+    border-bottom: 1px solid var(--border-color);
+}
+.left-generate-action .left-generate-btn {
+    width: 100%;
+    height: 36px;
+    margin: 0;
+    border-radius: 10px !important;
+    font-size: 14px !important;
+}
+.left-generate-hint {
+    margin-top: 5px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+/* 输入已准备但未生成方案时，突出左侧生成按钮 */
+body.ui-input-ready .left-generate-action .left-generate-btn {
+    box-shadow: 0 8px 22px rgba(37, 99, 235, 0.24) !important;
+}
+
+/* 方案库页已经有右侧Tab标题，隐藏内部重复标题和详情预览区 */
+#right-tab-library #master-header h3 {
+    display: none !important;
+}
+#right-tab-library #master-header .master-library-hint {
+    width: 100%;
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+#right-tab-library #master-3d {
+    display: none !important;
+}
+#right-tab-library #master-list {
+    width: 100% !important;
+    min-width: 0 !important;
+    flex: 1 1 auto !important;
+    border-right: none !important;
+    overflow-y: auto;
+}
+.library-rules-footer {
+    flex-shrink: 0;
+    padding: 10px;
+    border-top: 1px solid var(--border-color);
+    background: #FFFFFF;
+}
+.library-rule-btn {
+    width: 100%;
+    height: 32px;
+    color: var(--accent-color) !important;
+    background: #EFF6FF !important;
+    border-color: #BFDBFE !important;
+}
+.library-rule-btn:hover {
+    background: #DBEAFE !important;
+    border-color: var(--accent-color) !important;
+}
+.library-rule-hint {
+    margin-top: 6px;
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--text-muted);
+    text-align: center;
+}
