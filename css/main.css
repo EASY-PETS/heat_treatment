@@ -2627,3 +2627,255 @@ body.right-panel-collapsed {
 #btn-explode {
     display: none !important;
 }
+
+/* ==================== LOADING SIMULATION TAB ==================== */
+/* 恢复右侧“装炉仿真”Tab，替代旧的模拟数据占位 */
+
+.right-panel-tabs .right-tab-btn[data-tab="simulation"] {
+    display: block !important;
+}
+
+#right-tab-simulation.right-tab-pane {
+    display: none !important;
+}
+
+#right-tab-simulation.right-tab-pane.active {
+    display: flex !important;
+    flex-direction: column;
+}
+
+.loading-simulation-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.sim-header-card {
+    background: linear-gradient(135deg, #EFF6FF, #F8FAFC);
+    border: 1px solid #BFDBFE;
+    border-radius: 14px;
+    padding: 12px;
+}
+
+.sim-title {
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--text-color);
+    margin-bottom: 4px;
+}
+
+.sim-subtitle {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+.sim-mode-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 10px;
+}
+
+.sim-mode-pill {
+    flex: 1;
+    height: 26px;
+    border-radius: 999px;
+    border: 1px solid #CBD5E1;
+    background: #FFFFFF;
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 700;
+    cursor: default;
+}
+
+.sim-mode-pill.active {
+    background: #2563EB;
+    border-color: #2563EB;
+    color: #FFFFFF;
+}
+
+.sim-step-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.sim-step-card {
+    background: #FFFFFF;
+    border: 1px solid var(--border-color);
+    border-radius: 13px;
+    padding: 10px;
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);
+}
+
+.sim-step-card.shelf {
+    border-left: 3px solid #64748B;
+}
+
+.sim-step-card.place {
+    border-left: 3px solid #2563EB;
+}
+
+.sim-step-card.review {
+    border-left: 3px solid #16A34A;
+}
+
+.sim-step-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.sim-step-title {
+    font-size: 12px;
+    font-weight: 800;
+    color: var(--text-color);
+}
+
+.sim-step-meta {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.sim-item-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 6px;
+    padding: 5px 0;
+    border-top: 1px dashed #E2E8F0;
+    font-size: 11px;
+}
+
+.sim-item-name {
+    color: var(--text-color);
+    font-weight: 700;
+    line-height: 1.4;
+}
+
+.sim-item-desc {
+    display: block;
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 500;
+}
+
+.sim-item-count {
+    color: var(--accent-color);
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.sim-note {
+    margin-top: 6px;
+    font-size: 10px;
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+/* ==================== SIMULATION STEP 3D FOCUS ==================== */
+
+.sim-step-card[data-layer] {
+    cursor: pointer;
+}
+
+.sim-step-card[data-layer]:hover {
+    background: #F8FAFC;
+    border-color: #93C5FD;
+    transform: translateX(-1px);
+}
+
+.sim-step-card.active {
+    background: #EFF6FF;
+    border-color: #2563EB;
+    box-shadow: 0 6px 18px rgba(37, 99, 235, 0.16);
+}
+
+.sim-step-card.active .sim-step-title {
+    color: #1D4ED8;
+}
+
+/* ==================== SIMULATION SHELF NOTE ==================== */
+
+.sim-shelf-note {
+    margin: 6px 0 8px 0;
+    padding: 7px 8px;
+    border-radius: 9px;
+    background: #F8FAFC;
+    border: 1px dashed #CBD5E1;
+    color: #475569;
+    font-size: 10px;
+    line-height: 1.5;
+    font-weight: 700;
+}
+
+/* ==================== LAYERED SIMULATION PLAYING STATE ==================== */
+
+.sim-step-card.playing {
+    background: #DBEAFE;
+    border-color: #2563EB;
+    box-shadow: 0 8px 22px rgba(37, 99, 235, 0.22);
+    transform: translateX(-2px);
+}
+
+.sim-step-card.playing .sim-step-title {
+    color: #1D4ED8;
+}
+
+.sim-step-card.playing::after {
+    content: "播放中";
+    display: inline-flex;
+    margin-top: 6px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: #2563EB;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 800;
+}
+
+/* ==================== SIMULATION VIEW MODE ==================== */
+
+.sim-mode-pill[data-sim-view-mode] {
+    cursor: pointer;
+}
+
+.sim-mode-pill[data-sim-view-mode].active {
+    background: #2563EB;
+    border-color: #2563EB;
+    color: #FFFFFF;
+}
+
+.sim-mode-pill[data-action="sim-show-all"] {
+    cursor: pointer;
+}
+
+/* 模拟装炉改到右侧“装炉仿真”面板内，顶部不再显示 */
+#top-bar #btn-animate {
+    display: none !important;
+}
+
+.sim-action-row {
+    margin-top: 10px;
+}
+
+.sim-play-btn {
+    width: 100%;
+    height: 34px;
+    border: none;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #2563EB, #1D4ED8);
+    color: #FFFFFF;
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+    box-shadow: 0 6px 16px rgba(37, 99, 235, 0.22);
+}
+
+.sim-play-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 20px rgba(37, 99, 235, 0.28);
+}

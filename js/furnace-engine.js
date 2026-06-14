@@ -431,16 +431,36 @@ export function solveShelfLayeredPacking(items, furnaceConfig, itemMaterialMap, 
             break;
         }
 
-        // 根据本层最高高度添加搁板
+        // 根据本层最高高度决定是否需要添加搁板
         const effectiveHeight = maxItemHeight > 0 ? maxItemHeight : 1;
         const shelfY = currentY + effectiveHeight;
 
-        // 搁板添加在当前层最高工件上方 — 只要垂直空间还够放下一层搁板 + 工件就加
-        if (shelfY + shelfThickness < fh) {
+        // 只有“还有剩余工件”且“搁板上方至少可能放下一个工件”时，才添加搁板
+        const canPlaceAnyRemainingAboveShelf = remainingItems.some(item => {
+            if (totalWeight + item.weight > max_weight) return false;
+
+            const nextY = shelfY + shelfThickness;
+            if (nextY + item.h + sp > fh) return false;
+
+            const canFitNormal = item.w <= fw && item.d <= fd;
+            const canFitRotated =
+                placementRules.rotate !== false &&
+                item.shape !== 'cylinder' &&
+                item.d <= fw &&
+                item.w <= fd;
+
+            return canFitNormal || canFitRotated;
+        });
+
+        if (
+            remainingItems.length > 0 &&
+            shelfY + shelfThickness < fh &&
+            canPlaceAnyRemainingAboveShelf
+        ) {
             shelvesUsed.push({ y: shelfY, thickness: shelfThickness });
             currentY = shelfY + shelfThickness;
         } else {
-            // 垂直空间不足，不再加搁板，循环将在下一轮因 currentY >= fh 而退出
+            // 没有剩余工件，或上方已经无法放料，不再添加空搁板
             currentY = shelfY;
         }
 
@@ -2252,7 +2272,28 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
             if (useShelf) {
                 const effectiveHeight = maxItemHeight > 0 ? maxItemHeight : 1;
                 const shelfY = currentY + effectiveHeight;
-                if (shelfY + shelfThickness < fh) {
+
+                const canPlaceAnyRemainingAboveShelf = remainingItems.some(item => {
+                    if (totalWeight + item.weight > max_weight) return false;
+
+                    const nextY = shelfY + shelfThickness;
+                    if (nextY + item.h + sp > fh) return false;
+
+                    const canFitNormal = item.w <= fw && item.d <= fd;
+                    const canFitRotated =
+                        placementRules.rotate !== false &&
+                        item.shape !== 'cylinder' &&
+                        item.d <= fw &&
+                        item.w <= fd;
+
+                    return canFitNormal || canFitRotated;
+                });
+
+                if (
+                    remainingItems.length > 0 &&
+                    shelfY + shelfThickness < fh &&
+                    canPlaceAnyRemainingAboveShelf
+                ) {
                     shelvesUsed.push({ y: shelfY, thickness: shelfThickness });
                     currentY = shelfY + shelfThickness;
                 } else {

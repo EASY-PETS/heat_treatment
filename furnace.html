@@ -201,7 +201,7 @@
             <div class="right-panel-tabs">
                 <button class="right-tab-btn active" data-tab="material">工件详情</button>
                 <button class="right-tab-btn" data-tab="analysis">方案分析</button>
-                <button class="right-tab-btn" data-tab="simulation">模拟数据</button>
+                <button class="right-tab-btn" data-tab="simulation">装炉仿真</button>
             </div>
 
             <div class="right-tab-pane active" id="right-tab-material">
@@ -249,8 +249,10 @@
             </div>
 
             <div class="right-tab-pane" id="right-tab-simulation">
-                <div class="simulation-empty">
-                    热场、气流、辐射模拟数据待接入
+                <div id="loading-simulation-panel" class="loading-simulation-panel">
+                    <div class="simulation-empty">
+                        生成方案后显示装炉步骤仿真
+                    </div>
                 </div>
             </div>
 
@@ -406,13 +408,13 @@
             <div class="gen-option-cards">
                 <div class="gen-option-card" data-mode="animate">
                     <div class="gen-option-icon">🎬</div>
-                    <div class="gen-option-title">播放动画</div>
-                    <div class="gen-option-desc">逐帧模拟装框全过程，观看工件依次落入料框</div>
+                    <div class="gen-option-title">装炉仿真</div>
+                    <div class="gen-option-desc">按施工步骤逐层展示装炉过程，适合现场复核和作业指导</div>
                 </div>
                 <div class="gen-option-card" data-mode="skip">
                     <div class="gen-option-icon">⚡</div>
-                    <div class="gen-option-title">跳过动画</div>
-                    <div class="gen-option-desc">AI 思考加载后直接呈现完整的装炉方案 3D 效果</div>
+                    <div class="gen-option-title">直接生成方案</div>
+                    <div class="gen-option-desc">AI 思考加载后直接呈现完整 3D 装炉结果</div>
                 </div>
             </div>
             <button class="gen-option-cancel" id="btn-gen-option-cancel">取消</button>

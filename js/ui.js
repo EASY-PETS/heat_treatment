@@ -477,6 +477,240 @@ export function updateFurnaceNav() {
     }
 }
 
+function escapeSimHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function getSimulationItemLayer(item, furnace) {
+    if (
+        furnace &&
+        Array.isArray(furnace.shelvesUsed) &&
+        furnace.shelvesUsed.length > 0 &&
+        typeof item.y === 'number'
+    ) {
+        const sortedShelves = [...furnace.shelvesUsed].sort((a, b) => a.y - b.y);
+
+        for (let i = sortedShelves.length - 1; i >= 0; i--) {
+            if (item.y >= sortedShelves[i].y - 0.5) {
+                return i + 2;
+            }
+        }
+
+        return 1;
+    }
+
+    if (typeof item.layer === 'number' && item.layer >= 1) {
+        return item.layer;
+    }
+
+    return 1;
+}
+
+function getSimulationItemDimensions(item) {
+    if (item.originalDims) {
+        const l = item.originalDims.l ?? item.originalDims.length ?? item.w ?? 0;
+        const w = item.originalDims.w ?? item.d ?? 0;
+        const h = item.originalDims.h ?? item.h ?? 0;
+        return `${l}×${w}×${h}mm`;
+    }
+
+    return `${item.w || 0}×${item.d || 0}×${item.h || 0}mm`;
+}
+
+export function buildLoadingSimulationSteps(furnace) {
+    if (!furnace || !Array.isArray(furnace.packedItems)) {
+        return [];
+    }
+
+    const layerMap = new Map();
+
+    furnace.packedItems.forEach(item => {
+        const layer = getSimulationItemLayer(item, furnace);
+
+        if (!layerMap.has(layer)) {
+            layerMap.set(layer, {
+                layer,
+                items: new Map(),
+                totalItems: 0,
+                totalWeight: 0,
+                shelfInfo: null
+            });
+        }
+
+        const entry = layerMap.get(layer);
+        const mat = item.material || '未知材质';
+        const proc = item.process || '未知工艺';
+        const dims = getSimulationItemDimensions(item);
+        const key = `${item.name}|${mat}|${proc}|${dims}`;
+
+        if (!entry.items.has(key)) {
+            entry.items.set(key, {
+                name: item.name || '工件',
+                material: mat,
+                process: proc,
+                dimensions: dims,
+                count: 0,
+                totalWeight: 0
+            });
+        }
+
+        const itemEntry = entry.items.get(key);
+        itemEntry.count += 1;
+        itemEntry.totalWeight += item.weight || 0;
+
+        entry.totalItems += 1;
+        entry.totalWeight += item.weight || 0;
+    });
+
+    if (Array.isArray(furnace.shelvesUsed) && furnace.shelvesUsed.length > 0) {
+        const sortedShelves = [...furnace.shelvesUsed].sort((a, b) => a.y - b.y);
+
+        sortedShelves.forEach((shelf, idx) => {
+            const targetLayer = idx + 2;
+
+            if (layerMap.has(targetLayer)) {
+                layerMap.get(targetLayer).shelfInfo = {
+                    index: idx + 1,
+                    y: shelf.y || 0,
+                    thickness: shelf.thickness || placementRules.shelfThickness || 20,
+                    dimensions: `${furnace.w}×${furnace.d}mm`
+                };
+            }
+        });
+    }
+
+    const sortedLayers = [...layerMap.values()].sort((a, b) => a.layer - b.layer);
+    const steps = [];
+    let stepNo = 1;
+
+    sortedLayers.forEach(layerData => {
+        const layerTitle = layerData.layer === 1
+            ? '底层摆放'
+            : `第 ${layerData.layer} 层摆放`;
+
+        const shelfNote = layerData.shelfInfo
+            ? `先安装第 ${layerData.shelfInfo.index} 块搁板，Y=${Math.round(layerData.shelfInfo.y)}mm，厚度 ${layerData.shelfInfo.thickness}mm。`
+            : '';
+
+        steps.push({
+            no: stepNo++,
+            type: 'place',
+            title: layerTitle,
+            meta: `${layerData.totalItems} 件 · ${layerData.totalWeight.toFixed(1)}kg`,
+            layer: layerData.layer,
+            shelfNote,
+            items: [...layerData.items.values()].sort((a, b) => b.count - a.count)
+        });
+    });
+
+    steps.push({
+        no: stepNo++,
+        type: 'review',
+        title: '完成装炉复核',
+        meta: `${furnace.packedItems.length} 件`,
+        note: `当前炉次共 ${sortedLayers.length} 层，${furnace.packedItems.length} 件工件，合计 ${Number(furnace.totalWeight || 0).toFixed(1)}kg。`
+    });
+
+    return steps;
+}
+
+export function renderLoadingSimulationPanel() {
+    const panel = document.getElementById('loading-simulation-panel');
+    if (!panel) return;
+
+    if (!globalFurnacesResult || globalFurnacesResult.length === 0) {
+        panel.innerHTML = `
+            <div class="simulation-empty">
+                生成方案后显示装炉步骤仿真
+            </div>
+        `;
+        return;
+    }
+
+    const furnace = globalFurnacesResult[currentFurnaceIndex];
+    if (!furnace) {
+        panel.innerHTML = `
+            <div class="simulation-empty">
+                当前炉次不存在，请重新生成方案
+            </div>
+        `;
+        return;
+    }
+
+    const steps = buildLoadingSimulationSteps(furnace);
+
+    const stepsHtml = steps.map(step => {
+        if (step.type === 'place') {
+            const itemRows = (step.items || []).map(item => `
+                <div class="sim-item-row">
+                    <div class="sim-item-name">
+                        ${escapeSimHtml(item.name)}
+                        <span class="sim-item-desc">
+                            ${escapeSimHtml(item.material)} · ${escapeSimHtml(item.process)} · ${escapeSimHtml(item.dimensions)}
+                        </span>
+                    </div>
+                    <div class="sim-item-count">× ${item.count}</div>
+                </div>
+            `).join('');
+
+            const shelfNoteHtml = step.shelfNote
+                ? `<div class="sim-shelf-note">🧩 ${escapeSimHtml(step.shelfNote)}</div>`
+                : '';
+
+            return `
+                <div class="sim-step-card place" data-layer="${step.layer || ''}">
+                    <div class="sim-step-top">
+                        <div class="sim-step-title">${String(step.no).padStart(2, '0')} · ${escapeSimHtml(step.title)}</div>
+                        <div class="sim-step-meta">${escapeSimHtml(step.meta)}</div>
+                    </div>
+                    ${shelfNoteHtml}
+                    ${itemRows}
+                </div>
+            `;
+        }
+
+            const layerAttr = step.layer ? `data-layer="${step.layer}"` : '';
+
+            return `
+                <div class="sim-step-card ${step.type}" ${layerAttr}>
+                    <div class="sim-step-top">
+                        <div class="sim-step-title">${String(step.no).padStart(2, '0')} · ${escapeSimHtml(step.title)}</div>
+                        <div class="sim-step-meta">${escapeSimHtml(step.meta)}</div>
+                    </div>
+                    <div class="sim-note">${escapeSimHtml(step.note || '')}</div>
+                </div>
+            `;
+    }).join('');
+
+    panel.innerHTML = `
+        <div class="sim-header-card">
+            <div class="sim-title">🎬 ${escapeSimHtml(furnace.instanceId || '当前炉次')}</div>
+            <div class="sim-subtitle">
+                按层展示装炉顺序。第一版先用于现场复核和动画说明，后续再联动 3D 分层高亮。
+            </div>
+            <div class="sim-mode-row">
+                <button class="sim-mode-pill active" type="button" data-sim-view-mode="cumulative">累计到此步</button>
+                <button class="sim-mode-pill" type="button" data-sim-view-mode="single">仅看本层</button>
+                <button class="sim-mode-pill" type="button" data-action="sim-show-all">显示全部</button>
+            </div>
+
+            <div class="sim-action-row">
+                <button class="sim-play-btn" type="button" data-action="sim-play">
+                    ▶ 播放装炉仿真
+                </button>
+            </div>
+        </div>
+        <div class="sim-step-list">
+            ${stepsHtml}
+        </div>
+    `;
+}
+
 export function updateLeftPanelActiveForIndex(index) { document.querySelectorAll('.furnace-card').forEach(c => c.classList.remove('active')); if (!globalFurnacesResult || index >= globalFurnacesResult.length) return; const furnace = globalFurnacesResult[index]; document.querySelectorAll('.furnace-card').forEach(card => { if (card.querySelector('.f-card-name').textContent === furnace.typeName) card.classList.add('active'); }); }
 
 export function updateCenterStats(onFurnaceClick) {

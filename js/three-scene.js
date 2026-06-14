@@ -234,17 +234,14 @@ export function renderShelvesForFurnace(furnace, furnaceGroup, baseY, layerGroup
                 break;
             }
         }
-        // 🔧 跳过上方无工件的空搁板
-        // 如果 shelvesUsed 是算法明确输出 / JSON 明确恢复的实体搁板，直接渲染。
-        // 不再依赖 item.layer，因为导出的 item.layer 可能没有正确同步。
-        if (!hasExplicitShelves) {
-            const layerHasItems = furnace.packedItems.some(
-                item => getItemLayer(item, furnace) === shelfLayer
-            );
+        // 跳过上方无工件的空搁板。
+        // 即使 shelvesUsed 是算法明确输出，也不应该渲染没有承载物料的顶部空搁板。
+        const layerHasItems = furnace.packedItems.some(
+            item => getItemLayer(item, furnace) === shelfLayer
+        );
 
-            if (!layerHasItems) {
-                return;
-            }
+        if (!layerHasItems) {
+            return;
         }
 
         let shelfMesh;
@@ -923,6 +920,25 @@ export function focusLayer(layerIndex) {
         } else {
             // 仅显示匹配的层
             layerGroup.visible = (layerGroup.userData.layerIndex === layerIndex);
+        }
+    });
+}
+
+export function focusLayersUpTo(layerIndex) {
+    setFocusedLayer(layerIndex);
+
+    const group = furnaceGroups.get(currentFurnaceIndex);
+    if (!group || !group.userData || !group.userData.layerGroups) return;
+
+    const layerGroups = group.userData.layerGroups;
+
+    layerGroups.forEach((layerGroup, idx) => {
+        if (!layerGroup.userData || !layerGroup.userData.isLayerGroup) return;
+
+        if (layerIndex === null) {
+            layerGroup.visible = true;
+        } else {
+            layerGroup.visible = idx <= layerIndex;
         }
     });
 }
@@ -1869,6 +1885,384 @@ export async function playLoadingAnimation() {
 
     btnAnimate.disabled = false; btnAnimate.style.opacity = '1';
     setIsAnimating(false); setAnimPaused(false); setAnimStopped(false);
+}
+
+export async function playLayeredLoadingAnimation(options = {}) {
+    const getViewMode = typeof options.getViewMode === 'function'
+        ? options.getViewMode
+        : () => 'cumulative';
+
+    const onStepChange = typeof options.onStepChange === 'function'
+        ? options.onStepChange
+        : null;
+
+    const onFinish = typeof options.onFinish === 'function'
+        ? options.onFinish
+        : null;
+
+    if (isAnimating || !globalFurnacesResult || globalFurnacesResult.length === 0) return;
+
+    const furnace = globalFurnacesResult[currentFurnaceIndex];
+    if (!furnace) return;
+
+    // 确保当前炉次已经渲染
+    let group = furnaceGroups.get(currentFurnaceIndex);
+    if (!group || !group.userData || !group.userData.layerGroups) {
+        renderSingleFurnace(currentFurnaceIndex, getSelectedMaterialName());
+        group = furnaceGroups.get(currentFurnaceIndex);
+    }
+
+    if (!group || !group.userData || !group.userData.layerGroups) {
+        // 如果没有 layerGroup，回退到旧的逐件动画
+        playLoadingAnimation();
+        return;
+    }
+
+    const layerGroups = group.userData.layerGroups;
+    const allLayerIndexes = [...layerGroups.keys()].sort((a, b) => a - b);
+
+    if (allLayerIndexes.length === 0) {
+        playLoadingAnimation();
+        return;
+    }
+
+    // 如果用户已经点击过某一层，则从当前聚焦层开始播放；否则从第一层开始
+    let startLayer = null;
+
+    if (typeof options.startLayer === 'number') {
+        startLayer = options.startLayer;
+    } else if (typeof options.getStartLayer === 'function') {
+        startLayer = options.getStartLayer();
+    } else if (typeof focusedLayer === 'number') {
+        startLayer = focusedLayer;
+    }
+
+    let startIndex = 0;
+    if (typeof startLayer === 'number' && !isNaN(startLayer)) {
+        const foundIndex = allLayerIndexes.findIndex(layer => layer === startLayer);
+        if (foundIndex >= 0) {
+            startIndex = foundIndex;
+        }
+    }
+
+    const layerIndexes = allLayerIndexes.slice(startIndex);
+
+    setIsAnimating(true);
+    setAnimPaused(false);
+    setAnimStopped(false);
+
+    const btnAnimate = document.getElementById('btn-animate');
+    if (btnAnimate) {
+        btnAnimate.disabled = true;
+        btnAnimate.style.opacity = '0.5';
+    }
+
+    const controlBar = document.getElementById('anim-control-bar');
+    if (controlBar) {
+        controlBar.classList.add('visible');
+    }
+
+    const label = document.querySelector('#anim-control-bar .acb-label');
+    if (label) {
+        label.textContent = '🎬 逐层装炉仿真中';
+    }
+
+    const progressText = document.getElementById('anim-progress-text');
+
+    function getAnimationSpeedMs() {
+        const raw = parseInt(document.getElementById('anim-speed-select')?.value, 10);
+        return !isNaN(raw) ? raw : 400;
+    }
+
+    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+    const waitIfPaused = () => new Promise(resolve => {
+        const check = () => {
+            if (animStopped || !animPaused) {
+                resolve();
+            } else {
+                setTimeout(check, 100);
+            }
+        };
+        check();
+    });
+
+    function showLayersUpTo(targetLayer) {
+        layerGroups.forEach((layerGroup, layerIndex) => {
+            if (!layerGroup.userData || !layerGroup.userData.isLayerGroup) return;
+            layerGroup.visible = layerIndex <= targetLayer;
+        });
+    }
+
+    function showOnlyLayer(targetLayer) {
+        layerGroups.forEach((layerGroup, layerIndex) => {
+            if (!layerGroup.userData || !layerGroup.userData.isLayerGroup) return;
+            layerGroup.visible = layerIndex === targetLayer;
+        });
+    }
+
+    function applyLayerVisibility(targetLayer) {
+        const mode = getViewMode();
+
+        if (mode === 'single') {
+            showOnlyLayer(targetLayer);
+        } else {
+            showLayersUpTo(targetLayer);
+        }
+    }
+
+    function showAllLayers() {
+        layerGroups.forEach((layerGroup) => {
+            if (!layerGroup.userData || !layerGroup.userData.isLayerGroup) return;
+            layerGroup.visible = true;
+        });
+    }
+
+    function getItemsInLayer(layerIndex) {
+        const filterMaterialName = getSelectedMaterialName();
+
+        return (furnace.packedItems || []).filter(item => {
+            if (filterMaterialName && item.material !== filterMaterialName) return false;
+            return getItemLayer(item, furnace) === layerIndex;
+        });
+    }
+
+    function getFinalItemMeshMap(layerGroup) {
+        const map = new Map();
+
+        layerGroup.traverse(child => {
+            if (
+                child.isMesh &&
+                child.userData &&
+                child.userData.itemId &&
+                !child.userData._animMesh
+            ) {
+                map.set(child.userData.itemId, child);
+            }
+        });
+
+        return map;
+    }
+
+    function disposeAnimMesh(mesh) {
+        if (!mesh) return;
+
+        mesh.traverse(child => {
+            if (child.geometry) child.geometry.dispose();
+
+            if (child.material) {
+                if (Array.isArray(child.material)) {
+                    child.material.forEach(m => m.dispose());
+                } else {
+                    child.material.dispose();
+                }
+            }
+        });
+
+        if (mesh.parent) {
+            mesh.parent.remove(mesh);
+        }
+    }
+
+    function animateMeshDrop(mesh, targetY, durationMs) {
+        return new Promise(resolve => {
+            const startY = mesh.position.y;
+            let elapsed = 0;
+            let lastTime = performance.now();
+
+            function frame(now) {
+                if (animStopped) {
+                    resolve(false);
+                    return;
+                }
+
+                if (animPaused) {
+                    lastTime = now;
+                    requestAnimationFrame(frame);
+                    return;
+                }
+
+                elapsed += now - lastTime;
+                lastTime = now;
+
+                const progress = Math.min(elapsed / durationMs, 1);
+                const eased = 1 - Math.pow(1 - progress, 3);
+
+                mesh.position.y = startY + (targetY - startY) * eased;
+
+                if (progress < 1) {
+                    requestAnimationFrame(frame);
+                } else {
+                    mesh.position.y = targetY;
+                    resolve(true);
+                }
+            }
+
+            requestAnimationFrame(frame);
+        });
+    }
+
+    async function playItemsOneByOneInLayer(layerIndex, layerGroup, stepIndex, totalSteps) {
+        if (!layerGroup) return;
+
+        const layerItems = getItemsInLayer(layerIndex);
+        if (layerItems.length === 0) return;
+
+        const finalMeshMap = getFinalItemMeshMap(layerGroup);
+
+        // 先隐藏当前层最终工件 Mesh，保留搁板可见
+        finalMeshMap.forEach(mesh => {
+            mesh.visible = false;
+        });
+
+        const baseY = -120;
+
+        for (let itemIndex = 0; itemIndex < layerItems.length; itemIndex++) {
+            if (animStopped) break;
+
+            await waitIfPaused();
+            if (animStopped) break;
+
+            const speedMs = getAnimationSpeedMs();
+            const dropDurationMs = Math.max(speedMs, 60);
+            const entryDelayMs = Math.max(speedMs * 0.15, 10);
+            const item = layerItems[itemIndex];
+            const animMesh = createAnimItemMesh(item, furnace, baseY);
+
+            animMesh.userData._animMesh = true;
+            animMesh.userData._layerAnimMesh = true;
+            animMesh.userData.layer = layerIndex;
+
+            layerGroup.add(animMesh);
+
+            const targetY = item.y + item.h / 2 + baseY;
+
+            if (progressText) {
+                const layerLabel = layerIndex === 1 ? '底层' : `第 ${layerIndex} 层`;
+                progressText.textContent =
+                    `(${stepIndex + 1}/${totalSteps}) · ${layerLabel} · 工件 ${itemIndex + 1}/${layerItems.length} · ${item.name}`;
+            }
+
+            await animateMeshDrop(animMesh, targetY, dropDurationMs);
+
+            const finalMesh = finalMeshMap.get(item.id);
+            if (finalMesh) {
+                finalMesh.visible = true;
+                disposeAnimMesh(animMesh);
+            } else {
+                // 理论上不会发生；兜底：保留动画 Mesh 在目标位置
+                animMesh.position.y = targetY;
+            }
+
+            await sleep(entryDelayMs);
+        }
+
+        // 防止中途停止后当前层永久隐藏
+        finalMeshMap.forEach(mesh => {
+            mesh.visible = true;
+        });
+    }
+
+    function highlightSimulationLayer(layerIndex) {
+        const panel = document.getElementById('loading-simulation-panel');
+        if (!panel) return;
+
+        panel.querySelectorAll('.sim-step-card').forEach(card => {
+            card.classList.remove('playing');
+        });
+
+        const card = panel.querySelector(`.sim-step-card[data-layer="${layerIndex}"]`);
+        if (card) {
+            card.classList.add('playing', 'active');
+            card.scrollIntoView({
+                block: 'nearest',
+                behavior: 'smooth'
+            });
+        }
+    }
+
+    // 开始前先隐藏所有层，只保留工装框架
+    layerGroups.forEach((layerGroup) => {
+        if (!layerGroup.userData || !layerGroup.userData.isLayerGroup) return;
+        layerGroup.visible = false;
+    });
+
+    for (let i = 0; i < layerIndexes.length; i++) {
+        if (animStopped) break;
+
+        await waitIfPaused();
+        if (animStopped) break;
+
+        const layerIndex = layerIndexes[i];
+        const speedMs = getAnimationSpeedMs();
+        const holdMs = Math.max(speedMs * 1.2, 80);
+
+        applyLayerVisibility(layerIndex);
+
+        if (onStepChange) {
+            onStepChange(layerIndex, i, layerIndexes.length);
+        } else {
+            highlightSimulationLayer(layerIndex);
+        }
+
+        const mode = getViewMode();
+
+        if (mode === 'single') {
+            if (label) {
+                label.textContent = '🎬 单层逐件装炉仿真中';
+            }
+
+            const layerGroup = layerGroups.get(layerIndex);
+            await playItemsOneByOneInLayer(layerIndex, layerGroup, i, layerIndexes.length);
+        } else {
+            if (label) {
+                label.textContent = '🎬 逐层装炉仿真中';
+            }
+
+            if (progressText) {
+                const layerLabel = layerIndex === 1 ? '底层摆放' : `第 ${layerIndex} 层摆放`;
+                progressText.textContent =
+                    `(${i + 1}/${layerIndexes.length}) · ${layerLabel} · ${furnace.instanceId || '当前炉次'}`;
+            }
+
+            await sleep(holdMs);
+        }
+    }
+
+    showAllLayers();
+
+    const panel = document.getElementById('loading-simulation-panel');
+    if (panel) {
+        panel.querySelectorAll('.sim-step-card').forEach(card => {
+            card.classList.remove('playing');
+        });
+    }
+
+    if (onFinish) {
+        onFinish(animStopped);
+    }
+
+    setIsAnimating(false);
+    setAnimPaused(false);
+    setAnimStopped(false);
+
+    if (controlBar) {
+        setTimeout(() => {
+            controlBar.classList.remove('visible');
+        }, 600);
+    }
+
+    if (btnAnimate) {
+        btnAnimate.disabled = false;
+        btnAnimate.style.opacity = '1';
+    }
+
+    const pauseBtn = document.getElementById('btn-anim-pause');
+    if (pauseBtn) {
+        pauseBtn.textContent = '⏸ 暂停';
+        pauseBtn.style.background = '#f59e0b';
+        pauseBtn.style.color = '#000';
+    }
 }
 
 function rebuildSceneUpTo(stepIndex, allSteps, filterMaterialName) {

@@ -82,7 +82,7 @@ const workbenchRecord = createWorkbenchRecordController({
 });
 import { createPlanLibraryController } from './plan-library.js';
 import { analyzeFurnaces } from './plan-analysis.js';
-import { renderPlanAnalysisPanel, renderCandidatePlanCards } from './ui.js';
+import { renderPlanAnalysisPanel, renderCandidatePlanCards, renderLoadingSimulationPanel } from './ui.js';
 import * as THREE from 'three';
 import {
     isAnimating, animPaused, animStopped,
@@ -109,10 +109,12 @@ import {
     initThree, renderSingleFurnace,
     buildFurnaceGroup,
     getSelectedMaterialName,
-    playLoadingAnimation,
+    playLayeredLoadingAnimation,
     findResultIndexByFid, generateUniqueColor,
     refreshAllDisplayVisibility,
     toggleExplodedView, showLayeredBOM,
+    focusLayer,
+    focusLayersUpTo,
     setTightFitCamera,
     showAILoadingLoading, hideAILoadingLoading
 } from './three-scene.js';
@@ -141,6 +143,7 @@ import {
 
 let candidatePlans = [];
 let currentCandidatePlanIndex = 0;
+let simulationViewMode = 'cumulative';
 
 const STRATEGY_LABELS = {
     balanced: '均衡方案',
@@ -234,6 +237,8 @@ function applyCandidatePlan(index) {
 
     renderPlanAnalysisPanel(plan.analysis);
     renderCandidatePlanCards(candidatePlans, index, applyCandidatePlan);
+    renderLoadingSimulationPanel();
+    updateSimulationModeButtons();
     activateRightPanelTab('analysis');
 
     if (result.completedFurnaces && result.completedFurnaces.length > 0) {
@@ -384,6 +389,8 @@ function executeAndRender() {
 
     renderPlanAnalysisPanel(analysis);
     renderCandidatePlanCards(candidatePlans, currentCandidatePlanIndex, applyCandidatePlan);
+    renderLoadingSimulationPanel();
+    updateSimulationModeButtons();
     activateRightPanelTab('analysis');
 
     let startIndex = 0;
@@ -584,6 +591,8 @@ export function clearFurnaceResults() {
     if (emptyState) emptyState.style.display = "block";
 
     renderAISummaryBar(null);
+    renderLoadingSimulationPanel();
+    updateSimulationModeButtons();
     showCapacityFeedback('success', '筛选条件已变更，请重新生成方案');
     updateWorkbenchUiMode();
 }
@@ -741,6 +750,120 @@ function bindWorkbenchUiModeAutoRefresh() {
     document.addEventListener('input', scheduleWorkbenchUiModeUpdate, true);
 }
 
+function markSimulationStepPlaying(layerIndex, stepIndex, totalSteps) {
+    const panel = document.getElementById('loading-simulation-panel');
+    if (!panel) return;
+
+    panel.querySelectorAll('.sim-step-card').forEach(card => {
+        card.classList.remove('playing', 'active');
+    });
+
+    const card = panel.querySelector(`.sim-step-card[data-layer="${layerIndex}"]`);
+    if (card) {
+        card.classList.add('playing', 'active');
+        card.scrollIntoView({
+            block: 'nearest',
+            behavior: 'smooth'
+        });
+    }
+}
+
+function clearSimulationPlayingState() {
+    const panel = document.getElementById('loading-simulation-panel');
+    if (!panel) return;
+
+    panel.querySelectorAll('.sim-step-card').forEach(card => {
+        card.classList.remove('playing');
+    });
+}
+
+function playCurrentSimulation() {
+    renderLoadingSimulationPanel();
+    updateSimulationModeButtons();
+    activateRightPanelTab('simulation');
+
+    playLayeredLoadingAnimation({
+        getViewMode: () => simulationViewMode,
+        onStepChange: markSimulationStepPlaying,
+        onFinish: clearSimulationPlayingState
+    });
+}
+
+function applySimulationLayerFocus(layer) {
+    if (layer === null || isNaN(layer)) {
+        focusLayer(null);
+        return;
+    }
+
+    if (simulationViewMode === 'single') {
+        focusLayer(layer);
+    } else {
+        focusLayersUpTo(layer);
+    }
+}
+
+function updateSimulationModeButtons() {
+    const panel = document.getElementById('loading-simulation-panel');
+    if (!panel) return;
+
+    panel.querySelectorAll('[data-sim-view-mode]').forEach(btn => {
+        const mode = btn.getAttribute('data-sim-view-mode');
+        btn.classList.toggle('active', mode === simulationViewMode);
+    });
+}
+
+function bindLoadingSimulationStepClicks() {
+    const panel = document.getElementById('loading-simulation-panel');
+    if (!panel) return;
+
+    panel.addEventListener('click', (e) => {
+        const playBtn = e.target.closest('[data-action="sim-play"]');
+        if (playBtn) {
+            playCurrentSimulation();
+            return;
+        }
+
+        const modeBtn = e.target.closest('[data-sim-view-mode]');
+        if (modeBtn) {
+            simulationViewMode = modeBtn.getAttribute('data-sim-view-mode') || 'cumulative';
+            updateSimulationModeButtons();
+
+            const activeCard = panel.querySelector('.sim-step-card.active[data-layer]');
+            if (activeCard) {
+                const layer = parseInt(activeCard.getAttribute('data-layer'));
+                applySimulationLayerFocus(layer);
+            }
+
+            return;
+        }
+
+        const showAllBtn = e.target.closest('[data-action="sim-show-all"]');
+        if (showAllBtn) {
+            focusLayer(null);
+
+            panel.querySelectorAll('.sim-step-card').forEach(card => {
+                card.classList.remove('active');
+            });
+
+            return;
+        }
+
+        const stepCard = e.target.closest('.sim-step-card[data-layer]');
+        if (!stepCard) return;
+
+        const layer = parseInt(stepCard.getAttribute('data-layer'));
+        if (isNaN(layer)) return;
+
+        applySimulationLayerFocus(layer);
+
+        panel.querySelectorAll('.sim-step-card').forEach(card => {
+            card.classList.remove('active');
+        });
+
+        stepCard.classList.add('active');
+    });
+}
+
 /**
  * 导航至上一个或下一个炉膛方案
  */
@@ -762,9 +885,12 @@ function navigateFurnace(direction) {
     const filterName = getSelectedMaterialName();
 
     renderSingleFurnace(newIndex, filterName);
+    focusLayer(null);
     updateFurnaceNav();
     updateLeftPanelActiveForIndex(newIndex);
     renderAISummaryBar(onCenterFurnaceClick);
+    renderLoadingSimulationPanel();
+    updateSimulationModeButtons();
 
     renderFurnaceThumbnails(
         globalFurnacesResult,
@@ -779,9 +905,12 @@ function handleThumbFurnaceClick(clickedIdx) {
     const filterName = getSelectedMaterialName();
 
     renderSingleFurnace(clickedIdx, filterName);
+    focusLayer(null);
     updateFurnaceNav();
     updateLeftPanelActiveForIndex(clickedIdx);
     renderAISummaryBar(onCenterFurnaceClick);
+    renderLoadingSimulationPanel();
+    updateSimulationModeButtons();
 
     renderFurnaceThumbnails(
         globalFurnacesResult,
@@ -799,6 +928,7 @@ function onCenterFurnaceClick(idx) {
     const filterName = getSelectedMaterialName();
 
     renderSingleFurnace(idx, filterName);
+    focusLayer(null);
     updateFurnaceNav();
     updateLeftPanelActiveForIndex(idx);
     renderAISummaryBar(onCenterFurnaceClick);
@@ -808,6 +938,8 @@ function onCenterFurnaceClick(idx) {
         idx,
         handleThumbFurnaceClick
     );
+    renderLoadingSimulationPanel();
+    updateSimulationModeButtons();
 }
 
 /**
@@ -881,6 +1013,7 @@ function init() {
 
     bindWorkbenchUiModeAutoRefresh();
     updateWorkbenchUiMode();
+    bindLoadingSimulationStepClicks();
     syncPanelCollapsedBodyClasses();
 
     // ==================== EVENT LISTENERS ====================
@@ -898,7 +1031,7 @@ function init() {
     });
     document.getElementById("btn-rules-save").addEventListener("click", saveRulesModal);
     document.getElementById("btn-generate-plan").addEventListener("click", showGenerationOptions);
-    document.getElementById("btn-animate").addEventListener("click", playLoadingAnimation);
+    document.getElementById("btn-animate").addEventListener("click", playCurrentSimulation);
     document.getElementById("btn-export-pdf").addEventListener("click", showPdfSelectModal);
     // JSON 导出并入 PDF 导出弹窗，顶部不再单独提供入口
     // const btnExportJson = document.getElementById('btn-export-json');
@@ -1317,14 +1450,12 @@ function hideGenerationOptions() {
  * @returns {void}
  */
 function executeWithAnimation() {
-    executeAndRender();  // 先执行算法+渲染结果
-    // 然后触发动画播放
+    executeAndRender();
+
     setTimeout(() => {
-        playLoadingAnimation();
+        playCurrentSimulation();
     }, 300);
 }
-
-
 
 /**
  * 执行装炉算法，显示 AI 思考加载动画，然后直接呈现结果，跳过逐帧动画。
