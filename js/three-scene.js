@@ -118,6 +118,8 @@ let thermalSimRuntime = {
     sourceGroup: null,
     metrics: null,
     radiationScores: null,
+    selectedRadiationItemId: null,
+    selectedRadiationEntry: null,
     onUpdate: null,
     onFinish: null
 };
@@ -230,6 +232,7 @@ function clearThermalGroupChildren() {
     thermalSimRuntime.sourceGroup = null;
 }
 
+
 export function clearThermalSimulationLayer() {
     clearThermalGroupChildren();
     restoreThermalItemMaterials();
@@ -242,6 +245,8 @@ export function clearThermalSimulationLayer() {
     thermalSimRuntime.progress = 0;
     thermalSimRuntime.metrics = null;
     thermalSimRuntime.radiationScores = null;
+    thermalSimRuntime.selectedRadiationItemId = null;
+    thermalSimRuntime.selectedRadiationEntry = null;
     thermalSimRuntime.onUpdate = null;
     thermalSimRuntime.onFinish = null;
 }
@@ -779,13 +784,20 @@ function segmentIntersectsBox(p0, p1, box) {
     return tMax > 0.035 && tMin < 0.965;
 }
 
-function isRadiationBlocked(sourcePoint, targetPoint, targetItem, allItems, furnace) {
+function getRadiationBlockers(sourcePoint, targetPoint, targetItem, allItems, furnace) {
+    const blockers = [];
     for (const other of allItems) {
         if (!other || other.id === targetItem.id) continue;
         const box = getItemWorldBox(other, furnace);
-        if (segmentIntersectsBox(sourcePoint, targetPoint, box)) return true;
+        if (segmentIntersectsBox(sourcePoint, targetPoint, box)) {
+            blockers.push(other);
+        }
     }
-    return false;
+    return blockers;
+}
+
+function isRadiationBlocked(sourcePoint, targetPoint, targetItem, allItems, furnace) {
+    return getRadiationBlockers(sourcePoint, targetPoint, targetItem, allItems, furnace).length > 0;
 }
 
 function calculateRadiationExposureScores(furnace) {
@@ -801,6 +813,7 @@ function calculateRadiationExposureScores(furnace) {
         let blocked = 0;
         const visibleRays = [];
         const blockedRays = [];
+        const blockerMap = new Map();
 
         sources.forEach((src, si) => {
             // 每个热源只抽样两个目标点，避免成本太高；不同热源错开采样面。
@@ -808,15 +821,30 @@ function calculateRadiationExposureScores(furnace) {
             const sampleB = samples[(si + 2) % samples.length];
             [sampleA, sampleB].forEach(target => {
                 total += src.strength;
-                const isBlocked = isRadiationBlocked(src.position, target, item, items, furnace);
+                const blockers = getRadiationBlockers(src.position, target, item, items, furnace);
+                const isBlocked = blockers.length > 0;
                 if (isBlocked) {
                     blocked += src.strength;
-                    if (blockedRays.length < 4) blockedRays.push({ source: src.position.clone(), target: target.clone(), blocked: true });
+                    blockers.forEach(blocker => {
+                        const existed = blockerMap.get(blocker.id) || { item: blocker, count: 0 };
+                        existed.count += 1;
+                        blockerMap.set(blocker.id, existed);
+                    });
+                    if (blockedRays.length < 8) {
+                        blockedRays.push({
+                            source: src.position.clone(),
+                            target: target.clone(),
+                            blocked: true,
+                            blockers: blockers.map(b => ({ id: b.id, name: b.name || '遮挡工件' }))
+                        });
+                    }
                 } else {
                     const dist = src.position.distanceTo(target);
                     const distanceFactor = clamp01(1.15 - dist / Math.max(furnace.w || 1, furnace.h || 1, furnace.d || 1) * 0.18);
                     visible += src.strength * distanceFactor;
-                    if (visibleRays.length < 4) visibleRays.push({ source: src.position.clone(), target: target.clone(), blocked: false });
+                    if (visibleRays.length < 8) {
+                        visibleRays.push({ source: src.position.clone(), target: target.clone(), blocked: false, blockers: [] });
+                    }
                 }
             });
         });
@@ -824,20 +852,25 @@ function calculateRadiationExposureScores(furnace) {
         const rawScore = total > 0 ? visible / total : 0;
         const thermalRisk = estimateItemThermalRisk(item, furnace);
         const score = clamp01(rawScore * (1 - thermalRisk * 0.18));
+        const blockers = [...blockerMap.values()].sort((a, b) => b.count - a.count);
         result.set(item.id, {
             item,
             score,
             visibleRayCount: Math.round(visible),
             blockedRayCount: Math.round(blocked),
             totalRayWeight: Math.round(total),
-            rays: [...visibleRays.slice(0, 3), ...blockedRays.slice(0, 3)]
+            rays: [...visibleRays.slice(0, 4), ...blockedRays.slice(0, 4)],
+            visibleRays,
+            blockedRays,
+            blockers
         });
 
         item.simulation = {
             ...(item.simulation || {}),
             radiationExposureScore: Math.round(score * 100),
             visibleRayCount: Math.round(visible),
-            blockedRayCount: Math.round(blocked)
+            blockedRayCount: Math.round(blocked),
+            blockerCount: blockers.length
         };
     });
 
@@ -907,15 +940,15 @@ function buildRadiationHeatSourcesVisual(furnace, sources) {
 
 function buildRadiationExposureRays(scoreMap) {
     const entries = [...scoreMap.values()].sort((a, b) => a.score - b.score);
-    const selected = [...entries.slice(0, 8), ...entries.slice(-4)];
+    const selected = [...entries.slice(0, 12), ...entries.slice(-6)];
     const positions = [];
     const colors = [];
     const gold = new THREE.Color(0xffd166);
-    const red = new THREE.Color(0xff1744);
+    const red = new THREE.Color(0xef4444);
     const weak = new THREE.Color(0xff8a00);
 
     selected.forEach(entry => {
-        (entry.rays || []).slice(0, 3).forEach(ray => {
+        (entry.rays || []).slice(0, 5).forEach(ray => {
             const c = ray.blocked ? red : (entry.score > 0.72 ? gold : weak);
             positions.push(ray.source.x, ray.source.y, ray.source.z, ray.target.x, ray.target.y, ray.target.z);
             colors.push(c.r, c.g, c.b, c.r, c.g, c.b);
@@ -928,7 +961,7 @@ function buildRadiationExposureRays(scoreMap) {
     const material = new THREE.LineBasicMaterial({
         vertexColors: true,
         transparent: true,
-        opacity: 0.78,
+        opacity: 0.62,
         depthWrite: false,
         blending: THREE.AdditiveBlending
     });
@@ -985,6 +1018,144 @@ function calculateRadiationMetrics(furnace, scoreMap) {
     };
 }
 
+function buildSingleRadiationRays(entry) {
+    const positions = [];
+    const colors = [];
+    const gold = new THREE.Color(0xfff1a6);
+    const red = new THREE.Color(0xff1744);
+    const weak = new THREE.Color(0xff8a00);
+    const selectedRays = [
+        ...(entry.visibleRays || []).slice(0, 8),
+        ...(entry.blockedRays || []).slice(0, 8)
+    ];
+
+    selectedRays.forEach(ray => {
+        const c = ray.blocked ? red : (entry.score > 0.72 ? gold : weak);
+        positions.push(ray.source.x, ray.source.y, ray.source.z, ray.target.x, ray.target.y, ray.target.z);
+        colors.push(c.r, c.g, c.b, c.r, c.g, c.b);
+    });
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    const material = new THREE.LineBasicMaterial({
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.88,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+    });
+    const rays = new THREE.LineSegments(geometry, material);
+    rays.name = 'selectedRadiationExposureRays';
+    rays.userData = { isThermalRays: true, isRadiationExposureRays: true, isSelectedRadiationRays: true };
+    return rays;
+}
+
+function buildSelectedRadiationMarkers(furnace, entry) {
+    const group = new THREE.Group();
+    group.name = 'selectedRadiationMarkers';
+    if (!entry || !entry.item) return group;
+
+    function addItemMarker(item, color, opacity, scalePad = 20) {
+        const geometry = new THREE.BoxGeometry((item.w || 1) + scalePad, (item.h || 1) + scalePad, (item.d || 1) + scalePad);
+        const edges = new THREE.EdgesGeometry(geometry);
+        const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false });
+        const marker = new THREE.LineSegments(edges, mat);
+        marker.position.copy(getItemCenterWorld(item, furnace));
+        marker.userData = { isRadiationRiskMarker: true, isSelectedRadiationMarker: true };
+        group.add(marker);
+    }
+
+    addItemMarker(entry.item, 0xfacc15, 0.92, 24);
+    (entry.blockers || []).slice(0, 8).forEach(({ item }) => {
+        if (item) addItemMarker(item, 0xff1744, 0.72, 16);
+    });
+    return group;
+}
+
+function applySelectedRadiationTintToItems(furnace, scoreMap, selectedItemId, blockerIds) {
+    const group = furnaceGroups.get(currentFurnaceIndex);
+    if (!group || !furnace) return;
+    const blockers = new Set(blockerIds || []);
+
+    group.traverse(child => {
+        if (!child.isMesh || !child.userData || !child.userData.itemId) return;
+        const itemId = child.userData.itemId;
+        const entry = scoreMap.get(itemId);
+        const score = entry ? entry.score : 0.55;
+        let tint = getRadiationScoreColor(score);
+        let opacity = 0.18;
+        let emissiveScale = 0.12;
+        let emissiveIntensity = 0.08;
+
+        if (itemId === selectedItemId) {
+            tint = new THREE.Color(0xfacc15);
+            opacity = 0.98;
+            emissiveScale = 0.75;
+            emissiveIntensity = 0.72;
+        } else if (blockers.has(itemId)) {
+            tint = new THREE.Color(0xff1744);
+            opacity = 0.64;
+            emissiveScale = 0.55;
+            emissiveIntensity = 0.45;
+        }
+
+        getMeshMaterials(child).forEach(mat => {
+            if (!mat.color) return;
+            saveOriginalMaterialIfNeeded(mat);
+            mat.color.copy(tint);
+            if (mat.emissive) {
+                mat.emissive.copy(tint);
+                mat.emissive.multiplyScalar(emissiveScale);
+                mat.emissiveIntensity = emissiveIntensity;
+            }
+            mat.transparent = true;
+            mat.opacity = opacity;
+            mat.needsUpdate = true;
+        });
+    });
+}
+
+function buildSelectedRadiationMetric(furnace, scoreMap, entry) {
+    const metrics = calculateRadiationMetrics(furnace, scoreMap);
+    if (!entry) return metrics;
+    const blockers = (entry.blockers || []).slice(0, 6).map(({ item, count }) => ({
+        id: item?.id,
+        name: item?.name || '遮挡工件',
+        count
+    }));
+    const scorePercent = Math.round((entry.score || 0) * 100);
+    const blocked = entry.blockedRayCount || 0;
+    const visible = entry.visibleRayCount || 0;
+    metrics.selectedItem = {
+        id: entry.item?.id,
+        name: entry.item?.name || '当前工件',
+        material: entry.item?.material || '-',
+        process: entry.item?.process || '-',
+        score: scorePercent,
+        visibleRayCount: visible,
+        blockedRayCount: blocked,
+        totalRayWeight: entry.totalRayWeight || 0,
+        blockerCount: blockers.length,
+        blockers,
+        riskLevel: scorePercent < 45 ? '高' : (scorePercent < 65 ? '中' : '低'),
+        suggestion: scorePercent < 45
+            ? '该工件辐射可达性偏低，建议移向外圈/上层，或增加其周围间距。'
+            : (scorePercent < 65 ? '该工件存在局部遮挡，建议优先复核红色遮挡件和相邻间距。' : '该工件辐射暴露较充分，当前无明显单件遮挡风险。')
+    };
+    return metrics;
+}
+
+function findItemIdFromObject(obj) {
+    let cur = obj;
+    while (cur) {
+        if (cur.userData && cur.userData.itemId) return cur.userData.itemId;
+        cur = cur.parent;
+    }
+    return null;
+}
+
+
 export function renderRadiationExposureSimulation() {
     const furnace = getCurrentThermalFurnace();
     if (!furnace) return null;
@@ -1015,15 +1186,90 @@ export function renderRadiationExposureSimulation() {
     thermalSimRuntime.rayGroup = rays;
     thermalSimRuntime.riskGroup = riskMarkers;
     thermalSimRuntime.radiationScores = scores;
+    thermalSimRuntime.selectedRadiationItemId = null;
+    thermalSimRuntime.selectedRadiationEntry = null;
     thermalSimRuntime.metrics = calculateRadiationMetrics(furnace, scores);
     return thermalSimRuntime.metrics;
 }
+
+export function selectRadiationExposureItem(itemId) {
+    const furnace = getCurrentThermalFurnace();
+    if (!furnace || !itemId) return null;
+
+    clearThermalGroupChildren();
+    restoreThermalItemMaterials();
+    setThermalSceneTheme(true);
+
+    const group = ensureThermalSimulationGroup();
+    const { scores, sources } = calculateRadiationExposureScores(furnace);
+    const entry = scores.get(itemId);
+    if (!entry) {
+        return renderRadiationExposureSimulation();
+    }
+
+    const sourceVisual = buildRadiationHeatSourcesVisual(furnace, sources);
+    const rays = buildSingleRadiationRays(entry);
+    const markers = buildSelectedRadiationMarkers(furnace, entry);
+    group.add(sourceVisual);
+    group.add(rays);
+    group.add(markers);
+    group.visible = true;
+
+    const blockerIds = (entry.blockers || []).map(b => b.item?.id).filter(Boolean);
+    applySelectedRadiationTintToItems(furnace, scores, itemId, blockerIds);
+
+    thermalSimRuntime.visible = true;
+    thermalSimRuntime.activeMode = 'radiation';
+    thermalSimRuntime.isPlaying = false;
+    thermalSimRuntime.paused = false;
+    thermalSimRuntime.progress = 0;
+    thermalSimRuntime.sourceGroup = sourceVisual;
+    thermalSimRuntime.rayGroup = rays;
+    thermalSimRuntime.riskGroup = markers;
+    thermalSimRuntime.radiationScores = scores;
+    thermalSimRuntime.selectedRadiationItemId = itemId;
+    thermalSimRuntime.selectedRadiationEntry = entry;
+    thermalSimRuntime.metrics = buildSelectedRadiationMetric(furnace, scores, entry);
+    return thermalSimRuntime.metrics;
+}
+
+export function clearRadiationExposureSelection() {
+    if (thermalSimRuntime.activeMode !== 'radiation') return null;
+    return renderRadiationExposureSimulation();
+}
+
+export function selectRadiationExposureItemAtClientPoint(clientX, clientY) {
+    if (!renderer || !renderer.domElement || !camera) return null;
+    if (!thermalSimRuntime.visible || thermalSimRuntime.activeMode !== 'radiation') return null;
+    const group = furnaceGroups.get(currentFurnaceIndex);
+    if (!group) return null;
+
+    const rect = renderer.domElement.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    const pointer = new THREE.Vector2(
+        ((clientX - rect.left) / rect.width) * 2 - 1,
+        -((clientY - rect.top) / rect.height) * 2 + 1
+    );
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(pointer, camera);
+    const intersects = raycaster.intersectObjects(group.children, true);
+    for (const hit of intersects) {
+        const itemId = findItemIdFromObject(hit.object);
+        if (itemId) return selectRadiationExposureItem(itemId);
+    }
+
+    return clearRadiationExposureSelection();
+}
+
 
 export function getRadiationExposureRuntime() {
     return {
         visible: thermalSimRuntime.visible && thermalSimRuntime.activeMode === 'radiation',
         metrics: thermalSimRuntime.activeMode === 'radiation' ? thermalSimRuntime.metrics : null,
-        scores: thermalSimRuntime.radiationScores
+        scores: thermalSimRuntime.radiationScores,
+        selectedItemId: thermalSimRuntime.selectedRadiationItemId,
+        selectedItem: thermalSimRuntime.metrics?.selectedItem || null
     };
 }
 
@@ -2430,9 +2676,25 @@ export function buildFurnaceGroup(furnace, index, filterMaterialName) {
         }
 
         const itemLayer = itemLayerMap.get(item.id) || 1;
-        // 补充 userData 中 createItemMesh 未设置的字段
+        // 补充 userData 中 createItemMesh 未设置的字段。
+        // 🔧 辐射单件诊断依赖 itemId 做 3D 拾取；
+        // createItemMesh 可能只把 itemId 写在根 Mesh/Group 上，
+        // 圆柱体/复杂工件的子 Mesh 被 raycaster 命中时会拿不到 itemId。
+        // 因此这里强制把工件身份同步到根对象和所有子 Mesh。
+        const runtimeItemId = item.id || item.itemId || `${item.name || 'item'}-${index}-${itemLayer}`;
+        mesh.userData.itemId = runtimeItemId;
+        mesh.userData.itemName = item.name || '';
         mesh.userData.furnaceIndex = index;
         mesh.userData.layer = itemLayer;
+        if (typeof mesh.traverse === 'function') {
+            mesh.traverse(child => {
+                if (!child.userData) child.userData = {};
+                child.userData.itemId = runtimeItemId;
+                child.userData.itemName = item.name || '';
+                child.userData.furnaceIndex = index;
+                child.userData.layer = itemLayer;
+            });
+        }
 
         // 🔧 重构：将工件加入对应的 LayerGroup，而非 furnaceGroup
         const targetLayerGroup = layerGroups.get(itemLayer);

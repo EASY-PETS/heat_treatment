@@ -126,6 +126,9 @@ import {
     getVacuumQuenchThermalRuntime,
     renderRadiationExposureSimulation,
     getRadiationExposureRuntime,
+    selectRadiationExposureItem,
+    selectRadiationExposureItemAtClientPoint,
+    clearRadiationExposureSelection,
     clearThermalSimulationLayer,
     showAILoadingLoading, hideAILoadingLoading
 } from './three-scene.js';
@@ -1989,6 +1992,7 @@ function syncThermalControlState(metrics = null) {
 
 function renderCurrentThermalSimulation(progress = 0.18, switchTab = true) {
     processSimulationMode = 'thermal';
+    document.body.classList.remove('radiation-pick-mode');
     const metrics = renderVacuumQuenchThermalSimulation(progress);
     renderThermalSimulationPanel(metrics, 'thermal');
     syncThermalControlState(metrics);
@@ -1998,6 +2002,7 @@ function renderCurrentThermalSimulation(progress = 0.18, switchTab = true) {
 
 function renderCurrentRadiationSimulation(switchTab = true) {
     processSimulationMode = 'radiation';
+    document.body.classList.add('radiation-pick-mode');
     stopVacuumQuenchThermalSimulation();
     const metrics = renderRadiationExposureSimulation();
     renderThermalSimulationPanel(metrics, 'radiation');
@@ -2027,6 +2032,7 @@ function switchProcessSimulationMode(mode) {
 
 function playCurrentThermalSimulation() {
     processSimulationMode = 'thermal';
+    document.body.classList.remove('radiation-pick-mode');
     activateRightPanelTab('thermal');
     const runtime = getVacuumQuenchThermalRuntime();
     const startProgress = runtime.paused && runtime.activeMode === 'thermal' ? (runtime.progress || 0) : 0.03;
@@ -2050,6 +2056,7 @@ function playCurrentThermalSimulation() {
 
 function pauseResumeCurrentThermalSimulation() {
     processSimulationMode = 'thermal';
+    document.body.classList.remove('radiation-pick-mode');
     activateRightPanelTab('thermal');
     const runtime = getVacuumQuenchThermalRuntime();
 
@@ -2077,6 +2084,7 @@ function pauseResumeCurrentThermalSimulation() {
 }
 
 function resetCurrentThermalSimulation() {
+    document.body.classList.remove('radiation-pick-mode');
     stopVacuumQuenchThermalSimulation();
     clearThermalSimulationLayer();
     renderThermalSimulationPanel(null, processSimulationMode);
@@ -2085,6 +2093,7 @@ function resetCurrentThermalSimulation() {
 
 function scrubCurrentThermalSimulation(progressPercent) {
     processSimulationMode = 'thermal';
+    document.body.classList.remove('radiation-pick-mode');
     const p = Math.max(0, Math.min(100, progressPercent || 0)) / 100;
     const metrics = setVacuumQuenchThermalProgress(p);
     renderThermalSimulationPanel(metrics, 'thermal');
@@ -2109,6 +2118,89 @@ function restartThermalWithCurrentSpeedIfPlaying() {
             }
         });
     }
+}
+
+
+let radiationPickPointerDown = null;
+
+function renderSelectedRadiationMetrics(metrics) {
+    if (!metrics) return;
+    renderThermalSimulationPanel(metrics, 'radiation');
+    syncThermalControlState(metrics);
+    activateRightPanelTab('thermal');
+}
+
+function selectRadiationItemFromMaterialCard(card) {
+    if (!card || processSimulationMode !== 'radiation') return;
+    const runtime = typeof getRadiationExposureRuntime === 'function' ? getRadiationExposureRuntime() : null;
+    const scoreMap = runtime?.scores;
+    if (!runtime?.visible || !scoreMap || typeof scoreMap.values !== 'function') return;
+
+    const cardName = card.querySelector('.m-name')?.textContent?.trim();
+    const itemCode = card.getAttribute('data-item-code') || '';
+    const showName = card.getAttribute('data-show-name') || '';
+    if (!cardName && !itemCode && !showName) return;
+
+    const matched = [...scoreMap.values()].filter(entry => {
+        const item = entry.item || {};
+        return item.name === cardName ||
+            item.showName === showName ||
+            item.itemCode === itemCode ||
+            (showName && item.name === showName) ||
+            (cardName && item.showName === cardName);
+    }).sort((a, b) => (a.score || 0) - (b.score || 0));
+
+    // 同一个批次可能被拆成多个 3D 工件实例，默认选择辐射暴露最低的一件，演示价值最高。
+    const target = matched[0];
+    if (!target?.item?.id) return;
+
+    const metrics = selectRadiationExposureItem(target.item.id);
+    renderSelectedRadiationMetrics(metrics);
+}
+
+function bindRadiationMaterialCardSelection() {
+    const container = document.getElementById('material-cards-container');
+    if (!container || container.dataset.radiationPickBound === '1') return;
+    container.dataset.radiationPickBound = '1';
+
+    container.addEventListener('click', (event) => {
+        if (processSimulationMode !== 'radiation') return;
+        const card = event.target.closest('.material-card');
+        if (!card) return;
+        // 让原有 selectMaterialCard 先执行完，再根据选中批次定位到 3D 中风险最高的实例。
+        setTimeout(() => selectRadiationItemFromMaterialCard(card), 0);
+    });
+}
+
+function bindRadiationItemSelection() {
+    const canvas = document.querySelector('#canvas-container canvas');
+    if (!canvas || canvas.dataset.radiationPickBound === '1') return;
+    canvas.dataset.radiationPickBound = '1';
+
+    canvas.addEventListener('pointerdown', (event) => {
+        if (processSimulationMode !== 'radiation') return;
+        radiationPickPointerDown = {
+            x: event.clientX,
+            y: event.clientY,
+            t: performance.now()
+        };
+    });
+
+    canvas.addEventListener('pointerup', (event) => {
+        if (processSimulationMode !== 'radiation') return;
+        if (!radiationPickPointerDown) return;
+
+        const dx = Math.abs(event.clientX - radiationPickPointerDown.x);
+        const dy = Math.abs(event.clientY - radiationPickPointerDown.y);
+        const dt = performance.now() - radiationPickPointerDown.t;
+        radiationPickPointerDown = null;
+
+        // OrbitControls 拖拽旋转时不触发选择。
+        if (dx > 6 || dy > 6 || dt > 700) return;
+
+        const metrics = selectRadiationExposureItemAtClientPoint(event.clientX, event.clientY);
+        renderSelectedRadiationMetrics(metrics);
+    });
 }
 
 function clearSimulationPlayingState() {
@@ -2464,6 +2556,8 @@ function handleLeftPanelClearAction() {
  */
 function init() {
     initThree();
+    bindRadiationItemSelection();
+    bindRadiationMaterialCardSelection();
     updateTopSummary();
     hideExplodeBOMButtons();
     initLeftPanelTabs();
@@ -3297,50 +3391,24 @@ init();
             return;
         }
 
-        // 当前相机相对观察中心的方向
-        const dir = camera.position.clone().sub(controls.target);
-
-        if (dir.lengthSq() < 0.0001) {
-            dir.set(0, 0, 1);
+        const offset = camera.position.clone().sub(controls.target);
+        if (offset.lengthSq() < 0.0001) {
+            setTightFitCamera(new THREE.Vector3(1, 0, 0));
+            return;
         }
 
-        dir.normalize();
+        const dir = offset.clone().normalize();
 
-        function rotateCurrentView90() {
-            if (!camera || !controls) {
-                setTightFitCamera(new THREE.Vector3(1, 0, 0));
-                return;
-            }
-
-            const offset = camera.position.clone().sub(controls.target);
-
-            if (offset.lengthSq() < 0.0001) {
-                setTightFitCamera(new THREE.Vector3(1, 0, 0));
-                return;
-            }
-
-            const dir = offset.clone().normalize();
-
-            // 当前是俯视 / 接近俯视：不改变相机俯视方向，只旋转画面 up 方向
-            if (Math.abs(dir.y) > 0.92) {
-                camera.up.applyAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2);
-                camera.lookAt(controls.target);
-                controls.update();
-                return;
-            }
-
-            // 普通斜视 / 正视 / 侧视：绕世界 Y 轴旋转观察方向
-            dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2);
-            dir.normalize();
-
-            setTightFitCamera(dir, 0.18);
+        // 俯视状态下保持俯视，只旋转画面方向，不跳回平视。
+        if (Math.abs(dir.y) > 0.92) {
+            camera.up.applyAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2);
+            camera.lookAt(controls.target);
+            controls.update();
+            return;
         }
 
-        // 绕世界Y轴旋转90度
         dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2);
         dir.normalize();
-
-        // 复用第一步的完整场景适配逻辑
         setTightFitCamera(dir, 0.18);
     }
 

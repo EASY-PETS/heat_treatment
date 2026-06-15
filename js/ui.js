@@ -929,6 +929,31 @@ export function renderThermalSimulationPanel(metrics = null, mode = null) {
         const blockedRayCount = metrics?.blockedRayCount ?? 0;
         const worstItemName = metrics?.worstItemName || '-';
         const suggestion = metrics?.suggestion || '点击“辐射暴露”后，系统会用少量有效/遮挡射线解释工件辐射可达性。';
+        const selected = metrics?.selectedItem || null;
+        const blockerList = selected?.blockers?.length
+            ? selected.blockers.map(b => `<div class="thermal-risk-row"><span>${escapeSimHtml(b.name)}</span><strong>${b.count} 条路径</strong></div>`).join('')
+            : '<div class="thermal-mini-note">暂无明确遮挡来源。</div>';
+        const selectedHtml = selected ? `
+            <div class="thermal-risk-card radiation-card radiation-selected-card">
+                <div class="thermal-stage-title">单件辐射诊断</div>
+                <div class="thermal-title">🎯 ${escapeSimHtml(selected.name)}</div>
+                <div class="thermal-subtitle">${escapeSimHtml(selected.material)} · ${escapeSimHtml(selected.process)} · 风险 ${escapeSimHtml(selected.riskLevel)}</div>
+                <div class="thermal-metric-grid">
+                    <div class="thermal-metric"><span>单件暴露</span><strong>${selected.score}%</strong></div>
+                    <div class="thermal-metric"><span>遮挡来源</span><strong>${selected.blockerCount} 件</strong></div>
+                    <div class="thermal-metric"><span>有效路径</span><strong>${selected.visibleRayCount}</strong></div>
+                    <div class="thermal-metric"><span>遮挡路径</span><strong>${selected.blockedRayCount}</strong></div>
+                </div>
+                <div class="thermal-mini-note strong-note">${escapeSimHtml(selected.suggestion)}</div>
+                <div class="thermal-stage-title" style="margin-top:10px;">主要遮挡工件</div>
+                ${blockerList}
+            </div>
+        ` : `
+            <div class="thermal-risk-card radiation-card radiation-selected-card">
+                <div class="thermal-stage-title">单件辐射诊断</div>
+                <div class="thermal-mini-note">点击 3D 中任意工件，可只显示该工件的辐射路径、遮挡来源和调整建议。</div>
+            </div>
+        `;
 
         panel.innerHTML = `
             <div class="thermal-header-card compact radiation-card">
@@ -947,6 +972,8 @@ export function renderThermalSimulationPanel(metrics = null, mode = null) {
                 </div>
                 <div class="thermal-mini-note">炉壁/顶部橙色发光面 = 热源；金色线 = 可达路径；红色线 = 被其他工件包围盒遮挡；红色线框 = 需复核工件。</div>
             </div>
+
+            ${selectedHtml}
 
             <div class="thermal-risk-card radiation-card">
                 <div class="thermal-stage-title">辐射遮挡诊断</div>
