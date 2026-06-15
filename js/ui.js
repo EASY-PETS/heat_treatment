@@ -904,7 +904,7 @@ export function renderThermalSimulationPanel(metrics = null, mode = null) {
         panel.innerHTML = `
             <div class="thermal-sim-empty">
                 生成方案后显示工艺仿真。<br>
-                当前版本包含：升温热场 + 辐射暴露 + 介质场气流冷却。后续可继续扩展气氛覆盖。
+                当前版本包含：升温热场 + 辐射暴露 + 介质场气流冷却 + 气氛覆盖。
             </div>
         `;
         return;
@@ -920,6 +920,110 @@ export function renderThermalSimulationPanel(metrics = null, mode = null) {
     const packedVolume = items.reduce((sum, item) => sum + Number((item.w || 0) * (item.h || 0) * (item.d || 0)), 0);
     const furnaceVolume = Math.max(1, Number((furnace.w || 1) * (furnace.h || 1) * (furnace.d || 1)));
     const densityRate = metrics?.densityRate ?? Math.round((packedVolume / furnaceVolume) * 1000) / 10;
+
+    if (activeMode === 'atmosphere') {
+        const atmosphereCoverage = metrics?.atmosphereCoverage ?? Math.max(50, Math.round(86 - densityRate * 0.42));
+        const minAtmosphereCoverage = metrics?.minAtmosphereCoverage ?? Math.max(30, atmosphereCoverage - 24);
+        const deadCornerItemCount = metrics?.deadCornerItemCount ?? 0;
+        const severeDeadCornerItemCount = metrics?.severeDeadCornerItemCount ?? 0;
+        const surfaceUniformityScore = metrics?.surfaceUniformityScore ?? Math.max(45, Math.round(88 - densityRate * 0.36));
+        const effectiveFaceRate = metrics?.effectiveFaceRate ?? Math.max(52, Math.round(90 - densityRate * 0.28));
+        const worstItemName = metrics?.worstItemName || '-';
+        const worstFaceLabel = metrics?.worstFaceLabel || '-';
+        const worstBlocker = metrics?.worstBlocker || '-';
+        const localDensityRate = metrics?.localDensityRate ?? Math.round(densityRate);
+        const mediumType = metrics?.mediumType || 'nitriding';
+        const mediumLabel = metrics?.mediumLabel || '氮化气氛';
+        const mediumShortLabel = metrics?.mediumShortLabel || 'NH₃ / N₂ / H₂';
+        const activeSpecies = metrics?.activeSpecies || '活性氮';
+        const processHint = metrics?.processHint || '适合氮化 / 渗碳 / 保护气氛等表面处理，重点关注工件表面是否被有效气氛包覆。';
+        const suggestion = metrics?.suggestion || '点击“气氛覆盖”后，系统会按气氛类型显示覆盖评分、表面反应层和死角风险。';
+        const visualNote = metrics?.visualNote || '气氛雾场 = 有效介质浓度；亮色表面 = 有效反应/覆盖；橙红色线框 = 表面遮蔽或贴靠死角。';
+        const coverageLabel = metrics?.coverageLabel || '平均气氛覆盖';
+        const minLabel = metrics?.minLabel || '最低覆盖工件';
+        const deadLabel = metrics?.deadLabel || '气氛死角件';
+        const severeLabel = metrics?.severeLabel || '严重死角';
+        const uniformityLabel = metrics?.uniformityLabel || '表面覆盖均匀性';
+        const faceRateLabel = metrics?.faceRateLabel || '有效接触面比例';
+        const riskFaceLabel = metrics?.riskFaceLabel || '主要风险面';
+        const modeName = metrics?.modeName || '气氛覆盖';
+        const isCarbonMode = mediumType === 'carburizing' || mediumType === 'carbonitriding';
+        const gradientStyle = mediumType === 'carburizing'
+            ? 'linear-gradient(90deg,#7f1d1d,#dc2626,#f97316,#facc15,#ffb703)'
+            : (mediumType === 'carbonitriding'
+                ? 'linear-gradient(90deg,#dc2626,#f97316,#fde047,#4ade80,#22d3ee)'
+                : (mediumType === 'protective'
+                    ? 'linear-gradient(90deg,#f59e0b,#fde68a,#93c5fd,#38bdf8,#bae6fd)'
+                    : 'linear-gradient(90deg,#ef4444,#f97316,#fde047,#34d399,#2dd4bf)'));
+        const carbonRowsHtml = isCarbonMode ? `
+                <div class="thermal-risk-row"><span>${mediumType === 'carburizing' ? '估算碳势 Cp' : '复合活性势'}</span><strong>${metrics?.carbonPotential != null ? metrics.carbonPotential : '-'}${mediumType === 'carburizing' ? '%' : ''}</strong></div>
+                <div class="thermal-risk-row"><span>${mediumType === 'carburizing' ? '模拟渗层深度' : '模拟共渗层深度'}</span><strong>${escapeSimHtml(metrics?.estimatedCaseDepth || '-')}</strong></div>
+            ` : '';
+        const mediumOptions = [
+            { key: 'nitriding', label: '氮化气氛', sub: 'NH₃/N₂/H₂' },
+            { key: 'carburizing', label: '渗碳气氛', sub: 'CO/CH₄/N₂' },
+            { key: 'protective', label: '保护气氛', sub: 'N₂/Ar/H₂' },
+            { key: 'carbonitriding', label: '碳氮共渗', sub: '渗碳气+NH₃' }
+        ];
+        const optionHtml = mediumOptions.map(opt => `
+            <option value="${opt.key}" ${mediumType === opt.key ? 'selected' : ''}>${escapeSimHtml(opt.label)} · ${escapeSimHtml(opt.sub)}</option>
+        `).join('');
+        const presetHtml = mediumOptions.map(opt => `
+            <button class="plan-action-btn atmosphere-medium-preset ${mediumType === opt.key ? 'active' : ''}" type="button" data-action="atmosphere-medium-preset" data-atmosphere-medium="${opt.key}">
+                ${escapeSimHtml(opt.label)}
+            </button>
+        `).join('');
+
+        panel.innerHTML = `
+            <div class="thermal-header-card compact atmosphere-card">
+                <div class="thermal-title">${isCarbonMode ? '🔥' : '🌫️'} ${escapeSimHtml(furnace.instanceId || '当前炉次')} · 介质场 · ${escapeSimHtml(modeName)} V1.1</div>
+                <div class="thermal-subtitle">
+                    ${isCarbonMode
+                        ? '渗碳/碳氮共渗模式强调“碳势气氛 → 表面吸附 → 向内扩散 → 渗层形成”。金橙色雾场表示有效碳势，工件金色外轮廓表示表面渗层正在形成。'
+                        : '气氛覆盖用于解释氮化、保护气氛、渗碳等表面处理阶段：雾场表示有效介质浓度，工件颜色表示表面覆盖评分，红橙线框表示气氛死角。'}
+                </div>
+                <div class="thermal-metric-grid">
+                    <div class="thermal-metric"><span>${escapeSimHtml(coverageLabel)}</span><strong>${atmosphereCoverage}%</strong></div>
+                    <div class="thermal-metric"><span>${escapeSimHtml(minLabel)}</span><strong>${minAtmosphereCoverage}%</strong></div>
+                    <div class="thermal-metric"><span>${escapeSimHtml(deadLabel)}</span><strong>${deadCornerItemCount} 件</strong></div>
+                    <div class="thermal-metric"><span>${escapeSimHtml(severeLabel)}</span><strong>${severeDeadCornerItemCount} 件</strong></div>
+                </div>
+                <div class="thermal-legend atmosphere-legend">
+                    <span>${isCarbonMode ? '碳势死角' : '死角'}</span><div class="atmosphere-gradient" style="flex:1;height:8px;border-radius:999px;background:${gradientStyle};"></div><span>${isCarbonMode ? '碳势充足' : '覆盖充分'}</span>
+                </div>
+                <div class="thermal-mini-note">${escapeSimHtml(visualNote)}</div>
+            </div>
+
+            <div class="thermal-risk-card atmosphere-card">
+                <div class="thermal-stage-title">气氛介质</div>
+                <div class="thermal-risk-row"><span>当前介质</span><strong>${escapeSimHtml(mediumLabel)}</strong></div>
+                <div class="thermal-risk-row"><span>活性组分</span><strong>${escapeSimHtml(activeSpecies)} · ${escapeSimHtml(mediumShortLabel)}</strong></div>
+                <select class="thermal-speed-select atmosphere-medium-select" data-action="atmosphere-medium-type" style="width:100%;margin-top:8px;">
+                    ${optionHtml}
+                </select>
+                <div class="airflow-preset-row" style="margin-top:8px;">${presetHtml}</div>
+                <div class="thermal-mini-note">${escapeSimHtml(processHint)}</div>
+            </div>
+
+            <div class="thermal-risk-card atmosphere-card">
+                <div class="thermal-stage-title">${isCarbonMode ? '表面反应 / 渗层诊断' : '表面覆盖诊断'}</div>
+                <div class="thermal-risk-row"><span>${escapeSimHtml(uniformityLabel)}</span><strong>${surfaceUniformityScore} 分</strong></div>
+                <div class="thermal-risk-row"><span>${escapeSimHtml(faceRateLabel)}</span><strong>${effectiveFaceRate}%</strong></div>
+                ${carbonRowsHtml}
+                <div class="thermal-risk-row"><span>${escapeSimHtml(minLabel)}</span><strong>${escapeSimHtml(worstItemName)}</strong></div>
+                <div class="thermal-risk-row"><span>${escapeSimHtml(riskFaceLabel)}</span><strong>${escapeSimHtml(worstFaceLabel)}</strong></div>
+                <div class="thermal-risk-row"><span>主要遮蔽来源</span><strong>${escapeSimHtml(worstBlocker)}</strong></div>
+                <div class="thermal-risk-row"><span>局部密集度</span><strong>${localDensityRate}%</strong></div>
+                <div class="thermal-risk-row"><span>当前模式</span><strong>介质场 · ${escapeSimHtml(modeName)} V1.1</strong></div>
+            </div>
+
+            <div class="thermal-stage-card atmosphere-card">
+                <div class="thermal-stage-title">调整建议</div>
+                <div class="thermal-mini-note strong-note">${escapeSimHtml(suggestion)}</div>
+            </div>
+        `;
+        return;
+    }
 
     if (activeMode === 'airflow') {
         const coolingReachability = metrics?.coolingReachability ?? Math.max(50, Math.round(88 - densityRate * 0.55));
@@ -1181,6 +1285,24 @@ export function renderThermalSimulationPanel(metrics = null, mode = null) {
     const coldSpotCount = metrics?.coldSpotCount ?? 0;
     const radiationExposure = metrics?.radiationExposure ?? Math.max(55, Math.round(92 - densityRate * 0.45));
     const coreLagRisk = metrics?.coreLagRisk ?? (densityRate > 35 ? '中' : '低');
+    const heatmapView = metrics?.heatmapView || 'middle';
+    const heatmapViewLabel = metrics?.heatmapViewLabel || '中层热力图';
+    const heatmapViewDescription = metrics?.heatmapViewDescription || '默认查看装载中心区热场，必要时切换底面、底层、上层、可移动纵剖面或三层对比。';
+    const heatmapVerticalAxis = metrics?.heatmapVerticalAxis || 'z';
+    const heatmapVerticalAxisLabel = metrics?.heatmapVerticalAxisLabel || (heatmapVerticalAxis === 'x' ? 'X向剖面 · YZ面' : 'Z向剖面 · XY面');
+    const heatmapSectionOffset = Number(metrics?.heatmapSectionOffset || 0);
+    const heatmapSectionMinOffset = Number(metrics?.heatmapSectionMinOffset ?? -450);
+    const heatmapSectionMaxOffset = Number(metrics?.heatmapSectionMaxOffset ?? 450);
+    const thermalSpread = metrics?.thermalSpread ?? Math.max(12, Math.round(28 + densityRate * 0.42));
+    const coldSpotLocation = metrics?.coldSpotLocation || '未见明显冷点';
+    const minThermalRatio = metrics?.minThermalRatio ?? '-';
+    const heatmapDisplayMode = metrics?.heatmapDisplayMode || 'balanced';
+    const heatmapDisplayModeLabel = metrics?.heatmapDisplayModeLabel || '标准诊断';
+    const heatmapDisplayModeDescription = metrics?.heatmapDisplayModeDescription || '热力剖面、工件结构和冷点标记均衡显示。';
+    const heatmapSliceSectionText = metrics?.heatmapSliceSectionText || heatmapViewLabel;
+    const heatmapSliceRiskText = metrics?.heatmapSliceRiskText || '温度分布较均衡';
+    const heatmapSliceReason = metrics?.heatmapSliceReason || '当前剖面未见明显异常。';
+    const heatmapSliceSuggestion = metrics?.heatmapSliceSuggestion || '';
 
     const stage = progress < 22
         ? '预热升温'
@@ -1190,11 +1312,53 @@ export function renderThermalSimulationPanel(metrics = null, mode = null) {
                 ? '保温均热'
                 : '气淬前热态复核';
 
+    const heatmapViews = [
+        { key: 'middle', label: '中层', desc: '中心区' },
+        { key: 'floor', label: '底面', desc: '炉底/支撑' },
+        { key: 'bottom', label: '底层', desc: '下层冷点' },
+        { key: 'top', label: '上层', desc: '顶部热源' },
+        { key: 'vertical', label: '纵剖面', desc: '可移动' },
+        { key: 'all', label: '三层', desc: '层间对比' }
+    ];
+    const heatmapButtons = heatmapViews.map(view => `
+        <button class="plan-action-btn thermal-heatmap-btn ${heatmapView === view.key ? 'active' : ''}" type="button" data-action="thermal-heatmap-view" data-thermal-view="${view.key}" style="flex:1;min-width:76px;padding:7px 8px;">
+            <strong>${escapeSimHtml(view.label)}</strong><span style="display:block;font-size:9px;font-weight:600;opacity:.72;margin-top:2px;">${escapeSimHtml(view.desc)}</span>
+        </button>
+    `).join('');
+
+    const displayModes = [
+        { key: 'balanced', label: '标准诊断', desc: '均衡' },
+        { key: 'workpiece', label: '工件优先', desc: '看摆放' },
+        { key: 'coldspot', label: '冷点优先', desc: '找异常' }
+    ];
+    const displayModeButtons = displayModes.map(mode => `
+        <button class="plan-action-btn thermal-heatmap-btn ${heatmapDisplayMode === mode.key ? 'active' : ''}" type="button" data-action="thermal-heatmap-display-mode" data-thermal-display-mode="${mode.key}" style="flex:1;min-width:86px;padding:7px 8px;">
+            <strong>${escapeSimHtml(mode.label)}</strong><span style="display:block;font-size:9px;font-weight:600;opacity:.72;margin-top:2px;">${escapeSimHtml(mode.desc)}</span>
+        </button>
+    `).join('');
+
+    const verticalControlHtml = heatmapView === 'vertical' ? `
+        <div class="thermal-stage-title" style="margin-top:12px;">纵向剖面控制</div>
+        <div class="thermal-risk-row"><span>剖面方向</span><strong>${escapeSimHtml(heatmapVerticalAxisLabel)}</strong></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px;">
+            <button class="plan-action-btn thermal-heatmap-btn ${heatmapVerticalAxis === 'x' ? 'active' : ''}" type="button" data-action="thermal-heatmap-axis" data-thermal-axis="x">X向剖面<span style="display:block;font-size:9px;opacity:.72;">YZ面 / 沿X移动</span></button>
+            <button class="plan-action-btn thermal-heatmap-btn ${heatmapVerticalAxis === 'z' ? 'active' : ''}" type="button" data-action="thermal-heatmap-axis" data-thermal-axis="z">Z向剖面<span style="display:block;font-size:9px;opacity:.72;">XY面 / 沿Z移动</span></button>
+        </div>
+        <div class="thermal-risk-row" style="margin-top:6px;"><span>剖面位置</span><strong>${heatmapSectionOffset} mm</strong></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+            <span style="font-size:10px;color:#94a3b8;">${heatmapSectionMinOffset}</span>
+            <input type="range" data-action="thermal-heatmap-offset" min="${heatmapSectionMinOffset}" max="${heatmapSectionMaxOffset}" value="${heatmapSectionOffset}" step="10" style="flex:1;accent-color:#f97316;">
+            <span style="font-size:10px;color:#94a3b8;">${heatmapSectionMaxOffset}</span>
+        </div>
+        <button class="plan-action-btn" type="button" data-action="thermal-heatmap-reset-offset" style="margin-top:8px;width:100%;">回到中心剖面</button>
+        <div class="thermal-mini-note">移动纵向剖面会重新采样该截面的温度场，低温区标记也会跟随当前剖面更新。</div>
+    ` : '';
+
     const stageRows = [
         { p: 20, name: '预热升温', desc: '炉壁与工装先升温，厚大件中心仍偏冷' },
         { p: 60, name: '奥氏体化升温', desc: '真空环境以辐射加热为主，遮挡面升温滞后' },
         { p: 85, name: '保温均热', desc: '温差逐渐收敛，冷区风险开始下降' },
-        { p: 100, name: '高压气淬前复核', desc: '检查中心大件、密集堆叠区和背辐射区域' }
+        { p: 100, name: '气淬前热态复核', desc: '检查中心大件、密集堆叠区和背辐射区域' }
     ].map(row => `
         <div class="thermal-stage ${progress >= row.p - 8 ? 'active' : ''}">
             <div class="thermal-stage-progress">${row.p}%</div>
@@ -1207,34 +1371,65 @@ export function renderThermalSimulationPanel(metrics = null, mode = null) {
     `).join('');
 
     panel.innerHTML = `
-        <div class="thermal-header-card compact">
-            <div class="thermal-title">🔥 ${escapeSimHtml(furnace.instanceId || '当前炉次')} · 升温热场</div>
+        <div class="thermal-header-card compact thermal-heatmap-card">
+            <div class="thermal-title">🌡️ ${escapeSimHtml(furnace.instanceId || '当前炉次')} · 升温热场 · 热力图 V1.3</div>
             <div class="thermal-subtitle">
-                一期为解释型近似动画：蓝色表示低温/滞后区，橙红表示炉壁辐射升温区；红色线框提示可能的厚大件中心滞后或遮挡冷区。
+                热场使用半透明热力切片 + 等温线表达温度分布：V1.3 增强冷点优先显示、当前剖面解释和工件/剖面视觉层级，蓝色代表低温滞后，黄橙红代表受热充分。
             </div>
             <div class="thermal-metric-grid">
                 <div class="thermal-metric"><span>当前阶段</span><strong>${escapeSimHtml(stage)}</strong></div>
                 <div class="thermal-metric"><span>温度进度</span><strong>${currentTemp} / ${targetTemp} ℃</strong></div>
                 <div class="thermal-metric"><span>热场均匀性</span><strong>${uniformityScore} 分</strong></div>
-                <div class="thermal-metric"><span>装载密度</span><strong>${densityRate}%</strong></div>
+                <div class="thermal-metric"><span>估算温差</span><strong>±${thermalSpread} ℃</strong></div>
             </div>
             <div class="thermal-legend">
-                <span>低温</span><div class="thermal-gradient"></div><span>高温</span>
+                <span>低温/滞后</span><div class="thermal-gradient"></div><span>高温/充分</span>
             </div>
-            <div class="thermal-mini-note">升温热场 = 看温度结果；辐射暴露 = 解释加热遮挡；气流冷却 = 解释高压气淬阶段的迎风/背风风险。</div>
+            <div class="thermal-mini-note">热力图 = 看温度结果；辐射暴露 = 解释加热遮挡；气流冷却 = 解释迎风/背风；气氛覆盖 = 解释表面处理介质死角。</div>
         </div>
 
-        <div class="thermal-stage-card">
-            <div class="thermal-stage-title">工艺动画阶段</div>
+        <div class="thermal-risk-card thermal-heatmap-card">
+            <div class="thermal-stage-title">热力图视角</div>
+            <div class="thermal-risk-row"><span>当前视角</span><strong>${escapeSimHtml(heatmapViewLabel)}</strong></div>
+            <div class="thermal-mini-note" style="margin-bottom:8px;">${escapeSimHtml(heatmapViewDescription)}</div>
+            <div class="thermal-heatmap-view-row" style="display:flex;flex-wrap:wrap;gap:6px;">${heatmapButtons}</div>
+            ${verticalControlHtml}
+        </div>
+
+        <div class="thermal-risk-card thermal-heatmap-card">
+            <div class="thermal-stage-title">显示模式</div>
+            <div class="thermal-risk-row"><span>当前模式</span><strong>${escapeSimHtml(heatmapDisplayModeLabel)}</strong></div>
+            <div class="thermal-mini-note" style="margin-bottom:8px;">${escapeSimHtml(heatmapDisplayModeDescription)}</div>
+            <div class="thermal-heatmap-view-row" style="display:flex;flex-wrap:wrap;gap:6px;">${displayModeButtons}</div>
+        </div>
+
+        <div class="thermal-stage-card thermal-heatmap-card">
+            <div class="thermal-stage-title">升温阶段</div>
             <div class="thermal-stage-list">${stageRows}</div>
         </div>
 
-        <div class="thermal-risk-card">
-            <div class="thermal-stage-title">当前风险读数</div>
+        <div class="thermal-risk-card thermal-heatmap-card">
+            <div class="thermal-stage-title">当前剖面诊断</div>
+            <div class="thermal-risk-row"><span>剖面位置</span><strong>${escapeSimHtml(heatmapSliceSectionText)}</strong></div>
+            <div class="thermal-risk-row"><span>剖面判断</span><strong>${escapeSimHtml(heatmapSliceRiskText)}</strong></div>
+            <div class="thermal-mini-note strong-note">${escapeSimHtml(heatmapSliceReason)}</div>
+        </div>
+
+        <div class="thermal-risk-card thermal-heatmap-card">
+            <div class="thermal-stage-title">冷点 / 温差诊断</div>
             <div class="thermal-risk-row"><span>冷区风险点</span><strong>${coldSpotCount} 处</strong></div>
+            <div class="thermal-risk-row"><span>最低热量区域</span><strong>${escapeSimHtml(coldSpotLocation)}</strong></div>
+            <div class="thermal-risk-row"><span>最低热量比例</span><strong>${minThermalRatio === '-' ? '-' : minThermalRatio + '%'}</strong></div>
             <div class="thermal-risk-row"><span>辐射覆盖估算</span><strong>${radiationExposure}%</strong></div>
             <div class="thermal-risk-row"><span>厚大件中心滞后</span><strong>${escapeSimHtml(coreLagRisk)}</strong></div>
-            <div class="thermal-risk-row"><span>仿真进度</span><strong>${progress}%</strong></div>
+            <div class="thermal-risk-row"><span>当前模式</span><strong>升温热场 · 热力图 V1.3</strong></div>
+        </div>
+
+        <div class="thermal-stage-card thermal-heatmap-card">
+            <div class="thermal-stage-title">调整建议</div>
+            <div class="thermal-mini-note strong-note">${escapeSimHtml(heatmapSliceSuggestion || (coldSpotCount > 0 || coreLagRisk !== '低'
+                ? '优先复核 3D 中“冷点风险区”标记和蓝色/青色冷区所在层，必要时增加工件间距、减少中心堆叠，或将厚大件调整到更靠近热源/外圈的位置。'
+                : '当前热力图未显示明显冷点，高低温分布较均衡，可继续结合辐射暴露与气流冷却复核。'))}</div>
         </div>
     `;
 }

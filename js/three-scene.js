@@ -113,15 +113,22 @@ let thermalSimRuntime = {
     durationMs: 9000,
     startedAt: 0,
     pointCloud: null,
+    heatmapGroup: null,
+    selectedThermalHeatmapView: 'middle',
+    selectedThermalDisplayMode: 'balanced',
+    selectedThermalVerticalAxis: 'z',
+    selectedThermalSectionOffset: 0,
     rayGroup: null,
     riskGroup: null,
     sourceGroup: null,
     metrics: null,
     radiationScores: null,
     airflowScores: null,
+    atmosphereScores: null,
     selectedAirflowDirection: 'z+',
     selectedAirflowDirections: ['z+'],
     selectedAirflowGasType: 'n2',
+    selectedAtmosphereMediumType: 'nitriding',
     airflowParticles: null,
     airflowStreamGroup: null,
     selectedRadiationItemId: null,
@@ -252,6 +259,7 @@ function clearThermalGroupChildren() {
         disposeObject3D(child);
     }
     thermalSimRuntime.pointCloud = null;
+    thermalSimRuntime.heatmapGroup = null;
     thermalSimRuntime.rayGroup = null;
     thermalSimRuntime.riskGroup = null;
     thermalSimRuntime.sourceGroup = null;
@@ -272,9 +280,15 @@ export function clearThermalSimulationLayer() {
     thermalSimRuntime.metrics = null;
     thermalSimRuntime.radiationScores = null;
     thermalSimRuntime.airflowScores = null;
+    thermalSimRuntime.atmosphereScores = null;
     thermalSimRuntime.selectedAirflowDirection = 'z+';
+    thermalSimRuntime.selectedThermalHeatmapView = 'middle';
+    thermalSimRuntime.selectedThermalDisplayMode = 'balanced';
+    thermalSimRuntime.selectedThermalVerticalAxis = 'z';
+    thermalSimRuntime.selectedThermalSectionOffset = 0;
     thermalSimRuntime.selectedAirflowDirections = ['z+'];
     thermalSimRuntime.selectedAirflowGasType = 'n2';
+    thermalSimRuntime.selectedAtmosphereMediumType = 'nitriding';
     thermalSimRuntime.airflowParticles = null;
     thermalSimRuntime.airflowStreamGroup = null;
     thermalSimRuntime.selectedRadiationItemId = null;
@@ -632,6 +646,529 @@ function buildThermalPointCloud(furnace, progress) {
     return cloud;
 }
 
+const THERMAL_HEATMAP_VIEW_META = {
+    floor: { key: 'floor', label: '底面热力图', shortLabel: '底面', description: '查看炉底/工装底部边界面的温度分布，适合检查底板、支撑与下层搁板造成的冷区。' },
+    bottom: { key: 'bottom', label: '底层热力图', shortLabel: '底层', description: '查看靠近底层/搁板区域的升温滞后与冷点。' },
+    middle: { key: 'middle', label: '中层热力图', shortLabel: '中层', description: '查看装载中心区的热场均匀性。' },
+    top: { key: 'top', label: '上层热力图', shortLabel: '上层', description: '查看靠近顶部热源区域的温度分布。' },
+    vertical: { key: 'vertical', label: '可移动纵向剖面', shortLabel: '纵剖面', description: '可在 X/Z 两个方向之间切换，并沿法线移动剖面，查看不同截面上的上下温差与中心热滞后。' },
+    all: { key: 'all', label: '三层热力图', shortLabel: '三层', description: '同时显示底层、中层、上层热力切片，用于快速判断层间温差。' }
+};
+
+function normalizeThermalHeatmapView(viewKey = 'middle') {
+    const key = String(viewKey || 'middle').toLowerCase();
+    return THERMAL_HEATMAP_VIEW_META[key] ? key : 'middle';
+}
+
+function getThermalHeatmapViewMeta(viewKey = 'middle') {
+    return THERMAL_HEATMAP_VIEW_META[normalizeThermalHeatmapView(viewKey)] || THERMAL_HEATMAP_VIEW_META.middle;
+}
+
+const THERMAL_HEATMAP_DISPLAY_MODES = {
+    balanced: { key: 'balanced', label: '标准诊断', sliceOpacity: 0.78, itemOpacityScale: 1.0, coldBoost: 1.0, description: '热力剖面、工件结构和冷点标记均衡显示。' },
+    workpiece: { key: 'workpiece', label: '工件优先', sliceOpacity: 0.42, itemOpacityScale: 1.42, coldBoost: 0.9, description: '降低热力图透明度，优先看工件和摆放关系。' },
+    coldspot: { key: 'coldspot', label: '冷点优先', sliceOpacity: 0.66, itemOpacityScale: 0.72, coldBoost: 1.45, description: '高温区弱化，低温/滞后区域和冷点标记更突出。' }
+};
+
+function normalizeThermalDisplayMode(mode = 'balanced') {
+    const key = String(mode || 'balanced').toLowerCase();
+    return THERMAL_HEATMAP_DISPLAY_MODES[key] ? key : 'balanced';
+}
+
+function getThermalDisplayModeMeta(mode = thermalSimRuntime.selectedThermalDisplayMode || 'balanced') {
+    return THERMAL_HEATMAP_DISPLAY_MODES[normalizeThermalDisplayMode(mode)] || THERMAL_HEATMAP_DISPLAY_MODES.balanced;
+}
+
+function normalizeThermalVerticalAxis(axis = 'z') {
+    return String(axis || 'z').toLowerCase() === 'x' ? 'x' : 'z';
+}
+
+function getThermalVerticalAxisLabel(axis = thermalSimRuntime.selectedThermalVerticalAxis || 'z') {
+    return normalizeThermalVerticalAxis(axis) === 'x' ? 'X向剖面 · YZ面' : 'Z向剖面 · XY面';
+}
+
+function getThermalSectionRange(furnace, axis = thermalSimRuntime.selectedThermalVerticalAxis || 'z') {
+    const fw = Number(furnace?.w || 600);
+    const fd = Number(furnace?.d || 600);
+    const a = normalizeThermalVerticalAxis(axis);
+    const half = a === 'x' ? fw / 2 : fd / 2;
+    return {
+        axis: a,
+        min: Math.round(-half),
+        max: Math.round(half),
+        span: Math.round(half * 2)
+    };
+}
+
+function clampThermalSectionOffset(furnace, offset = 0, axis = thermalSimRuntime.selectedThermalVerticalAxis || 'z') {
+    const range = getThermalSectionRange(furnace, axis);
+    return Math.max(range.min, Math.min(range.max, Number(offset) || 0));
+}
+
+function getHeatmapSliceSpecs(viewKey = 'middle') {
+    const key = normalizeThermalHeatmapView(viewKey);
+    const verticalAxis = normalizeThermalVerticalAxis(thermalSimRuntime.selectedThermalVerticalAxis || 'z');
+    const verticalOffset = Number(thermalSimRuntime.selectedThermalSectionOffset || 0);
+    const horizontal = [
+        { key: 'bottom', label: '底层', type: 'horizontal', ratio: 0.22, opacity: 0.78 },
+        { key: 'middle', label: '中层', type: 'horizontal', ratio: 0.52, opacity: 0.84 },
+        { key: 'top', label: '上层', type: 'horizontal', ratio: 0.82, opacity: 0.74 }
+    ];
+    if (key === 'all') return horizontal;
+    if (key === 'floor') return [{ key: 'floor', label: '底面', type: 'floor', ratio: 0.018, opacity: 0.86 }];
+    if (key === 'vertical') {
+        return [{
+            key: 'vertical',
+            label: verticalAxis === 'x' ? 'X向纵剖面' : 'Z向纵剖面',
+            type: 'vertical',
+            axis: verticalAxis,
+            offset: verticalOffset,
+            ratio: 0.5,
+            opacity: 0.88
+        }];
+    }
+    return horizontal.filter(s => s.key === key);
+}
+
+function sampleThermalRatioAtPoint(furnace, x, y, z, progress) {
+    const fw = Number(furnace.w || 600);
+    const fh = Number(furnace.h || 600);
+    const fd = Number(furnace.d || 600);
+    if (!isPointInsideThermalVolume(furnace, x, y, z)) return null;
+    const xNorm = clamp01((x + fw / 2) / Math.max(1, fw));
+    const yNorm = clamp01((y - THERMAL_BASE_Y) / Math.max(1, fh));
+    const zNorm = clamp01((z + fd / 2) / Math.max(1, fd));
+    const shapeFactors = getThermalShapeFactors(furnace, x, y, z, xNorm, yNorm, zNorm);
+    const shadowInfo = estimateShadowAndCoreLag(x, y, z, furnace);
+    const meta = {
+        wallFactor: shapeFactors.wallFactor,
+        heightFactor: yNorm,
+        centerFactor: shapeFactors.centerFactor,
+        shadow: shadowInfo.shadow,
+        coreLag: shadowInfo.coreLag,
+        nearMaterial: shadowInfo.nearMaterial
+    };
+    return temperatureRatioFromMeta(meta, progress);
+}
+
+function colorFromThermalHeatmapRatio(ratio, displayMode = thermalSimRuntime.selectedThermalDisplayMode || 'balanced') {
+    const mode = normalizeThermalDisplayMode(displayMode);
+    const s = clamp01(ratio);
+    const deepCold = new THREE.Color(0x1d4ed8);
+    const cold = new THREE.Color(0x22d3ee);
+    const mid = new THREE.Color(0xfacc15);
+    const hot = new THREE.Color(0xf97316);
+    const veryHot = new THREE.Color(0xef4444);
+    const whiteHot = new THREE.Color(0xfff7ed);
+    const c = new THREE.Color();
+    if (mode === 'coldspot') {
+        if (s < 0.42) c.lerpColors(deepCold, cold, s / 0.42);
+        else if (s < 0.66) c.lerpColors(cold, mid, (s - 0.42) / 0.24);
+        else if (s < 0.86) c.lerpColors(mid, hot, (s - 0.66) / 0.20);
+        else c.lerpColors(hot, veryHot, (s - 0.86) / 0.14);
+        return c;
+    }
+    if (s < 0.30) c.lerpColors(deepCold, cold, s / 0.30);
+    else if (s < 0.58) c.lerpColors(cold, mid, (s - 0.30) / 0.28);
+    else if (s < 0.80) c.lerpColors(mid, hot, (s - 0.58) / 0.22);
+    else if (s < 0.94) c.lerpColors(hot, veryHot, (s - 0.80) / 0.14);
+    else c.lerpColors(veryHot, whiteHot, (s - 0.94) / 0.06);
+    return c;
+}
+
+function heatmapAlphaFromRatio(ratio, spec, displayMode = thermalSimRuntime.selectedThermalDisplayMode || 'balanced') {
+    const mode = normalizeThermalDisplayMode(displayMode);
+    const s = clamp01(ratio);
+    if (mode === 'workpiece') return spec.type === 'vertical' ? 132 + Math.round(s * 30) : 120 + Math.round(s * 28);
+    if (mode === 'coldspot') {
+        const coldAlpha = Math.round((1 - s) * 84);
+        return spec.type === 'vertical' ? 155 + coldAlpha : 145 + coldAlpha;
+    }
+    return spec.type === 'vertical' ? 168 + Math.round(s * 32) : 154 + Math.round(s * 36);
+}
+
+function createThermalHeatmapTexture(furnace, spec, progress) {
+    const canvas = document.createElement('canvas');
+    const size = 112;
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    const image = ctx.createImageData(size, size);
+    const data = image.data;
+    const ratioGrid = new Array(size * size).fill(null);
+    const displayMode = normalizeThermalDisplayMode(thermalSimRuntime.selectedThermalDisplayMode || 'balanced');
+    const fw = Number(furnace.w || 600);
+    const fh = Number(furnace.h || 600);
+    const fd = Number(furnace.d || 600);
+    const fixedY = spec.type === 'floor'
+        ? THERMAL_BASE_Y + Math.max(4, fh * (spec.ratio || 0.018))
+        : THERMAL_BASE_Y + fh * (spec.ratio || 0.5);
+    const fixedZ = clampThermalSectionOffset(furnace, spec.offset ?? 0, 'z');
+    const fixedX = clampThermalSectionOffset(furnace, spec.offset ?? 0, 'x');
+    const verticalAxis = normalizeThermalVerticalAxis(spec.axis || thermalSimRuntime.selectedThermalVerticalAxis || 'z');
+
+    for (let py = 0; py < size; py++) {
+        for (let px = 0; px < size; px++) {
+            const u = size <= 1 ? 0.5 : px / (size - 1);
+            const v = size <= 1 ? 0.5 : py / (size - 1);
+            let x = -fw / 2 + u * fw;
+            let y = fixedY;
+            let z = -fd / 2 + v * fd;
+
+            if (spec.type === 'vertical') {
+                y = THERMAL_BASE_Y + (1 - v) * fh;
+                if (verticalAxis === 'x') {
+                    x = fixedX;
+                    z = -fd / 2 + u * fd;
+                } else {
+                    x = -fw / 2 + u * fw;
+                    z = fixedZ;
+                }
+            }
+
+            const ratio = sampleThermalRatioAtPoint(furnace, x, y, z, progress);
+            const offset = (py * size + px) * 4;
+            if (ratio == null) {
+                data[offset + 0] = 0;
+                data[offset + 1] = 0;
+                data[offset + 2] = 0;
+                data[offset + 3] = 0;
+                continue;
+            }
+            ratioGrid[py * size + px] = ratio;
+            const color = colorFromThermalHeatmapRatio(ratio, displayMode);
+            const alpha = heatmapAlphaFromRatio(ratio, spec, displayMode);
+            data[offset + 0] = Math.round(color.r * 255);
+            data[offset + 1] = Math.round(color.g * 255);
+            data[offset + 2] = Math.round(color.b * 255);
+            data[offset + 3] = alpha;
+        }
+    }
+
+    ctx.putImageData(image, 0, 0);
+
+    // V1.3：叠加简化等温线。不是严格 CFD/FEA 等温线，但可以显著提升工程图感和低温边界可读性。
+    const contourLevels = displayMode === 'coldspot' ? [0.46, 0.58, 0.72] : [0.50, 0.66, 0.82];
+    contourLevels.forEach((level, idx) => {
+        ctx.beginPath();
+        ctx.lineWidth = idx === 0 ? 1.8 : 1.15;
+        ctx.strokeStyle = idx === 0
+            ? 'rgba(125, 211, 252, 0.78)'
+            : (idx === 1 ? 'rgba(250, 204, 21, 0.46)' : 'rgba(248, 113, 113, 0.42)');
+        for (let y = 1; y < size - 1; y += 2) {
+            for (let x = 1; x < size - 1; x += 2) {
+                const here = ratioGrid[y * size + x];
+                const right = ratioGrid[y * size + x + 1];
+                const down = ratioGrid[(y + 1) * size + x];
+                if (here == null) continue;
+                if ((right != null && (here - level) * (right - level) < 0) ||
+                    (down != null && (here - level) * (down - level) < 0)) {
+                    ctx.moveTo(x - 1, y);
+                    ctx.lineTo(x + 1, y);
+                }
+            }
+        }
+        ctx.stroke();
+    });
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    if ('colorSpace' in texture && THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+    return texture;
+}
+
+function buildThermalHeatmapFrame(width, height, position, rotation, color = 0xffffff, opacity = 0.36) {
+    const edges = new THREE.EdgesGeometry(new THREE.PlaneGeometry(width, height));
+    const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false });
+    const lines = new THREE.LineSegments(edges, mat);
+    lines.position.copy(position);
+    lines.rotation.copy(rotation);
+    lines.renderOrder = 32;
+    lines.userData = { isThermalHeatmapFrame: true };
+    return lines;
+}
+
+
+function buildThermalHeatmapLabel(text, subText, position) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 144;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.78)';
+    roundRect(ctx, 12, 16, 488, 104, 24);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(251, 146, 60, 0.72)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.fillStyle = '#fff7ed';
+    ctx.font = '700 34px sans-serif';
+    ctx.fillText(text, 34, 58);
+    ctx.fillStyle = 'rgba(255, 237, 213, 0.84)';
+    ctx.font = '500 24px sans-serif';
+    ctx.fillText(subText || '', 34, 94);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    if ('colorSpace' in texture && THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+    const material = new THREE.SpriteMaterial({ map: texture, transparent: true, opacity: 0.92, depthWrite: false, depthTest: false });
+    const sprite = new THREE.Sprite(material);
+    sprite.position.copy(position);
+    sprite.scale.set(210, 60, 1);
+    sprite.renderOrder = 60;
+    sprite.userData = { isThermalHeatmapLabel: true };
+    return sprite;
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+}
+
+function buildThermalColdSpotMarker(furnace, progress, viewKey = thermalSimRuntime.selectedThermalHeatmapView || 'middle') {
+    const info = findThermalColdSpotInfo(furnace, progress, viewKey);
+    if (!info || info.x == null || info.minRatio == null || info.minRatio > 0.86) return null;
+    const group = new THREE.Group();
+    group.name = 'thermalColdSpotMarker';
+    const pos = new THREE.Vector3(info.x, info.y, info.z);
+    const size = Math.max(46, Math.min(96, Math.max(furnace.w || 600, furnace.h || 600, furnace.d || 600) * 0.078));
+    const normalizedView = normalizeThermalHeatmapView(viewKey);
+    const axis = normalizeThermalVerticalAxis(thermalSimRuntime.selectedThermalVerticalAxis || 'z');
+
+    const cyan = 0x38bdf8;
+    const amber = 0xf97316;
+    const coldScore = 1 - clamp01(info.minRatio || 0);
+    const markerColor = coldScore > 0.48 ? cyan : amber;
+    const mat = new THREE.LineBasicMaterial({ color: markerColor, transparent: true, opacity: 0.96, depthWrite: false, depthTest: false });
+
+    function addLine(points, material = mat) {
+        const geo = new THREE.BufferGeometry().setFromPoints(points);
+        const line = new THREE.Line(geo, material);
+        line.renderOrder = 62;
+        group.add(line);
+        return line;
+    }
+
+    // 工程化“冷点框 + 十字准星”，替代原来的大圆环，减少游戏感。
+    if (normalizedView === 'vertical') {
+        if (axis === 'x') {
+            addLine([pos.clone().add(new THREE.Vector3(0, -size, -size)), pos.clone().add(new THREE.Vector3(0, size, -size)), pos.clone().add(new THREE.Vector3(0, size, size)), pos.clone().add(new THREE.Vector3(0, -size, size)), pos.clone().add(new THREE.Vector3(0, -size, -size))]);
+            addLine([pos.clone().add(new THREE.Vector3(0, -size * 1.22, 0)), pos.clone().add(new THREE.Vector3(0, size * 1.22, 0))]);
+            addLine([pos.clone().add(new THREE.Vector3(0, 0, -size * 1.22)), pos.clone().add(new THREE.Vector3(0, 0, size * 1.22))]);
+        } else {
+            addLine([pos.clone().add(new THREE.Vector3(-size, -size, 0)), pos.clone().add(new THREE.Vector3(size, -size, 0)), pos.clone().add(new THREE.Vector3(size, size, 0)), pos.clone().add(new THREE.Vector3(-size, size, 0)), pos.clone().add(new THREE.Vector3(-size, -size, 0))]);
+            addLine([pos.clone().add(new THREE.Vector3(-size * 1.22, 0, 0)), pos.clone().add(new THREE.Vector3(size * 1.22, 0, 0))]);
+            addLine([pos.clone().add(new THREE.Vector3(0, -size * 1.22, 0)), pos.clone().add(new THREE.Vector3(0, size * 1.22, 0))]);
+        }
+    } else {
+        addLine([pos.clone().add(new THREE.Vector3(-size, 0, -size)), pos.clone().add(new THREE.Vector3(size, 0, -size)), pos.clone().add(new THREE.Vector3(size, 0, size)), pos.clone().add(new THREE.Vector3(-size, 0, size)), pos.clone().add(new THREE.Vector3(-size, 0, -size))]);
+        addLine([pos.clone().add(new THREE.Vector3(-size * 1.22, 0, 0)), pos.clone().add(new THREE.Vector3(size * 1.22, 0, 0))]);
+        addLine([pos.clone().add(new THREE.Vector3(0, 0, -size * 1.22)), pos.clone().add(new THREE.Vector3(0, 0, size * 1.22))]);
+    }
+
+    const glowGeo = new THREE.SphereGeometry(size * 0.18, 18, 12);
+    const glowMat = new THREE.MeshBasicMaterial({ color: 0x7dd3fc, transparent: true, opacity: 0.82, depthWrite: false, depthTest: false });
+    const glow = new THREE.Mesh(glowGeo, glowMat);
+    glow.position.copy(pos);
+    glow.renderOrder = 63;
+    group.add(glow);
+
+    const label = buildThermalHeatmapLabel('冷点风险区', `${info.label} · ${Math.round(info.minRatio * 100)}%`, pos.clone().add(new THREE.Vector3(size * 1.25, size * 1.32, 0)));
+    group.add(label);
+    group.userData = { isThermalColdSpotMarker: true, info };
+    return group;
+}
+
+function findThermalColdSpotInfo(furnace, progress = 0.18, viewKey = thermalSimRuntime.selectedThermalHeatmapView || 'middle') {
+    const fw = Number(furnace.w || 600);
+    const fh = Number(furnace.h || 600);
+    const fd = Number(furnace.d || 600);
+    const key = normalizeThermalHeatmapView(viewKey);
+    const samples = [];
+
+    function pushSample(x, y, z) {
+        const ratio = sampleThermalRatioAtPoint(furnace, x, y, z, progress);
+        if (ratio != null) samples.push({ x, y, z, ratio });
+    }
+
+    if (key === 'vertical') {
+        const axis = normalizeThermalVerticalAxis(thermalSimRuntime.selectedThermalVerticalAxis || 'z');
+        const offset = clampThermalSectionOffset(furnace, thermalSimRuntime.selectedThermalSectionOffset || 0, axis);
+        const steps = 9;
+        for (let a = 0; a < steps; a++) {
+            for (let b = 0; b < steps; b++) {
+                const u = steps === 1 ? 0.5 : a / (steps - 1);
+                const v = steps === 1 ? 0.5 : b / (steps - 1);
+                const y = THERMAL_BASE_Y + v * fh;
+                if (axis === 'x') {
+                    pushSample(offset, y, -fd / 2 + u * fd);
+                } else {
+                    pushSample(-fw / 2 + u * fw, y, offset);
+                }
+            }
+        }
+    } else if (['floor', 'bottom', 'middle', 'top'].includes(key)) {
+        const ratioMap = { floor: 0.018, bottom: 0.22, middle: 0.52, top: 0.82 };
+        const y = THERMAL_BASE_Y + fh * (ratioMap[key] ?? 0.52);
+        const steps = 9;
+        for (let ix = 0; ix < steps; ix++) {
+            for (let iz = 0; iz < steps; iz++) {
+                const x = -fw / 2 + (ix / (steps - 1)) * fw;
+                const z = -fd / 2 + (iz / (steps - 1)) * fd;
+                pushSample(x, y, z);
+            }
+        }
+    } else {
+        const xs = [-0.32, 0, 0.32].map(r => r * fw);
+        const ys = [0.22, 0.52, 0.82].map(r => THERMAL_BASE_Y + r * fh);
+        const zs = [-0.32, 0, 0.32].map(r => r * fd);
+        xs.forEach(x => ys.forEach(y => zs.forEach(z => pushSample(x, y, z))));
+    }
+
+    if (!samples.length) return { label: '未见明显冷点', minRatio: 1 };
+    const worst = samples.sort((a, b) => a.ratio - b.ratio)[0];
+    const xLabel = Math.abs(worst.x) < fw * 0.12 ? '中心' : (worst.x < 0 ? '左侧' : '右侧');
+    const yLocal = (worst.y - THERMAL_BASE_Y) / Math.max(1, fh);
+    const yLabel = yLocal < 0.08 ? '底面' : (yLocal < 0.34 ? '下层' : (yLocal > 0.68 ? '上层' : '中层'));
+    const zLabel = Math.abs(worst.z) < fd * 0.12 ? '中部' : (worst.z < 0 ? '前侧' : '后侧');
+    const viewLabel = key === 'vertical'
+        ? getThermalVerticalAxisLabel(thermalSimRuntime.selectedThermalVerticalAxis || 'z')
+        : (getThermalHeatmapViewMeta(key).shortLabel || '热力图');
+    return { label: `${viewLabel} · ${xLabel}${yLabel}${zLabel}`, minRatio: worst.ratio, x: worst.x, y: worst.y, z: worst.z };
+}
+
+function buildThermalSliceDiagnosis(furnace, progress, viewKey = thermalSimRuntime.selectedThermalHeatmapView || 'middle') {
+    const info = findThermalColdSpotInfo(furnace, progress, viewKey) || {};
+    const viewMeta = getThermalHeatmapViewMeta(viewKey);
+    const minRatio = Math.round((info.minRatio ?? 1) * 100);
+    const axis = normalizeThermalVerticalAxis(thermalSimRuntime.selectedThermalVerticalAxis || 'z');
+    const offset = Math.round(thermalSimRuntime.selectedThermalSectionOffset || 0);
+    const sectionText = normalizeThermalHeatmapView(viewKey) === 'vertical'
+        ? `${getThermalVerticalAxisLabel(axis)} · 位置 ${axis.toUpperCase()}=${offset}mm`
+        : viewMeta.label;
+    const riskText = minRatio < 48 ? '高风险冷点' : (minRatio < 65 ? '中等热滞后' : (minRatio < 82 ? '轻微温差' : '温度分布较均衡'));
+    const reason = minRatio < 65
+        ? '可能原因：厚大件中心滞后、层间遮挡、搁板/料框支撑附近热交换较弱，或中心堆叠密度偏高。'
+        : '当前剖面未见明显异常，建议继续结合辐射暴露和气流冷却复核。';
+    return {
+        sectionText,
+        minRatio,
+        location: info.label || '未见明显冷点',
+        riskText,
+        reason,
+        suggestion: minRatio < 65
+            ? '建议优先检查蓝色/青色冷区附近工件间距，必要时降低中心堆叠密度、调整厚大件到外圈或增加热流通道。'
+            : '当前剖面的热力分布可接受，可继续查看底面、纵剖面和三层对比。'
+    };
+}
+
+function buildThermalHeatmapField(furnace, progress, viewKey = 'middle') {
+    const group = new THREE.Group();
+    group.name = 'thermalHeatmapField';
+    const fw = Number(furnace.w || 600);
+    const fh = Number(furnace.h || 600);
+    const fd = Number(furnace.d || 600);
+    const yMid = THERMAL_BASE_Y + fh / 2;
+    const normalizedView = normalizeThermalHeatmapView(viewKey);
+    const specs = getHeatmapSliceSpecs(normalizedView);
+    const displayMeta = getThermalDisplayModeMeta();
+
+    specs.forEach((spec, idx) => {
+        const texture = createThermalHeatmapTexture(furnace, spec, progress);
+        const mat = new THREE.MeshBasicMaterial({
+            map: texture,
+            transparent: true,
+            opacity: normalizedView === 'all'
+                ? Math.min(0.46, (spec.opacity ?? 0.58) * displayMeta.sliceOpacity)
+                : Math.min(0.72, (spec.opacity ?? 0.80) * displayMeta.sliceOpacity),
+            side: THREE.DoubleSide,
+            depthWrite: false,
+            depthTest: false
+        });
+        let width = fw;
+        let height = fd;
+        let position = new THREE.Vector3(0, THERMAL_BASE_Y + fh * (spec.ratio || 0.5), 0);
+        let rotation = new THREE.Euler(-Math.PI / 2, 0, 0);
+        let labelSubText = `Y=${Math.round(position.y - THERMAL_BASE_Y)}mm`;
+
+        if (spec.type === 'floor') {
+            position.y = THERMAL_BASE_Y + Math.max(4, fh * (spec.ratio || 0.018));
+            labelSubText = `炉底面 · Y=${Math.round(position.y - THERMAL_BASE_Y)}mm`;
+        } else if (spec.type === 'vertical') {
+            const verticalAxis = normalizeThermalVerticalAxis(spec.axis || thermalSimRuntime.selectedThermalVerticalAxis || 'z');
+            const offset = clampThermalSectionOffset(furnace, spec.offset ?? thermalSimRuntime.selectedThermalSectionOffset ?? 0, verticalAxis);
+            if (verticalAxis === 'x') {
+                width = fd;
+                height = fh;
+                position = new THREE.Vector3(offset, yMid, 0);
+                rotation = new THREE.Euler(0, Math.PI / 2, 0);
+                labelSubText = `YZ面 · X=${Math.round(offset)}mm`;
+            } else {
+                width = fw;
+                height = fh;
+                position = new THREE.Vector3(0, yMid, offset);
+                rotation = new THREE.Euler(0, 0, 0);
+                labelSubText = `XY面 · Z=${Math.round(offset)}mm`;
+            }
+        }
+
+        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), mat);
+        mesh.position.copy(position);
+        mesh.rotation.copy(rotation);
+        mesh.renderOrder = 30 + idx;
+        mesh.userData = {
+            isThermalHeatmapSlice: true,
+            heatmapView: spec.key,
+            label: spec.label,
+            axis: spec.axis || null,
+            offset: spec.offset || 0
+        };
+        group.add(mesh);
+        group.add(buildThermalHeatmapFrame(width, height, position, rotation, normalizedView === 'vertical' ? 0x7dd3fc : 0xe2e8f0, spec.type === 'vertical' ? 0.82 : 0.56));
+        const labelPos = spec.type === 'vertical'
+            ? position.clone().add(new THREE.Vector3(-fw / 2 + 150, fh / 2 + 50, 12))
+            : position.clone().add(new THREE.Vector3(-fw / 2 + 150, 36, -fd / 2 + 38));
+        group.add(buildThermalHeatmapLabel(`${spec.label}热力图`, labelSubText, labelPos));
+    });
+
+    const coldSpotMarker = buildThermalColdSpotMarker(furnace, progress, normalizedView);
+    if (coldSpotMarker) group.add(coldSpotMarker);
+
+    group.userData = {
+        isThermalHeatmapField: true,
+        viewKey: normalizedView,
+        progress: clamp01(progress),
+        verticalAxis: thermalSimRuntime.selectedThermalVerticalAxis || 'z',
+        sectionOffset: thermalSimRuntime.selectedThermalSectionOffset || 0
+    };
+    return group;
+}
+
+function updateThermalHeatmapField(furnace, progress) {
+    const group = ensureThermalSimulationGroup();
+    if (thermalSimRuntime.heatmapGroup) {
+        group.remove(thermalSimRuntime.heatmapGroup);
+        disposeObject3D(thermalSimRuntime.heatmapGroup);
+    }
+    const viewKey = normalizeThermalHeatmapView(thermalSimRuntime.selectedThermalHeatmapView || 'middle');
+    const heatmap = buildThermalHeatmapField(furnace, progress, viewKey);
+    group.add(heatmap);
+    thermalSimRuntime.heatmapGroup = heatmap;
+    return heatmap;
+}
+
 function buildRadiationRays(furnace) {
     const fw = furnace.w || 600;
     const fh = furnace.h || 600;
@@ -740,14 +1277,22 @@ function buildRingThermalBoundary(furnace) {
 function calculateThermalMetrics(furnace, progress) {
     const items = furnace.packedItems || [];
     const risks = items.map(item => estimateItemThermalRisk(item, furnace));
-    const avgRisk = risks.length ? risks.reduce((s, v) => s + v, 0) / risks.length : 0;
+    const avgRisk = risks.length ? risks.reduce((sum, value) => sum + value, 0) / risks.length : 0;
     const maxRisk = risks.length ? Math.max(...risks) : 0;
-    const coldSpotCount = risks.filter(v => v > 0.45).length;
+    const coldSpotCount = risks.filter(value => value > 0.45).length;
     const packedVolume = items.reduce((sum, item) => sum + (item.w || 0) * (item.h || 0) * (item.d || 0), 0);
     const furnaceVolume = Math.max(1, (furnace.w || 1) * (furnace.h || 1) * (furnace.d || 1));
     const density = packedVolume / furnaceVolume;
     const uniformityScore = Math.max(48, Math.round(94 - avgRisk * 42 - maxRisk * 18 - density * 28));
     const currentTemp = Math.round(VACUUM_QUENCH_PROFILE.startTemp + clamp01(progress) * (VACUUM_QUENCH_PROFILE.targetTemp - VACUUM_QUENCH_PROFILE.startTemp));
+    const viewMeta = getThermalHeatmapViewMeta(thermalSimRuntime.selectedThermalHeatmapView || 'middle');
+    const verticalAxis = normalizeThermalVerticalAxis(thermalSimRuntime.selectedThermalVerticalAxis || 'z');
+    const sectionRange = getThermalSectionRange(furnace, verticalAxis);
+    const sectionOffset = clampThermalSectionOffset(furnace, thermalSimRuntime.selectedThermalSectionOffset || 0, verticalAxis);
+    const coldSpotInfo = findThermalColdSpotInfo(furnace, progress, viewMeta.key);
+    const sliceDiagnosis = buildThermalSliceDiagnosis(furnace, progress, viewMeta.key);
+    const displayModeMeta = getThermalDisplayModeMeta();
+    const estimatedSpread = Math.max(8, Math.round(18 + maxRisk * 72 + density * 44 - clamp01(progress) * 16));
     return {
         mode: 'thermal',
         processName: VACUUM_QUENCH_PROFILE.processName,
@@ -758,7 +1303,26 @@ function calculateThermalMetrics(furnace, progress) {
         radiationExposure: Math.max(52, Math.round(91 - avgRisk * 35 - density * 18)),
         coreLagRisk: maxRisk > 0.55 ? '高' : (maxRisk > 0.38 ? '中' : '低'),
         densityRate: Math.round(density * 1000) / 10,
-        progress: Math.round(clamp01(progress) * 100)
+        progress: Math.round(clamp01(progress) * 100),
+        heatmapView: viewMeta.key,
+        heatmapViewLabel: viewMeta.label,
+        heatmapViewDescription: viewMeta.description,
+        heatmapVerticalAxis: verticalAxis,
+        heatmapVerticalAxisLabel: getThermalVerticalAxisLabel(verticalAxis),
+        heatmapSectionOffset: Math.round(sectionOffset),
+        heatmapSectionMinOffset: sectionRange.min,
+        heatmapSectionMaxOffset: sectionRange.max,
+        thermalSpread: estimatedSpread,
+        coldSpotLocation: coldSpotInfo.label,
+        minThermalRatio: Math.round((coldSpotInfo.minRatio ?? 1) * 100),
+        heatmapDisplayMode: displayModeMeta.key,
+        heatmapDisplayModeLabel: displayModeMeta.label,
+        heatmapDisplayModeDescription: displayModeMeta.description,
+        heatmapSliceSectionText: sliceDiagnosis.sectionText,
+        heatmapSliceRiskText: sliceDiagnosis.riskText,
+        heatmapSliceReason: sliceDiagnosis.reason,
+        heatmapSliceSuggestion: sliceDiagnosis.suggestion,
+        heatmapModeName: '热力图 V1.3'
     };
 }
 
@@ -804,7 +1368,7 @@ function applyThermalTintToItems(furnace, progress) {
                 mat.emissiveIntensity = emissiveStrength;
             }
             mat.transparent = true;
-            mat.opacity = 0.72 + itemRatio * 0.24;
+            mat.opacity = 0.34 + itemRatio * 0.18;
             mat.needsUpdate = true;
         });
     });
@@ -2537,6 +3101,637 @@ export function getAirflowCoolingRuntime() {
     };
 }
 
+
+// ---------- 介质场：气氛覆盖 v1 ----------
+function getAtmosphereMediumMeta(mediumType = 'nitriding') {
+    const key = String(mediumType || 'nitriding').toLowerCase().trim();
+    const table = {
+        nitriding: {
+            key: 'nitriding',
+            label: '氮化气氛',
+            shortLabel: 'NH₃ / N₂ / H₂',
+            activeSpecies: '活性氮',
+            processHint: '适合氮化 / 软氮化，重点关注表面接触、贴靠面与中心死角。',
+            targetClearance: 90,
+            severeClearance: 24,
+            diffusionFactor: 0.92,
+            colorHigh: 0x34d399,
+            colorMid: 0xa3e635,
+            colorLow: 0xf97316,
+            backgroundColor: 0x0b1f1c,
+            surfaceLayerColor: 0x5eead4,
+            fogOpacity: 0.46,
+            visualTone: 'nitrogen'
+        },
+        carburizing: {
+            key: 'carburizing',
+            label: '渗碳气氛',
+            shortLabel: 'CO / CH₄ / N₂',
+            activeSpecies: '碳势介质',
+            processHint: '适合渗碳 / 可控气氛多用炉，重点关注气氛更新和表面反应均匀性。',
+            targetClearance: 110,
+            severeClearance: 32,
+            diffusionFactor: 0.88,
+            colorHigh: 0xffb703,
+            colorMid: 0xf97316,
+            colorLow: 0x7f1d1d,
+            backgroundColor: 0x160d06,
+            surfaceLayerColor: 0xffd166,
+            fogOpacity: 0.58,
+            visualTone: 'carbon'
+        },
+        protective: {
+            key: 'protective',
+            label: '保护气氛',
+            shortLabel: 'N₂ / Ar / H₂',
+            activeSpecies: '防氧化保护介质',
+            processHint: '适合保护气氛退火 / 防氧化处理，重点关注是否存在封闭死角。',
+            targetClearance: 70,
+            severeClearance: 20,
+            diffusionFactor: 0.96,
+            colorHigh: 0x2dd4bf,
+            colorMid: 0x38bdf8,
+            colorLow: 0xf59e0b,
+            backgroundColor: 0x071827,
+            surfaceLayerColor: 0xbae6fd,
+            fogOpacity: 0.38,
+            visualTone: 'protective'
+        },
+        carbonitriding: {
+            key: 'carbonitriding',
+            label: '碳氮共渗',
+            shortLabel: '渗碳气 + NH₃',
+            activeSpecies: '碳氮活性介质',
+            processHint: '适合碳氮共渗，重点关注密集区、贴靠面和小间隙处的复合介质覆盖。',
+            targetClearance: 120,
+            severeClearance: 36,
+            diffusionFactor: 0.84,
+            colorHigh: 0xffc857,
+            colorMid: 0xfacc15,
+            colorLow: 0xdc2626,
+            backgroundColor: 0x151106,
+            surfaceLayerColor: 0xffe08a,
+            fogOpacity: 0.54,
+            visualTone: 'carbonitriding'
+        }
+    };
+    return table[key] || table.nitriding;
+}
+
+function getAtmosphereCoverageColor(score, mediumType = 'nitriding') {
+    const meta = getAtmosphereMediumMeta(mediumType);
+    const low = new THREE.Color(meta.colorLow);
+    const mid = new THREE.Color(meta.colorMid);
+    const high = new THREE.Color(meta.colorHigh);
+    const c = new THREE.Color();
+    const s = clamp01(score);
+    if (s < 0.55) c.lerpColors(low, mid, s / 0.55);
+    else c.lerpColors(mid, high, (s - 0.55) / 0.45);
+    return c;
+}
+
+function isCarbonAtmosphere(mediumType = 'nitriding') {
+    const key = String(mediumType || '').toLowerCase();
+    return key === 'carburizing' || key === 'carbonitriding';
+}
+
+function estimateCaseDepthRange(avgScore = 0.75, mediumType = 'nitriding') {
+    if (!isCarbonAtmosphere(mediumType)) return null;
+    const baseMin = mediumType === 'carbonitriding' ? 0.35 : 0.80;
+    const baseMax = mediumType === 'carbonitriding' ? 0.70 : 1.25;
+    const quality = 0.78 + clamp01(avgScore) * 0.30;
+    return {
+        min: Math.round(baseMin * quality * 100) / 100,
+        max: Math.round(baseMax * quality * 100) / 100
+    };
+}
+
+function getAtmosphereModeCopy(mediumMeta) {
+    if (mediumMeta.key === 'carburizing') {
+        return {
+            modeName: '渗碳碳势覆盖',
+            coverageLabel: '平均碳势覆盖',
+            minLabel: '最低碳势工件',
+            deadLabel: '碳势死角件',
+            severeLabel: '严重碳势死角',
+            uniformityLabel: '预计渗层均匀性',
+            faceRateLabel: '有效吸碳表面',
+            riskFaceLabel: '最低碳势表面',
+            visualNote: '金橙色碳势云 = CO/CH₄ 有效碳势；金色外轮廓 = 表面吸碳/渗层形成；红棕色 = 贴靠面或中心碳势死角。'
+        };
+    }
+    if (mediumMeta.key === 'carbonitriding') {
+        return {
+            modeName: '碳氮共渗覆盖',
+            coverageLabel: '碳氮介质覆盖',
+            minLabel: '最低共渗工件',
+            deadLabel: '共渗死角件',
+            severeLabel: '严重共渗死角',
+            uniformityLabel: '共渗层均匀性',
+            faceRateLabel: '有效反应表面',
+            riskFaceLabel: '最低反应表面',
+            visualNote: '金黄/青绿复合雾场 = 碳氮活性介质；亮色外轮廓 = 表面反应层；红色 = 贴靠面或小间隙死角。'
+        };
+    }
+    if (mediumMeta.key === 'protective') {
+        return {
+            modeName: '保护气氛覆盖',
+            coverageLabel: '平均保护覆盖',
+            minLabel: '最低保护工件',
+            deadLabel: '保护死角件',
+            severeLabel: '严重保护死角',
+            uniformityLabel: '防氧化均匀性',
+            faceRateLabel: '有效保护表面',
+            riskFaceLabel: '最低保护表面',
+            visualNote: '淡蓝/银灰雾场 = 惰性保护气氛；亮色表面 = 有效保护；橙色 = 封闭死角或防氧化不足。'
+        };
+    }
+    return {
+        modeName: '氮化气氛覆盖',
+        coverageLabel: '平均氮势覆盖',
+        minLabel: '最低氮势工件',
+        deadLabel: '氮势死角件',
+        severeLabel: '严重氮势死角',
+        uniformityLabel: '氮化层均匀性',
+        faceRateLabel: '有效氮化表面',
+        riskFaceLabel: '最低氮势表面',
+        visualNote: '青绿色氮势雾场 = 活性氮覆盖；亮色表面 = 氮化反应充分；橙红色 = 贴靠面或气氛死角。'
+    };
+}
+
+function getAtmosphereFaceSamples(item, furnace) {
+    const b = getItemWorldBox(item, furnace);
+    const cx = (b.minX + b.maxX) / 2;
+    const cy = (b.minY + b.maxY) / 2;
+    const cz = (b.minZ + b.maxZ) / 2;
+    return [
+        { key: 'x-', label: '左侧面', point: new THREE.Vector3(b.minX, cy, cz), normal: new THREE.Vector3(-1, 0, 0), axis: 'x', sign: -1 },
+        { key: 'x+', label: '右侧面', point: new THREE.Vector3(b.maxX, cy, cz), normal: new THREE.Vector3(1, 0, 0), axis: 'x', sign: 1 },
+        { key: 'y-', label: '下表面', point: new THREE.Vector3(cx, b.minY, cz), normal: new THREE.Vector3(0, -1, 0), axis: 'y', sign: -1 },
+        { key: 'y+', label: '上表面', point: new THREE.Vector3(cx, b.maxY, cz), normal: new THREE.Vector3(0, 1, 0), axis: 'y', sign: 1 },
+        { key: 'z-', label: '前侧面', point: new THREE.Vector3(cx, cy, b.minZ), normal: new THREE.Vector3(0, 0, -1), axis: 'z', sign: -1 },
+        { key: 'z+', label: '后侧面', point: new THREE.Vector3(cx, cy, b.maxZ), normal: new THREE.Vector3(0, 0, 1), axis: 'z', sign: 1 }
+    ];
+}
+
+function getAxisRangeFromBox(box, axis) {
+    if (axis === 'x') return { min: box.minX, max: box.maxX };
+    if (axis === 'y') return { min: box.minY, max: box.maxY };
+    return { min: box.minZ, max: box.maxZ };
+}
+
+function rangesOverlapWithPad(aMin, aMax, bMin, bMax, pad = 0) {
+    return aMax + pad >= bMin && bMax + pad >= aMin;
+}
+
+function getFurnaceWorldBounds(furnace) {
+    return {
+        minX: -(Number(furnace?.w || 600) / 2),
+        maxX: Number(furnace?.w || 600) / 2,
+        minY: THERMAL_BASE_Y,
+        maxY: THERMAL_BASE_Y + Number(furnace?.h || 600),
+        minZ: -(Number(furnace?.d || 600) / 2),
+        maxZ: Number(furnace?.d || 600) / 2
+    };
+}
+
+function estimateAtmosphereFaceClearance(face, targetItem, allItems, furnace) {
+    const targetBox = getItemWorldBox(targetItem, furnace);
+    const axis = face.axis;
+    const orthAxes = ['x', 'y', 'z'].filter(a => a !== axis);
+    let bestClearance = Infinity;
+    let bestBlocker = null;
+    const overlapPad = 12;
+
+    for (const other of allItems) {
+        if (!other || other.id === targetItem.id) continue;
+        const otherBox = getItemWorldBox(other, furnace);
+        const overlapsOrthogonal = orthAxes.every(oa => {
+            const a = getAxisRangeFromBox(targetBox, oa);
+            const b = getAxisRangeFromBox(otherBox, oa);
+            return rangesOverlapWithPad(a.min, a.max, b.min, b.max, overlapPad);
+        });
+        if (!overlapsOrthogonal) continue;
+
+        let clearance = Infinity;
+        if (axis === 'x') clearance = face.sign > 0 ? otherBox.minX - targetBox.maxX : targetBox.minX - otherBox.maxX;
+        if (axis === 'y') clearance = face.sign > 0 ? otherBox.minY - targetBox.maxY : targetBox.minY - otherBox.maxY;
+        if (axis === 'z') clearance = face.sign > 0 ? otherBox.minZ - targetBox.maxZ : targetBox.minZ - otherBox.maxZ;
+
+        if (clearance >= -2 && clearance < bestClearance) {
+            bestClearance = Math.max(0, clearance);
+            bestBlocker = other;
+        }
+    }
+
+    const furnaceBox = getFurnaceWorldBounds(furnace);
+    let wallClearance = Infinity;
+    if (axis === 'x') wallClearance = face.sign > 0 ? furnaceBox.maxX - targetBox.maxX : targetBox.minX - furnaceBox.minX;
+    if (axis === 'y') wallClearance = face.sign > 0 ? furnaceBox.maxY - targetBox.maxY : targetBox.minY - furnaceBox.minY;
+    if (axis === 'z') wallClearance = face.sign > 0 ? furnaceBox.maxZ - targetBox.maxZ : targetBox.minZ - furnaceBox.minZ;
+
+    return {
+        clearance: Number.isFinite(bestClearance) ? bestClearance : wallClearance,
+        blocker: bestBlocker,
+        wallClearance
+    };
+}
+
+function estimateAtmosphereLocalDensity(item, furnace) {
+    const center = getItemCenterWorld(item, furnace);
+    const items = furnace.packedItems || [];
+    const radius = Math.max(180, Math.min(360, Math.max(furnace.w || 600, furnace.d || 600) * 0.22));
+    let density = 0;
+    items.forEach(other => {
+        if (!other || other.id === item.id) return;
+        const c = getItemCenterWorld(other, furnace);
+        const dist = c.distanceTo(center);
+        if (dist < radius) {
+            const volumeFactor = Math.min(1, Math.cbrt(Math.max((other.w || 1) * (other.h || 1) * (other.d || 1), 1)) / 360);
+            density += (1 - dist / radius) * (0.35 + volumeFactor * 0.65);
+        }
+    });
+    return clamp01(density / 4.2);
+}
+
+function calculateAtmosphereCoverageScores(furnace, mediumType = 'nitriding') {
+    const items = furnace.packedItems || [];
+    const result = new Map();
+    const mediumMeta = getAtmosphereMediumMeta(mediumType);
+    if (!items.length) return { scores: result, mediumMeta };
+
+    items.forEach(item => {
+        const faces = getAtmosphereFaceSamples(item, furnace);
+        const localDensity = estimateAtmosphereLocalDensity(item, furnace);
+        const blockerMap = new Map();
+        const faceResults = [];
+        let totalScore = 0;
+        let deadFaceCount = 0;
+
+        faces.forEach(face => {
+            const info = estimateAtmosphereFaceClearance(face, item, items, furnace);
+            const target = mediumMeta.targetClearance || 100;
+            const severe = mediumMeta.severeClearance || 28;
+            let faceScore = clamp01((info.clearance - severe * 0.35) / Math.max(1, target - severe * 0.35));
+            if (info.wallClearance < 18) faceScore *= 0.86;
+            faceScore *= (1 - localDensity * 0.22);
+            faceScore *= mediumMeta.diffusionFactor || 0.9;
+            faceScore = clamp01(faceScore);
+
+            if (info.blocker && info.clearance < target) {
+                const existed = blockerMap.get(info.blocker.id) || { item: info.blocker, count: 0, minClearance: Infinity };
+                existed.count += 1;
+                existed.minClearance = Math.min(existed.minClearance, info.clearance);
+                blockerMap.set(info.blocker.id, existed);
+            }
+            if (faceScore < 0.48 || info.clearance < severe) deadFaceCount += 1;
+            totalScore += faceScore;
+            faceResults.push({
+                key: face.key,
+                label: face.label,
+                score: Math.round(faceScore * 100),
+                clearance: Math.round(info.clearance),
+                blockerName: info.blocker?.name || ''
+            });
+        });
+
+        const score = clamp01(totalScore / Math.max(1, faces.length));
+        const blockers = [...blockerMap.values()].sort((a, b) => b.count - a.count || a.minClearance - b.minClearance);
+        const worstFace = [...faceResults].sort((a, b) => a.score - b.score)[0];
+        result.set(item.id, {
+            item,
+            score,
+            coveragePercent: Math.round(score * 100),
+            deadFaceCount,
+            localDensity,
+            faceResults,
+            worstFace,
+            blockers,
+            mediumType: mediumMeta.key
+        });
+
+        item.simulation = {
+            ...(item.simulation || {}),
+            atmosphereCoverageScore: Math.round(score * 100),
+            atmosphereDeadFaceCount: deadFaceCount,
+            atmosphereBlockerCount: blockers.length,
+            atmosphereMediumType: mediumMeta.key
+        };
+    });
+
+    return { scores: result, mediumMeta };
+}
+
+function calculateAtmosphereCoverageMetrics(furnace, scoreMap, mediumMeta) {
+    const entries = [...scoreMap.values()];
+    const avgScore = entries.length ? entries.reduce((s, v) => s + v.score, 0) / entries.length : 0;
+    const minScore = entries.length ? Math.min(...entries.map(v => v.score)) : 0;
+    const deadCornerItems = entries.filter(v => v.score < 0.62 || v.deadFaceCount >= 2).length;
+    const severeDeadCornerItems = entries.filter(v => v.score < 0.44 || v.deadFaceCount >= 3).length;
+    const worst = [...entries].sort((a, b) => a.score - b.score)[0];
+    const avgDensity = entries.length ? entries.reduce((s, v) => s + (v.localDensity || 0), 0) / entries.length : 0;
+    const coveredFaces = entries.reduce((s, v) => s + (v.faceResults || []).filter(f => f.score >= 65).length, 0);
+    const totalFaces = entries.reduce((s, v) => s + (v.faceResults || []).length, 0) || 1;
+    const uniformity = Math.max(42, Math.round(96 - (1 - avgScore) * 42 - severeDeadCornerItems * 3.2 - avgDensity * 18));
+    const worstFaceLabel = worst?.worstFace?.label || '-';
+    const worstBlocker = worst?.blockers?.[0]?.item?.name || '-';
+
+    const modeCopy = getAtmosphereModeCopy(mediumMeta);
+    const caseDepth = estimateCaseDepthRange(avgScore, mediumMeta.key);
+    const carbonPotential = isCarbonAtmosphere(mediumMeta.key)
+        ? Math.round((0.72 + avgScore * 0.28 - avgDensity * 0.08) * 100) / 100
+        : null;
+    const baseSuggestion = severeDeadCornerItems > 0
+        ? `存在明显${mediumMeta.key === 'carburizing' ? '碳势' : '气氛'}死角，建议优先复核 ${worst?.item?.name || '最低覆盖工件'} 的 ${worstFaceLabel}，增加相邻间距或调整到外圈通道。`
+        : (deadCornerItems > 0 ? '存在局部表面遮蔽，建议检查中心密集区、下表面贴靠和层间间距。' : '当前表面覆盖较均匀，未发现明显气氛死角高风险。');
+    const carbonSuggestion = mediumMeta.key === 'carburizing'
+        ? `${baseSuggestion} 渗碳模式下优先避免大面积贴靠，保证 CO/CH₄ 碳势气氛能进入中心层与下表面。`
+        : baseSuggestion;
+
+    return {
+        mode: 'atmosphere',
+        processName: VACUUM_QUENCH_PROFILE.processName,
+        mediumType: mediumMeta.key,
+        mediumLabel: mediumMeta.label,
+        mediumShortLabel: mediumMeta.shortLabel,
+        activeSpecies: mediumMeta.activeSpecies,
+        processHint: mediumMeta.processHint,
+        visualNote: modeCopy.visualNote,
+        modeName: modeCopy.modeName,
+        coverageLabel: modeCopy.coverageLabel,
+        minLabel: modeCopy.minLabel,
+        deadLabel: modeCopy.deadLabel,
+        severeLabel: modeCopy.severeLabel,
+        uniformityLabel: modeCopy.uniformityLabel,
+        faceRateLabel: modeCopy.faceRateLabel,
+        riskFaceLabel: modeCopy.riskFaceLabel,
+        atmosphereCoverage: Math.round(avgScore * 100),
+        minAtmosphereCoverage: Math.round(minScore * 100),
+        deadCornerItemCount: deadCornerItems,
+        severeDeadCornerItemCount: severeDeadCornerItems,
+        surfaceUniformityScore: uniformity,
+        effectiveFaceRate: Math.round((coveredFaces / totalFaces) * 100),
+        worstItemName: worst?.item?.name || '-',
+        worstFaceLabel,
+        worstBlocker,
+        localDensityRate: Math.round(avgDensity * 100),
+        carbonPotential,
+        estimatedCaseDepth: caseDepth ? `${caseDepth.min.toFixed(2)}–${caseDepth.max.toFixed(2)}mm` : null,
+        suggestion: carbonSuggestion
+    };
+}
+
+function buildAtmosphereFogField(furnace, scoreMap, mediumMeta) {
+    const fw = Number(furnace.w || 600);
+    const fh = Number(furnace.h || 600);
+    const fd = Number(furnace.d || 600);
+    const nx = Math.max(7, Math.min(11, Math.round(fw / 100)));
+    const ny = Math.max(4, Math.min(7, Math.round(fh / 150)));
+    const nz = Math.max(7, Math.min(11, Math.round(fd / 100)));
+    const positions = [];
+    const colors = [];
+    const jitter = Math.min(fw, fd) * 0.018;
+
+    for (let ix = 0; ix < nx; ix++) {
+        const x = -fw / 2 + (nx === 1 ? 0.5 : ix / (nx - 1)) * fw;
+        for (let iy = 0; iy < ny; iy++) {
+            const y = THERMAL_BASE_Y + (ny === 1 ? 0.5 : iy / (ny - 1)) * fh;
+            for (let iz = 0; iz < nz; iz++) {
+                const z = -fd / 2 + (nz === 1 ? 0.5 : iz / (nz - 1)) * fd;
+                if (!isPointInsideThermalVolume(furnace, x, y, z)) continue;
+                const shadow = estimateShadowAndCoreLag(x, y, z, furnace);
+                const wallShape = getThermalShapeFactors(
+                    furnace,
+                    x, y, z,
+                    (x + fw / 2) / Math.max(1, fw),
+                    (y - THERMAL_BASE_Y) / Math.max(1, fh),
+                    (z + fd / 2) / Math.max(1, fd)
+                );
+                const concentration = clamp01(0.92 - shadow.nearMaterial * 0.44 - shadow.shadow * 0.26 + wallShape.wallFactor * 0.10);
+                const c = getAtmosphereCoverageColor(concentration, mediumMeta.key);
+                positions.push(
+                    x + (Math.random() - 0.5) * jitter,
+                    y + (Math.random() - 0.5) * jitter,
+                    z + (Math.random() - 0.5) * jitter
+                );
+                colors.push(c.r, c.g, c.b);
+            }
+        }
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    const material = new THREE.PointsMaterial({
+        size: Math.max(34, Math.min(72, Math.min(fw, fd) / 12)),
+        map: createThermalParticleTexture(),
+        transparent: true,
+        opacity: mediumMeta.fogOpacity ?? 0.46,
+        vertexColors: true,
+        depthWrite: false,
+        depthTest: true,
+        blending: THREE.AdditiveBlending
+    });
+    const fog = new THREE.Points(geometry, material);
+    fog.name = 'atmosphereCoverageFogField';
+    fog.renderOrder = 21;
+    fog.userData = { isAtmosphereFogField: true };
+    return fog;
+}
+
+function buildAtmosphereRiskMarkers(furnace, scoreMap) {
+    const group = new THREE.Group();
+    group.name = 'atmosphereDeadCornerMarkers';
+    const sorted = [...scoreMap.values()].sort((a, b) => a.score - b.score).slice(0, 10);
+    sorted.forEach(entry => {
+        if (!entry || entry.score > 0.68 && entry.deadFaceCount < 2) return;
+        const item = entry.item;
+        const geometry = new THREE.BoxGeometry((item.w || 1) + 18, (item.h || 1) + 18, (item.d || 1) + 18);
+        const edges = new THREE.EdgesGeometry(geometry);
+        const mat = new THREE.LineBasicMaterial({
+            color: entry.score < 0.45 ? 0xef4444 : 0xf97316,
+            transparent: true,
+            opacity: entry.score < 0.45 ? 0.80 : 0.58,
+            depthWrite: false
+        });
+        const marker = new THREE.LineSegments(edges, mat);
+        marker.position.copy(getItemCenterWorld(item, furnace));
+        marker.userData = { isAtmosphereRiskMarker: true, risk: 1 - entry.score };
+        group.add(marker);
+    });
+    return group;
+}
+
+function applyAtmosphereTintToItems(furnace, scoreMap, mediumMeta) {
+    const group = furnaceGroups.get(currentFurnaceIndex);
+    if (!group || !furnace) return;
+    const carbonMode = isCarbonAtmosphere(mediumMeta.key);
+    group.traverse(child => {
+        if (!child.isMesh || !child.userData || !child.userData.itemId) return;
+        const entry = scoreMap.get(child.userData.itemId);
+        const score = entry ? entry.score : 0.65;
+        const tint = getAtmosphereCoverageColor(score, mediumMeta.key);
+        getMeshMaterials(child).forEach(mat => {
+            if (!mat.color) return;
+            saveOriginalMaterialIfNeeded(mat);
+            if (carbonMode) {
+                const core = new THREE.Color(score > 0.62 ? 0x8a4b16 : 0x4a1710);
+                mat.color.copy(core.lerp(tint, 0.28 + score * 0.28));
+            } else {
+                mat.color.copy(tint);
+            }
+            if (mat.emissive) {
+                mat.emissive.copy(tint);
+                mat.emissive.multiplyScalar(carbonMode ? (score > 0.72 ? 0.72 : 0.42) : (score > 0.72 ? 0.52 : 0.28));
+                mat.emissiveIntensity = carbonMode ? (0.18 + score * 0.48) : (0.10 + score * 0.34);
+            }
+            mat.transparent = true;
+            mat.opacity = carbonMode ? (0.48 + score * 0.30) : (0.56 + score * 0.34);
+            mat.needsUpdate = true;
+        });
+    });
+}
+
+function buildAtmosphereSurfaceLayerVisual(furnace, scoreMap, mediumMeta) {
+    const group = new THREE.Group();
+    group.name = 'atmosphereSurfaceReactionLayer';
+    if (!isCarbonAtmosphere(mediumMeta.key)) return group;
+
+    const entries = [...scoreMap.values()].sort((a, b) => b.score - a.score).slice(0, 80);
+    entries.forEach(entry => {
+        const item = entry.item;
+        if (!item) return;
+        const score = clamp01(entry.score || 0);
+        const layerColor = getAtmosphereCoverageColor(Math.max(0.55, score), mediumMeta.key);
+        const pad = 4 + score * 8;
+        const geo = new THREE.BoxGeometry((item.w || 1) + pad, (item.h || 1) + pad, (item.d || 1) + pad);
+        const mat = new THREE.MeshBasicMaterial({
+            color: layerColor,
+            transparent: true,
+            opacity: 0.045 + score * 0.085,
+            side: THREE.BackSide,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending
+        });
+        const shell = new THREE.Mesh(geo, mat);
+        shell.position.copy(getItemCenterWorld(item, furnace));
+        shell.renderOrder = 31;
+        shell.userData = { isAtmosphereSurfaceLayer: true, itemId: item.id };
+        group.add(shell);
+
+        const edgeGeo = new THREE.EdgesGeometry(geo);
+        const edgeMat = new THREE.LineBasicMaterial({
+            color: mediumMeta.surfaceLayerColor || mediumMeta.colorHigh,
+            transparent: true,
+            opacity: 0.16 + score * 0.42,
+            depthWrite: false
+        });
+        const edge = new THREE.LineSegments(edgeGeo, edgeMat);
+        edge.position.copy(shell.position);
+        edge.renderOrder = 32;
+        edge.userData = { isAtmosphereSurfaceLayer: true, itemId: item.id };
+        group.add(edge);
+    });
+    return group;
+}
+
+function buildAtmosphereBoundaryVisual(furnace, mediumMeta) {
+    const group = new THREE.Group();
+    group.name = 'atmosphereCoverageBoundary';
+    const fw = Number(furnace.w || 600);
+    const fh = Number(furnace.h || 600);
+    const fd = Number(furnace.d || 600);
+    const y0 = THERMAL_BASE_Y;
+    const mat = new THREE.MeshBasicMaterial({
+        color: mediumMeta.colorHigh,
+        transparent: true,
+        opacity: 0.055,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+    });
+    const planes = [
+        { geo: new THREE.PlaneGeometry(fd, fh), pos: [-fw / 2, y0 + fh / 2, 0], rot: [0, Math.PI / 2, 0] },
+        { geo: new THREE.PlaneGeometry(fd, fh), pos: [fw / 2, y0 + fh / 2, 0], rot: [0, Math.PI / 2, 0] },
+        { geo: new THREE.PlaneGeometry(fw, fh), pos: [0, y0 + fh / 2, -fd / 2], rot: [0, 0, 0] },
+        { geo: new THREE.PlaneGeometry(fw, fh), pos: [0, y0 + fh / 2, fd / 2], rot: [0, 0, 0] },
+        { geo: new THREE.PlaneGeometry(fw, fd), pos: [0, y0 + fh, 0], rot: [-Math.PI / 2, 0, 0] }
+    ];
+    planes.forEach(p => {
+        const mesh = new THREE.Mesh(p.geo, mat.clone());
+        mesh.position.set(p.pos[0], p.pos[1], p.pos[2]);
+        mesh.rotation.set(p.rot[0], p.rot[1], p.rot[2]);
+        mesh.renderOrder = 8;
+        group.add(mesh);
+    });
+    return group;
+}
+
+export function renderAtmosphereCoverageSimulation(options = {}) {
+    const furnace = getCurrentThermalFurnace();
+    if (!furnace) return null;
+
+    clearThermalGroupChildren();
+    restoreThermalItemMaterials();
+    setThermalSceneTheme(true, 'atmosphere');
+
+    const mediumMeta = getAtmosphereMediumMeta(options.mediumType || thermalSimRuntime.selectedAtmosphereMediumType || 'nitriding');
+    if (scene && mediumMeta.backgroundColor) {
+        scene.background = new THREE.Color(mediumMeta.backgroundColor);
+    }
+    const { scores } = calculateAtmosphereCoverageScores(furnace, mediumMeta.key);
+    const group = ensureThermalSimulationGroup();
+    const boundary = buildAtmosphereBoundaryVisual(furnace, mediumMeta);
+    const fog = buildAtmosphereFogField(furnace, scores, mediumMeta);
+    const surfaceLayer = buildAtmosphereSurfaceLayerVisual(furnace, scores, mediumMeta);
+    const risks = buildAtmosphereRiskMarkers(furnace, scores);
+    const ringBoundary = buildRingThermalBoundary(furnace);
+
+    group.add(boundary);
+    group.add(fog);
+    group.add(surfaceLayer);
+    group.add(risks);
+    if (ringBoundary) group.add(ringBoundary);
+    group.visible = true;
+
+    applyAtmosphereTintToItems(furnace, scores, mediumMeta);
+
+    thermalSimRuntime.visible = true;
+    thermalSimRuntime.activeMode = 'atmosphere';
+    thermalSimRuntime.isPlaying = false;
+    thermalSimRuntime.paused = false;
+    thermalSimRuntime.progress = 0;
+    thermalSimRuntime.pointCloud = fog;
+    thermalSimRuntime.sourceGroup = boundary;
+    thermalSimRuntime.riskGroup = risks;
+    thermalSimRuntime.atmosphereScores = scores;
+    thermalSimRuntime.selectedAtmosphereMediumType = mediumMeta.key;
+    thermalSimRuntime.selectedRadiationItemId = null;
+    thermalSimRuntime.selectedRadiationEntry = null;
+    thermalSimRuntime.selectedRadiationBatch = null;
+    thermalSimRuntime.selectedRadiationSection = null;
+    thermalSimRuntime.metrics = calculateAtmosphereCoverageMetrics(furnace, scores, mediumMeta);
+    return thermalSimRuntime.metrics;
+}
+
+export function setAtmosphereMediumType(mediumType = 'nitriding') {
+    const meta = getAtmosphereMediumMeta(mediumType);
+    thermalSimRuntime.selectedAtmosphereMediumType = meta.key;
+    return renderAtmosphereCoverageSimulation({ mediumType: meta.key });
+}
+
+export function getAtmosphereCoverageRuntime() {
+    const meta = getAtmosphereMediumMeta(thermalSimRuntime.selectedAtmosphereMediumType || 'nitriding');
+    return {
+        visible: thermalSimRuntime.visible && thermalSimRuntime.activeMode === 'atmosphere',
+        metrics: thermalSimRuntime.activeMode === 'atmosphere' ? thermalSimRuntime.metrics : null,
+        scores: thermalSimRuntime.atmosphereScores,
+        mediumType: meta.key,
+        mediumMeta: meta,
+        progress: thermalSimRuntime.activeMode === 'atmosphere' ? thermalSimRuntime.progress : 0
+    };
+}
+
 function normalizeRadiationText(value) {
     return String(value || '').trim().toLowerCase();
 }
@@ -3030,23 +4225,35 @@ export function getRadiationExposureRuntime() {
     };
 }
 
-export function renderVacuumQuenchThermalSimulation(progress = 0.12) {
+export function renderVacuumQuenchThermalSimulation(progress = 0.12, options = {}) {
     const furnace = getCurrentThermalFurnace();
     if (!furnace) return null;
 
     clearThermalGroupChildren();
     restoreThermalItemMaterials();
     const safeProgress = clamp01(progress);
-    setThermalSceneTheme(true);
+    if (options.heatmapView) {
+        thermalSimRuntime.selectedThermalHeatmapView = normalizeThermalHeatmapView(options.heatmapView);
+    }
+    if (options.heatmapDisplayMode) {
+        thermalSimRuntime.selectedThermalDisplayMode = normalizeThermalDisplayMode(options.heatmapDisplayMode);
+    }
+    if (options.heatmapVerticalAxis) {
+        thermalSimRuntime.selectedThermalVerticalAxis = normalizeThermalVerticalAxis(options.heatmapVerticalAxis);
+    }
+    if (options.heatmapSectionOffset != null) {
+        thermalSimRuntime.selectedThermalSectionOffset = clampThermalSectionOffset(furnace, options.heatmapSectionOffset, thermalSimRuntime.selectedThermalVerticalAxis || 'z');
+    } else {
+        thermalSimRuntime.selectedThermalSectionOffset = clampThermalSectionOffset(furnace, thermalSimRuntime.selectedThermalSectionOffset || 0, thermalSimRuntime.selectedThermalVerticalAxis || 'z');
+    }
+    setThermalSceneTheme(true, 'thermal');
 
     const group = ensureThermalSimulationGroup();
-    const cloud = buildThermalPointCloud(furnace, safeProgress);
-    const rays = buildRadiationRays(furnace);
+    const heatmap = buildThermalHeatmapField(furnace, safeProgress, thermalSimRuntime.selectedThermalHeatmapView || 'middle');
     const riskMarkers = buildRiskMarkers(furnace);
     const ringBoundary = buildRingThermalBoundary(furnace);
 
-    group.add(cloud);
-    group.add(rays);
+    group.add(heatmap);
     group.add(riskMarkers);
     if (ringBoundary) group.add(ringBoundary);
     group.visible = true;
@@ -3054,8 +4261,9 @@ export function renderVacuumQuenchThermalSimulation(progress = 0.12) {
     thermalSimRuntime.visible = true;
     thermalSimRuntime.activeMode = 'thermal';
     thermalSimRuntime.progress = safeProgress;
-    thermalSimRuntime.pointCloud = cloud;
-    thermalSimRuntime.rayGroup = rays;
+    thermalSimRuntime.pointCloud = null;
+    thermalSimRuntime.heatmapGroup = heatmap;
+    thermalSimRuntime.rayGroup = null;
     thermalSimRuntime.riskGroup = riskMarkers;
     thermalSimRuntime.metrics = calculateThermalMetrics(furnace, safeProgress);
     applyThermalTintToItems(furnace, safeProgress);
@@ -3099,15 +4307,75 @@ export function setVacuumQuenchThermalProgress(progress) {
     thermalSimRuntime.isPlaying = false;
     thermalSimRuntime.paused = true;
     const p = clamp01(progress);
-    if (!thermalSimRuntime.visible || !thermalSimRuntime.pointCloud || thermalSimRuntime.activeMode !== 'thermal') {
+    if (!thermalSimRuntime.visible || !thermalSimRuntime.heatmapGroup || thermalSimRuntime.activeMode !== 'thermal') {
         return renderVacuumQuenchThermalSimulation(p);
     }
     thermalSimRuntime.progress = p;
-    updateThermalPointCloud(p);
+    updateThermalHeatmapField(furnace, p);
     applyThermalTintToItems(furnace, p);
     thermalSimRuntime.metrics = calculateThermalMetrics(furnace, p);
     if (thermalSimRuntime.onUpdate) thermalSimRuntime.onUpdate(thermalSimRuntime.metrics);
     return thermalSimRuntime.metrics;
+}
+
+export function setThermalHeatmapDisplayMode(mode = 'balanced') {
+    const furnace = getCurrentThermalFurnace();
+    thermalSimRuntime.selectedThermalDisplayMode = normalizeThermalDisplayMode(mode);
+    if (!furnace || thermalSimRuntime.activeMode !== 'thermal') {
+        return thermalSimRuntime.metrics || null;
+    }
+    return renderVacuumQuenchThermalSimulation(thermalSimRuntime.progress || 0.18, {
+        heatmapView: thermalSimRuntime.selectedThermalHeatmapView || 'middle',
+        heatmapDisplayMode: thermalSimRuntime.selectedThermalDisplayMode
+    });
+}
+
+export function setThermalHeatmapView(viewKey = 'middle') {
+    const furnace = getCurrentThermalFurnace();
+    thermalSimRuntime.selectedThermalHeatmapView = normalizeThermalHeatmapView(viewKey);
+    if (!furnace || thermalSimRuntime.activeMode !== 'thermal') {
+        return thermalSimRuntime.metrics || null;
+    }
+    return renderVacuumQuenchThermalSimulation(thermalSimRuntime.progress || 0.18, {
+        heatmapView: thermalSimRuntime.selectedThermalHeatmapView
+    });
+}
+
+export function setThermalHeatmapVerticalAxis(axis = 'z') {
+    const furnace = getCurrentThermalFurnace();
+    thermalSimRuntime.selectedThermalVerticalAxis = normalizeThermalVerticalAxis(axis);
+    if (furnace) {
+        thermalSimRuntime.selectedThermalSectionOffset = clampThermalSectionOffset(furnace, thermalSimRuntime.selectedThermalSectionOffset || 0, thermalSimRuntime.selectedThermalVerticalAxis);
+    }
+    if (!furnace || thermalSimRuntime.activeMode !== 'thermal') {
+        return thermalSimRuntime.metrics || null;
+    }
+    return renderVacuumQuenchThermalSimulation(thermalSimRuntime.progress || 0.18, {
+        heatmapView: 'vertical',
+        heatmapVerticalAxis: thermalSimRuntime.selectedThermalVerticalAxis,
+        heatmapSectionOffset: thermalSimRuntime.selectedThermalSectionOffset
+    });
+}
+
+export function setThermalHeatmapSectionOffset(offset = 0) {
+    const furnace = getCurrentThermalFurnace();
+    if (furnace) {
+        thermalSimRuntime.selectedThermalSectionOffset = clampThermalSectionOffset(furnace, offset, thermalSimRuntime.selectedThermalVerticalAxis || 'z');
+    } else {
+        thermalSimRuntime.selectedThermalSectionOffset = Number(offset) || 0;
+    }
+    if (!furnace || thermalSimRuntime.activeMode !== 'thermal') {
+        return thermalSimRuntime.metrics || null;
+    }
+    return renderVacuumQuenchThermalSimulation(thermalSimRuntime.progress || 0.18, {
+        heatmapView: 'vertical',
+        heatmapVerticalAxis: thermalSimRuntime.selectedThermalVerticalAxis || 'z',
+        heatmapSectionOffset: thermalSimRuntime.selectedThermalSectionOffset
+    });
+}
+
+export function resetThermalHeatmapSectionOffset() {
+    return setThermalHeatmapSectionOffset(0);
 }
 
 export function getVacuumQuenchThermalRuntime() {
@@ -3118,7 +4386,11 @@ export function getVacuumQuenchThermalRuntime() {
         paused: thermalSimRuntime.paused,
         progress: thermalSimRuntime.progress,
         durationMs: thermalSimRuntime.durationMs,
-        metrics: thermalSimRuntime.metrics
+        metrics: thermalSimRuntime.metrics,
+        heatmapView: thermalSimRuntime.selectedThermalHeatmapView || 'middle',
+        heatmapDisplayMode: thermalSimRuntime.selectedThermalDisplayMode || 'balanced',
+        heatmapVerticalAxis: thermalSimRuntime.selectedThermalVerticalAxis || 'z',
+        heatmapSectionOffset: thermalSimRuntime.selectedThermalSectionOffset || 0
     };
 }
 
@@ -3141,9 +4413,9 @@ function updateThermalSimulationFrame(now) {
         const elapsed = now - thermalSimRuntime.startedAt;
         const progress = clamp01(elapsed / thermalSimRuntime.durationMs);
         thermalSimRuntime.progress = progress;
-        updateThermalPointCloud(progress);
         const furnace = getCurrentThermalFurnace();
         if (furnace) {
+            updateThermalHeatmapField(furnace, progress);
             thermalSimRuntime.metrics = calculateThermalMetrics(furnace, progress);
             applyThermalTintToItems(furnace, progress);
         }
@@ -4555,6 +5827,8 @@ export function renderSingleFurnace(index, filterMaterialName) {
             renderRadiationExposureSimulation();
         } else if (thermalSimRuntime.activeMode === 'airflow') {
             renderAirflowCoolingSimulation({ directionKeys: thermalSimRuntime.selectedAirflowDirections || thermalSimRuntime.selectedAirflowDirection || 'z+', keepPlaying: thermalSimRuntime.isPlaying && !thermalSimRuntime.paused });
+        } else if (thermalSimRuntime.activeMode === 'atmosphere') {
+            renderAtmosphereCoverageSimulation({ mediumType: thermalSimRuntime.selectedAtmosphereMediumType || 'nitriding' });
         } else {
             renderVacuumQuenchThermalSimulation(thermalSimRuntime.progress || 0.12);
         }
