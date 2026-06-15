@@ -127,6 +127,8 @@ import {
     renderRadiationExposureSimulation,
     getRadiationExposureRuntime,
     selectRadiationExposureItem,
+    selectRadiationExposureBatch,
+    selectLowestRadiationExposureItemInCurrentBatch,
     selectRadiationExposureItemAtClientPoint,
     clearRadiationExposureSelection,
     clearThermalSimulationLayer,
@@ -2121,73 +2123,141 @@ function restartThermalWithCurrentSpeedIfPlaying() {
 }
 
 
-let radiationPickPointerDown = null;
-
-function renderSelectedRadiationMetrics(metrics) {
-    if (!metrics) return;
-    renderThermalSimulationPanel(metrics, 'radiation');
-    syncThermalControlState(metrics);
-    activateRightPanelTab('thermal');
+function isRadiationModeActive() {
+    const runtime = typeof getRadiationExposureRuntime === 'function' ? getRadiationExposureRuntime() : null;
+    const activeModeBtn = document.querySelector('.process-sim-mode-btn.active');
+    const activeMode = activeModeBtn ? activeModeBtn.getAttribute('data-process-sim-mode') : '';
+    return processSimulationMode === 'radiation' ||
+        !!runtime?.visible ||
+        document.body.classList.contains('radiation-pick-mode') ||
+        activeMode === 'radiation';
 }
 
-function selectRadiationItemFromMaterialCard(card) {
-    if (!card || processSimulationMode !== 'radiation') return;
+function ensureRadiationOverviewVisible() {
+    processSimulationMode = 'radiation';
+    document.body.classList.add('radiation-pick-mode');
     const runtime = typeof getRadiationExposureRuntime === 'function' ? getRadiationExposureRuntime() : null;
-    const scoreMap = runtime?.scores;
-    if (!runtime?.visible || !scoreMap || typeof scoreMap.values !== 'function') return;
+    if (!runtime?.visible) {
+        return renderCurrentRadiationSimulation(false);
+    }
+    return runtime.metrics || null;
+}
 
-    const cardName = card.querySelector('.m-name')?.textContent?.trim();
+let radiationPickPointerDown = null;
+
+// function renderSelectedRadiationMetrics(metrics) {
+//     if (!metrics) return;
+
+//     // 关键修复：必须先切到右侧热场 Tab，再渲染选中态数据。
+//     // activateRightPanelTab('thermal') 会触发 tab click，原逻辑会重绘一次默认面板；
+//     // 如果先 renderThermalSimulationPanel(metrics)，随后再 activateRightPanelTab，
+//     // 选中/批次诊断会被默认面板覆盖。
+//     processSimulationMode = 'radiation';
+//     document.body.classList.add('radiation-pick-mode');
+//     activateRightPanelTab('thermal');
+
+//     renderThermalSimulationPanel(metrics, 'radiation');
+//     syncThermalControlState(metrics);
+// }
+function renderSelectedRadiationMetrics(metrics) {
+    if (!metrics) return;
+
+    processSimulationMode = 'radiation';
+    document.body.classList.add('radiation-pick-mode');
+    activateRightPanelTab('thermal');
+
+    console.log('[radiation diagnosis render]', {
+        selectedItem: metrics.selectedItem,
+        selectedBatch: metrics.selectedBatch,
+        mode: metrics.mode
+    });
+
+    renderThermalSimulationPanel(metrics, 'radiation');
+    syncThermalControlState(metrics);
+}
+
+
+function selectRadiationBatchFromMaterialCard(card) {
+    if (!card || !isRadiationModeActive()) return;
+
+    ensureRadiationOverviewVisible();
+
+    const cardName = card.querySelector('.m-name')?.textContent?.trim() || '';
     const itemCode = card.getAttribute('data-item-code') || '';
     const showName = card.getAttribute('data-show-name') || '';
     if (!cardName && !itemCode && !showName) return;
 
-    const matched = [...scoreMap.values()].filter(entry => {
-        const item = entry.item || {};
-        return item.name === cardName ||
-            item.showName === showName ||
-            item.itemCode === itemCode ||
-            (showName && item.name === showName) ||
-            (cardName && item.showName === cardName);
-    }).sort((a, b) => (a.score || 0) - (b.score || 0));
-
-    // 同一个批次可能被拆成多个 3D 工件实例，默认选择辐射暴露最低的一件，演示价值最高。
-    const target = matched[0];
-    if (!target?.item?.id) return;
-
-    const metrics = selectRadiationExposureItem(target.item.id);
-    renderSelectedRadiationMetrics(metrics);
+    // 左侧卡片代表“物料批次/类型”，不是某一个 3D 实例。
+    // 因此这里进入批次辐射诊断；需要看单件路径时再点击 3D 工件或“定位最低暴露件”。
+    processSimulationMode = 'radiation';
+    document.body.classList.add('radiation-pick-mode');
+    const metrics = selectRadiationExposureBatch({
+        name: cardName,
+        itemCode,
+        showName
+    });
+    renderSelectedRadiationMetrics(metrics || getRadiationExposureRuntime()?.metrics || null);
 }
 
 function bindRadiationMaterialCardSelection() {
-    const container = document.getElementById('material-cards-container');
-    if (!container || container.dataset.radiationPickBound === '1') return;
-    container.dataset.radiationPickBound = '1';
+    // 用 document 级事件委托，而不是只绑定当前 material-cards-container。
+    // 原因：左侧物料卡片会被清空、重新生成、导入、筛选，容器/卡片生命周期不稳定。
+    if (document.body.dataset.radiationMaterialPickBound === '1') return;
+    document.body.dataset.radiationMaterialPickBound = '1';
 
-    container.addEventListener('click', (event) => {
-        if (processSimulationMode !== 'radiation') return;
-        const card = event.target.closest('.material-card');
-        if (!card) return;
-        // 让原有 selectMaterialCard 先执行完，再根据选中批次定位到 3D 中风险最高的实例。
-        setTimeout(() => selectRadiationItemFromMaterialCard(card), 0);
-    });
+    document.addEventListener('click', (event) => {
+        const card = event.target.closest('#material-cards-container .material-card');
+        if (!card || !isRadiationModeActive()) return;
+
+        // 让原有 selectMaterialCard / showMaterialDetail 先执行完，避免和左侧详情面板抢状态。
+        setTimeout(() => selectRadiationBatchFromMaterialCard(card), 0);
+    }, true);
+}
+
+function bindRadiationDiagnosisActions() {
+    // 同样使用 document 事件委托，避免 thermal-simulation-panel 重绘后按钮丢失监听。
+    if (document.body.dataset.radiationDiagnosisBound === '1') return;
+    document.body.dataset.radiationDiagnosisBound = '1';
+
+    document.addEventListener('click', (event) => {
+        const locateBtn = event.target.closest('[data-action="radiation-locate-worst"]');
+        if (!locateBtn) return;
+        event.preventDefault();
+        event.stopPropagation();
+        processSimulationMode = 'radiation';
+        document.body.classList.add('radiation-pick-mode');
+        ensureRadiationOverviewVisible();
+        const metrics = selectLowestRadiationExposureItemInCurrentBatch();
+        renderSelectedRadiationMetrics(metrics || getRadiationExposureRuntime()?.metrics || null);
+    }, true);
+}
+
+function isRadiationCanvasEventTarget(event) {
+    const container = document.getElementById('canvas-container');
+    if (!container || !event.target || !container.contains(event.target)) return false;
+    // HUD、底部 dock、空态等 UI 不触发 3D 拾取。
+    if (event.target.closest('#current-tooling-hud, #empty-state, #furnace-thumb-bar, #three-dock, .view-dock, .current-tooling-hud')) {
+        return false;
+    }
+    return true;
 }
 
 function bindRadiationItemSelection() {
-    const canvas = document.querySelector('#canvas-container canvas');
-    if (!canvas || canvas.dataset.radiationPickBound === '1') return;
-    canvas.dataset.radiationPickBound = '1';
+    const container = document.getElementById('canvas-container');
+    if (!container || container.dataset.radiationPickBound === '1') return;
+    container.dataset.radiationPickBound = '1';
 
-    canvas.addEventListener('pointerdown', (event) => {
-        if (processSimulationMode !== 'radiation') return;
+    container.addEventListener('pointerdown', (event) => {
+        if (!isRadiationModeActive() || !isRadiationCanvasEventTarget(event)) return;
         radiationPickPointerDown = {
             x: event.clientX,
             y: event.clientY,
             t: performance.now()
         };
-    });
+    }, true);
 
-    canvas.addEventListener('pointerup', (event) => {
-        if (processSimulationMode !== 'radiation') return;
+    container.addEventListener('pointerup', (event) => {
+        if (!isRadiationModeActive() || !isRadiationCanvasEventTarget(event)) return;
         if (!radiationPickPointerDown) return;
 
         const dx = Math.abs(event.clientX - radiationPickPointerDown.x);
@@ -2198,9 +2268,25 @@ function bindRadiationItemSelection() {
         // OrbitControls 拖拽旋转时不触发选择。
         if (dx > 6 || dy > 6 || dt > 700) return;
 
+
+        processSimulationMode = 'radiation';
+        document.body.classList.add('radiation-pick-mode');
+        ensureRadiationOverviewVisible();
+
         const metrics = selectRadiationExposureItemAtClientPoint(event.clientX, event.clientY);
-        renderSelectedRadiationMetrics(metrics);
-    });
+
+        // 关键：3D 单件点击不能 fallback 到 runtime.metrics。
+        // 因为 runtime.metrics 可能还是上一次的批次诊断，
+        // 会导致点击 3D 工件失败时，右侧继续显示批次诊断，看起来像“单件诊断没触发”。
+        if (metrics && metrics.selectedItem) {
+            renderSelectedRadiationMetrics(metrics);
+        }
+        // processSimulationMode = 'radiation';
+        // document.body.classList.add('radiation-pick-mode');
+        // ensureRadiationOverviewVisible();
+        // const metrics = selectRadiationExposureItemAtClientPoint(event.clientX, event.clientY);
+        // renderSelectedRadiationMetrics(metrics || getRadiationExposureRuntime()?.metrics || null);
+    }, true);
 }
 
 function clearSimulationPlayingState() {
@@ -2558,6 +2644,7 @@ function init() {
     initThree();
     bindRadiationItemSelection();
     bindRadiationMaterialCardSelection();
+    bindRadiationDiagnosisActions();
     updateTopSummary();
     hideExplodeBOMButtons();
     initLeftPanelTabs();

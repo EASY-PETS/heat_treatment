@@ -930,9 +930,13 @@ export function renderThermalSimulationPanel(metrics = null, mode = null) {
         const worstItemName = metrics?.worstItemName || '-';
         const suggestion = metrics?.suggestion || '点击“辐射暴露”后，系统会用少量有效/遮挡射线解释工件辐射可达性。';
         const selected = metrics?.selectedItem || null;
+        const selectedBatch = metrics?.selectedBatch || null;
         const blockerList = selected?.blockers?.length
             ? selected.blockers.map(b => `<div class="thermal-risk-row"><span>${escapeSimHtml(b.name)}</span><strong>${b.count} 条路径</strong></div>`).join('')
             : '<div class="thermal-mini-note">暂无明确遮挡来源。</div>';
+        const batchBlockerList = selectedBatch?.blockers?.length
+            ? selectedBatch.blockers.map(b => `<div class="thermal-risk-row"><span>${escapeSimHtml(b.name)}</span><strong>${b.count} 条路径</strong></div>`).join('')
+            : '<div class="thermal-mini-note">该批次暂无明确集中遮挡来源。</div>';
         const selectedHtml = selected ? `
             <div class="thermal-risk-card radiation-card radiation-selected-card">
                 <div class="thermal-stage-title">单件辐射诊断</div>
@@ -948,12 +952,28 @@ export function renderThermalSimulationPanel(metrics = null, mode = null) {
                 <div class="thermal-stage-title" style="margin-top:10px;">主要遮挡工件</div>
                 ${blockerList}
             </div>
+        ` : (selectedBatch ? `
+            <div class="thermal-risk-card radiation-card radiation-selected-card">
+                <div class="thermal-stage-title">批次辐射诊断</div>
+                <div class="thermal-title">📦 ${escapeSimHtml(selectedBatch.name)}</div>
+                <div class="thermal-subtitle">共 ${selectedBatch.count} 件 · 风险 ${escapeSimHtml(selectedBatch.riskLevel)} · ${escapeSimHtml(selectedBatch.riskLocation || '-')}</div>
+                <div class="thermal-metric-grid">
+                    <div class="thermal-metric"><span>平均暴露</span><strong>${selectedBatch.avgScore}%</strong></div>
+                    <div class="thermal-metric"><span>最低暴露</span><strong>${selectedBatch.minScore}%</strong></div>
+                    <div class="thermal-metric"><span>风险实例</span><strong>${selectedBatch.highRiskCount} / ${selectedBatch.count} 件</strong></div>
+                    <div class="thermal-metric"><span>遮挡路径</span><strong>${selectedBatch.blockedRayCount}</strong></div>
+                </div>
+                <div class="thermal-mini-note strong-note">${escapeSimHtml(selectedBatch.suggestion)}</div>
+                <button class="plan-action-btn" type="button" data-action="radiation-locate-worst" style="margin-top:10px;width:100%;">定位最低暴露件</button>
+                <div class="thermal-stage-title" style="margin-top:10px;">主要遮挡来源</div>
+                ${batchBlockerList}
+            </div>
         ` : `
             <div class="thermal-risk-card radiation-card radiation-selected-card">
-                <div class="thermal-stage-title">单件辐射诊断</div>
-                <div class="thermal-mini-note">点击 3D 中任意工件，可只显示该工件的辐射路径、遮挡来源和调整建议。</div>
+                <div class="thermal-stage-title">辐射诊断</div>
+                <div class="thermal-mini-note">点击 3D 中任意工件查看“单件辐射诊断”；点击左侧物料卡片查看“批次辐射诊断”。</div>
             </div>
-        `;
+        `);
 
         panel.innerHTML = `
             <div class="thermal-header-card compact radiation-card">
