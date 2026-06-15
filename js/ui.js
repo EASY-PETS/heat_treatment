@@ -65,13 +65,12 @@ export function getFurnaceDataFromCard(card) {
     const maxLayers = parseInt(card.getAttribute('data-max-layers')) || 5;
     const allowedProcesses = card.getAttribute('data-allowed-processes') || '';
     const placementMode = card.getAttribute('data-placement-mode') || 'free';
-    const loadDirection = card.getAttribute('data-load-direction') || '前进前出';
 
     // 在 getFurnaceDataFromCard 函数末尾，return 语句的上方加上：
     const extrasStr = card.getAttribute('data-extras');
     const extras = extrasStr ? JSON.parse(extrasStr) : {};
 
-    return { fid, name, width: parseFloat(dims[0]) || 0, height: parseFloat(dims[1]) || 0, depth: parseFloat(dims[2]) || 0, maxWeight, count, plannedHeats, actualSpacing, basketType, toolingType, maxLayers, allowedProcesses, placementMode, loadDirection, extras };
+    return { fid, name, width: parseFloat(dims[0]) || 0, height: parseFloat(dims[1]) || 0, depth: parseFloat(dims[2]) || 0, maxWeight, count, plannedHeats, actualSpacing, basketType, toolingType, maxLayers, allowedProcesses, placementMode, extras };
 }
 
 export function getMaterialDataFromCard(card) {
@@ -128,9 +127,7 @@ export function createFurnaceCard(name, depth, width, height, maxWeight, count, 
     const ttConfig = furnaceTooling[tt] || furnaceTooling['standard-basket'];
     card.setAttribute('data-tooling-type', tt);
     card.setAttribute('data-max-layers', ttConfig.maxLayers);
-    // UI 上该卡片代表装载工装；内部仍复用 furnace 命名以兼容算法
-    card.setAttribute('data-allowed-processes', '');
-    card.setAttribute('data-load-direction', '前进前出');
+    card.setAttribute('data-allowed-processes', (ttConfig.allowedProcesses || []).join(','));
     card.setAttribute('data-placement-mode', ttConfig.placementMode);
     card.innerHTML =
     '<span class="f-drag-handle" draggable="true" title="拖拽排序">⠿</span>' +
@@ -138,59 +135,27 @@ export function createFurnaceCard(name, depth, width, height, maxWeight, count, 
     '<div class="f-card-name">' + name + '</div>' +
     '<div class="f-card-meta">' +
         '<span>📐 ' + width + '×' + height + '×' + depth + '</span>' +
-        '<span>📦 工装数量 ' + count + '</span>' +
+        '<span>📦 可用数量 ' + count + '</span>' +
         '<span>⚖ ' + maxWeight + 'kg</span>' +
     '</div>' +
-    '<div class="f-card-status">适用工艺：未配置 · 装载方向：前进前出</div>';
-    // card.addEventListener('click', (e) => { if (e.target.closest('[data-action="delete-furnace"]')) return; if (e.target.closest('.f-drag-handle')) return; selectFurnaceCard(cardId); showFurnaceDetail(cardId); });
-    card.addEventListener('click', (e) => { 
-            if (e.target.closest('[data-action="delete-furnace"]')) return; 
-            if (e.target.closest('.f-drag-handle')) return; 
-            
-            // 记录点击前的状态
-            const wasSelected = card.classList.contains('active'); 
-            // 执行选中/取消选中切换
-            selectFurnaceCard(cardId); 
-            
-            if (!wasSelected) { 
-                // 原本未选中，现在选中了，展示详情
-                showFurnaceDetail(cardId); 
-            } else { 
-                // 原本已选中，现在取消选中了，隐藏详情并恢复默认提示
-                document.getElementById('fdp-placeholder').style.display = 'block'; 
-                document.getElementById('fdp-body').style.display = 'none'; 
-                document.getElementById('fdp-title').textContent = '📋 工装参数'; 
-            } 
-        });
+    '<div class="f-card-status">' + ttConfig.label + ' · 点击选择 · 再次点击取消</div>';
+    card.addEventListener('click', (e) => {
+        if (e.target.closest('[data-action="delete-furnace"]')) return;
+        if (e.target.closest('.f-drag-handle')) return;
+        if (e.target.closest('.furnace-inline-detail')) return;
+
+        const wasSelected = card.classList.contains('active');
+        selectFurnaceCard(cardId);
+
+        if (wasSelected) {
+            removeFurnaceInlineDetail(cardId);
+        } else {
+            showFurnaceDetail(cardId);
+        }
+    });
     setupFurnaceDrag(card);
-    (document.getElementById('furnace-cards-container') || document.getElementById('equipment-cards-container'))?.appendChild(card);
+    document.getElementById('furnace-cards-container').appendChild(card);
     return { cardId, furnaceCounter: newFC, name, depth, width, height, maxWeight, count, plannedHeats: 0, basketType: basketType || 'grid', toolingType: tt };
-}
-
-function collapseMaterialDetailPanel() {
-    const panel = document.getElementById('material-detail-panel');
-    const placeholder = document.getElementById('mdp-placeholder');
-    const body = document.getElementById('mdp-body');
-    const title = document.getElementById('mdp-title');
-    const icon = document.getElementById('mdp-toggle-icon');
-
-    if (placeholder) placeholder.style.display = 'block';
-    if (body) body.style.display = 'none';
-    if (title) title.textContent = '📋 工件详情';
-    if (panel) panel.classList.add('collapsed');
-    if (icon) icon.textContent = '▼';
-
-    setMdpCollapsed(true);
-}
-
-function expandMaterialDetailPanel() {
-    const panel = document.getElementById('material-detail-panel');
-    const icon = document.getElementById('mdp-toggle-icon');
-
-    if (panel) panel.classList.remove('collapsed');
-    if (icon) icon.textContent = '▲';
-
-    setMdpCollapsed(false);
 }
 
 // export function selectFurnaceCard(cardId) { document.querySelectorAll('.furnace-card').forEach(c => c.classList.remove('active')); const card = document.getElementById(cardId); if (card) { card.classList.add('active'); setSelectedFurnaceCardId(cardId); } }
@@ -210,79 +175,144 @@ export function selectFurnaceCard(cardId) {
     } 
 }
 
-export function showFurnaceDetail(cardId) {
-    const card = document.getElementById(cardId); if (!card) return;
-    const d = getFurnaceDataFromCard(card);
-    document.getElementById('fdp-title').textContent = '📋 工装：' + d.name;
-    document.getElementById('fdp-placeholder').style.display = 'none';
-    const body = document.getElementById('fdp-body'); body.style.display = 'block';
+function removeFurnaceInlineDetail(cardId) {
+    document.querySelectorAll('.furnace-inline-detail').forEach(drawer => {
+        if (!cardId || drawer.getAttribute('data-card-id') === cardId) {
+            drawer.remove();
+        }
+    });
 
-    const processValue = d.allowedProcesses || '';
-    const directionValue = d.loadDirection || '前进前出';
+    const panel = document.getElementById('furnace-detail-panel');
+    const placeholder = document.getElementById('fdp-placeholder');
+    const body = document.getElementById('fdp-body');
+    const title = document.getElementById('fdp-title');
+    const icon = document.getElementById('fdp-toggle-icon');
+
+    if (panel) panel.classList.add('collapsed');
+    if (placeholder) placeholder.style.display = 'block';
+    if (body) {
+        body.style.display = 'none';
+        body.innerHTML = '';
+    }
+    if (title) title.textContent = '📋 工装参数';
+    if (icon) icon.textContent = '▼';
+    setFdpCollapsed(true);
+}
+
+function buildFurnaceDetailFormHtml(d) {
+    let labelW = '宽度 X (mm)';
+    let labelD = '纵深 Z (mm)';
+    if (d.toolingType === 'ring-tooling') {
+        labelW = '外径 (mm)';
+        labelD = '等效外径 (mm)';
+    }
+
+    const ex = d.extras || {};
 
     let html =
         '<div class="fdp-row">' +
             '<div class="fdp-field">' +
-                '<label>工装名称</label>' +
+                '<label>名称</label>' +
                 '<input type="text" id="fdp-name" value="' + d.name + '">' +
-            '</div>' +
-            '<div class="fdp-field">' +
-                '<label>工装类型</label>' +
-                '<input type="text" id="fdp-equipment-type" value="' + (card.getAttribute('data-equipment-type') || '标准料框') + '" placeholder="如：标准料框、料盘、网篮、环形工装">' +
             '</div>' +
         '</div>' +
 
         '<div class="fdp-row">' +
             '<div class="fdp-field">' +
-                '<label>工装宽度 X (mm)</label>' +
+                '<label>' + labelW + '</label>' +
                 '<input type="number" id="fdp-width" value="' + d.width + '">' +
             '</div>' +
             '<div class="fdp-field">' +
-                '<label>工装高度 Y (mm)</label>' +
+                '<label>高度 Y (mm)</label>' +
                 '<input type="number" id="fdp-height" value="' + d.height + '">' +
             '</div>' +
             '<div class="fdp-field">' +
-                '<label>工装纵深 Z (mm)</label>' +
+                '<label>' + labelD + '</label>' +
                 '<input type="number" id="fdp-depth" value="' + d.depth + '">' +
             '</div>' +
         '</div>' +
 
         '<div class="fdp-row">' +
             '<div class="fdp-field">' +
-                '<label>工装承重上限 (kg)</label>' +
+                '<label>承重上限 (kg)</label>' +
                 '<input type="number" id="fdp-weight" value="' + d.maxWeight + '">' +
             '</div>' +
             '<div class="fdp-field">' +
-                '<label>工装数量</label>' +
+                '<label>可用数量</label>' +
                 '<input type="number" id="fdp-count" value="' + d.count + '" min="1">' +
             '</div>' +
         '</div>' +
 
         '<div class="fdp-row">' +
-            '<div class="fdp-field">' +
-                '<label>适用加工工艺</label>' +
-                '<input type="text" id="fdp-processes" value="' + processValue + '" placeholder="如：渗碳淬火、氮化、真空淬火">' +
-            '</div>' +
+            '<div class="fdp-field"><label>安全间距 (mm) <span style="color:#666;font-size:9px;">不填=5mm</span></label><input type="number" id="fdp-spacing" value="' + (d.actualSpacing != null ? d.actualSpacing : '') + '" placeholder="默认 5mm"></div>' +
+        '</div>';
+
+    html += '<div class="fid-extra-section">';
+    html += '<div class="fid-extra-title">🛠️ 该工装专属结构参数</div>';
+
+    if (d.toolingType === 'special-jig') {
+        html += '<div class="fdp-row"><div class="fdp-field"><label>卡槽数量 (个)</label><input type="number" id="fdp-ex-slotCount" value="' + (ex.slotCount || 8) + '"></div><div class="fdp-field"><label>卡槽间距 (mm)</label><input type="number" id="fdp-ex-slotPitch" value="' + (ex.slotPitch || 100) + '"></div></div>';
+    } else if (d.toolingType === 'material-tray') {
+        html += '<div class="fdp-row"><div class="fdp-field"><label>盘身侧边高 (mm)</label><input type="number" id="fdp-ex-trayDepth" value="' + (ex.trayDepth || 50) + '"></div></div>';
+    } else if (d.toolingType === 'hanger') {
+        html += '<div class="fdp-row"><div class="fdp-field"><label>顶部挂梁数量 (根)</label><input type="number" id="fdp-ex-beamCount" value="' + (ex.beamCount || 2) + '"></div><div class="fdp-field"><label>挂梁挂钩高度 (mm)</label><input type="number" id="fdp-ex-beamHeight" value="' + (ex.beamHeight || (d.height - 30)) + '"></div></div>';
+    } else if (d.toolingType === 'ring-tooling') {
+        html += '<div class="fdp-row"><div class="fdp-field"><label>环形内径 (mm)</label><input type="number" id="fdp-ex-innerDia" value="' + (ex.innerDia || 200) + '"></div><div class="fdp-field"><label>圆盘层数 (层)</label><input type="number" id="fdp-ex-stationCount" value="' + (ex.stationCount || ex.ringCount || 3) + '"></div></div>';
+    } else {
+        html += '<div class="fid-muted">（此基础工装暂无需要调节的额外特征尺寸）</div>';
+    }
+
+    html += '</div>';
+    html += '<button class="fdp-save-btn" id="fdp-save-btn">💾 保存工装参数</button>';
+    return html;
+}
+
+export function showFurnaceDetail(cardId) {
+    const card = document.getElementById(cardId);
+    if (!card) return;
+
+    const d = getFurnaceDataFromCard(card);
+    removeFurnaceInlineDetail();
+
+    const drawer = document.createElement('div');
+    drawer.className = 'furnace-inline-detail';
+    drawer.setAttribute('data-card-id', cardId);
+    drawer.innerHTML =
+        '<div class="fid-header">' +
+            '<div class="fid-title">📋 ' + d.name + '</div>' +
+            '<button class="fid-close" type="button" title="收起详情">收起 ▲</button>' +
         '</div>' +
+        '<div class="fdp-body">' + buildFurnaceDetailFormHtml(d) + '</div>';
 
-        '<div class="fdp-row">' +
-            '<div class="fdp-field">' +
-                '<label>装载方向</label>' +
-                '<select id="fdp-load-direction">' +
-                    '<option value="前进前出" ' + (directionValue === '前进前出' ? 'selected' : '') + '>前进前出</option>' +
-                    '<option value="前进后出" ' + (directionValue === '前进后出' ? 'selected' : '') + '>前进后出</option>' +
-                    '<option value="吊装入炉" ' + (directionValue === '吊装入炉' ? 'selected' : '') + '>吊装入炉</option>' +
-                    '<option value="顶部装入" ' + (directionValue === '顶部装入' ? 'selected' : '') + '>顶部装入</option>' +
-                '</select>' +
-            '</div>' +
-        '</div>' +
+    card.insertAdjacentElement('afterend', drawer);
 
-        '<div class="fdp-device-note">当前版本不设计真实炉膛，仅使用该工装的尺寸作为装载空间；真实车间、设备、炉膛关系后续在“生产车间”中链接。</div>' +
-        '<button class="fdp-save-btn" id="fdp-save-btn">💾 保存工装参数</button>';
+    const closeBtn = drawer.querySelector('.fid-close');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const activeCard = document.getElementById(cardId);
+            if (activeCard && activeCard.classList.contains('active')) {
+                activeCard.classList.remove('active');
+                setSelectedFurnaceCardId(null);
+            }
+            removeFurnaceInlineDetail(cardId);
+        });
+    }
 
-    body.innerHTML = html;
-    document.getElementById('fdp-save-btn').addEventListener('click', () => { saveFurnaceDetail(cardId); });
-    if (fdpCollapsed) { setFdpCollapsed(false); (document.getElementById('furnace-detail-panel') || document.getElementById('equipment-detail-panel'))?.classList.remove('collapsed'); document.getElementById('fdp-toggle-icon').textContent = '▲'; }
+    const saveBtn = drawer.querySelector('#fdp-save-btn');
+    if (saveBtn) saveBtn.addEventListener('click', () => saveFurnaceDetail(cardId));
+
+    if (d.toolingType === 'ring-tooling') {
+        const wInput = drawer.querySelector('#fdp-width');
+        const dInput = drawer.querySelector('#fdp-depth');
+        if (wInput && dInput) {
+            wInput.addEventListener('input', () => dInput.value = wInput.value);
+            dInput.addEventListener('input', () => wInput.value = dInput.value);
+        }
+    }
+
+    setFdpCollapsed(false);
+    drawer.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
 export function saveFurnaceDetail(cardId) {
@@ -293,32 +323,78 @@ export function saveFurnaceDetail(cardId) {
     const depth = parseFloat(document.getElementById('fdp-depth').value) || 0;
     const maxWeight = parseFloat(document.getElementById('fdp-weight').value) || 0;
     const count = parseInt(document.getElementById('fdp-count').value) || 1;
-    const equipmentType = document.getElementById('fdp-equipment-type')?.value.trim() || '标准料框';
-    const processes = document.getElementById('fdp-processes')?.value.trim() || '';
-    const loadDirection = document.getElementById('fdp-load-direction')?.value || '前进前出';
+    const plannedHeats = 0;
+    const spacingVal = document.getElementById('fdp-spacing').value;
+    const actualSpacing = spacingVal !== '' ? parseFloat(spacingVal) : 5;
 
-    card.setAttribute('data-equipment-type', equipmentType);
-    card.setAttribute('data-allowed-processes', processes);
-    card.setAttribute('data-load-direction', loadDirection);
+    // 删除原本在这里读取 fdp-tooling-type、fdp-max-layers、fdp-basket-type 等等赋值给 setAttribute 的几十行代码
+    // ----- 新增：根据不同工装类型保存其专属参数 -----
+    const tt = card.getAttribute('data-tooling-type') || 'standard-basket';
+    const extras = {};
+    if (tt === 'special-jig') {
+        const sc = document.getElementById('fdp-ex-slotCount');
+        const sp = document.getElementById('fdp-ex-slotPitch');
+        if (sc) extras.slotCount = parseInt(sc.value) || 8;
+        if (sp) extras.slotPitch = parseFloat(sp.value) || 100;
+    } else if (tt === 'material-tray') {
+        const td = document.getElementById('fdp-ex-trayDepth');
+        if (td) extras.trayDepth = parseFloat(td.value) || 50;
+    } else if (tt === 'hanger') {
+        const bc = document.getElementById('fdp-ex-beamCount');
+        const bh = document.getElementById('fdp-ex-beamHeight');
+        if (bc) extras.beamCount = parseInt(bc.value) || 2;
+        if (bh) extras.beamHeight = parseFloat(bh.value) || (height - 30);
+        } else if (tt === 'ring-tooling') {
+            const idia = document.getElementById('fdp-ex-innerDia');
+            const scnt = document.getElementById('fdp-ex-stationCount');
 
+            const innerDia = parseFloat(idia?.value) || 200;
+            const ringCount = parseInt(scnt?.value) || 3;
+
+            /**
+             * 环形工装参数说明：
+             * - innerDia：中心不可放料区域直径
+             * - innerRadius / centerVoidRadius：算法使用的中心避障半径
+             * - ringCount：上方圆盘层数量
+             * - rodDiameter：视觉中心立柱直径，不等于中心避障直径
+             * - useInternalShelves：强制算法使用环形工装内置圆盘层
+             */
+            extras.useInternalShelves = true;
+
+            extras.innerDia = innerDia;
+            extras.innerRadius = innerDia / 2;
+            extras.centerVoidRadius = innerDia / 2;
+
+            extras.stationCount = ringCount;
+            extras.ringCount = ringCount;
+
+            extras.rodDiameter = 40;
+        }
+    // 将打包好的专属参数转为 JSON 字符串存在 HTML 属性里
+    card.setAttribute('data-extras', JSON.stringify(extras));
+    // ----------------------------------------------
+    
     card.querySelector('.f-card-name').textContent = name;
     card.querySelector('.f-card-meta').innerHTML =
     '<span>📐 ' + width + '×' + height + '×' + depth + '</span>' +
-    '<span>📦 工装数量 ' + count + '</span>' +
+    '<span>📦 可用数量 ' + count + '</span>' +
     '<span>⚖ ' + maxWeight + 'kg</span>';
 
-    const processLabel = processes || '未配置';
-    card.querySelector('.f-card-status').textContent = '适用工艺：' + processLabel + ' · 装载方向：' + loadDirection;
-
-    document.getElementById('fdp-title').textContent = '📋 工装：' + name;
-    updateTopSummary();
-    const btn = document.getElementById('fdp-save-btn');
-    if (btn) { btn.textContent = '✅ 已保存'; setTimeout(() => { btn.textContent = '💾 保存工装参数'; }, 1500); }
+    // 卡片底部标签依然从原始的 data 属性读取（由添加工装时决定）
+    // const tt = card.getAttribute('data-tooling-type') || 'standard-basket';
+    const ttCfg = furnaceTooling[tt] || { label: '标准料框' };
+    card.querySelector('.f-card-status').textContent = ttCfg.label + ' · 点击选择 · 再次点击取消';
+    
+    if (actualSpacing !== null) card.setAttribute('data-spacing', actualSpacing); else card.removeAttribute('data-spacing');
+    const fdpTitle = document.getElementById('fdp-title'); if (fdpTitle) fdpTitle.textContent = '📋 ' + name; const drawerTitle = document.querySelector('.furnace-inline-detail[data-card-id="' + cardId + '"] .fid-title'); if (drawerTitle) drawerTitle.textContent = '📋 ' + name; updateTopSummary();
+    const btn = document.getElementById('fdp-save-btn'); if (btn) { btn.textContent = '✅ 已保存'; setTimeout(() => { btn.textContent = '💾 保存工装参数'; }, 1500); }
 }
 
 export function deleteFurnaceCard(fid) {
-    const card = document.getElementById('furnace-card-' + fid); if (card) card.remove();
-    if (selectedFurnaceCardId === 'furnace-card-' + fid) { setSelectedFurnaceCardId(null); document.getElementById('fdp-placeholder').style.display = 'block'; document.getElementById('fdp-body').style.display = 'none'; document.getElementById('fdp-title').textContent = '📋 工装参数'; }
+    const cardId = 'furnace-card-' + fid;
+    removeFurnaceInlineDetail(cardId);
+    const card = document.getElementById(cardId); if (card) card.remove();
+    if (selectedFurnaceCardId === cardId) { setSelectedFurnaceCardId(null); removeFurnaceInlineDetail(cardId); }
     updateTopSummary();
 }
 
@@ -328,10 +404,11 @@ function setupFurnaceDrag(card) {
     handle.addEventListener('dragstart', (e) => { dragSrcCard = card; card.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
     handle.addEventListener('dragend', () => { card.classList.remove('dragging'); document.querySelectorAll('.furnace-card').forEach(c => c.classList.remove('drag-over')); dragSrcCard = null; });
     card.addEventListener('dragover', (e) => { e.preventDefault(); if (dragSrcCard && dragSrcCard !== card) { document.querySelectorAll('.furnace-card').forEach(c => c.classList.remove('drag-over')); card.classList.add('drag-over'); } });
-    card.addEventListener('drop', (e) => { e.preventDefault(); if (dragSrcCard && dragSrcCard !== card) { const container = document.getElementById('furnace-cards-container') || document.getElementById('equipment-cards-container'); if (!container) return; const cards = [...container.querySelectorAll('.furnace-card')]; const srcIdx = cards.indexOf(dragSrcCard); const tgtIdx = cards.indexOf(card); if (srcIdx < tgtIdx) container.insertBefore(dragSrcCard, card.nextSibling); else container.insertBefore(dragSrcCard, card); } card.classList.remove('drag-over'); });
+    card.addEventListener('drop', (e) => { e.preventDefault(); if (dragSrcCard && dragSrcCard !== card) { const container = document.getElementById('furnace-cards-container'); const cards = [...container.querySelectorAll('.furnace-card')]; const srcIdx = cards.indexOf(dragSrcCard); const tgtIdx = cards.indexOf(card); if (srcIdx < tgtIdx) container.insertBefore(dragSrcCard, card.nextSibling); else container.insertBefore(dragSrcCard, card); } card.classList.remove('drag-over'); });
 }
 
 export function sortFurnaceCards(field) {
+    removeFurnaceInlineDetail();
     if (sortState.field === field) setSortState({ field, dir: sortState.dir === 'asc' ? 'desc' : 'asc' }); else setSortState({ field, dir: 'asc' });
     const currentDir = (sortState.field === field) ? sortState.dir : 'asc';
     document.querySelectorAll('.sort-btn').forEach(b => { b.classList.remove('active', 'asc', 'desc'); if (b.getAttribute('data-field') === field) b.classList.add('active', currentDir); });
@@ -351,6 +428,43 @@ export function sortFurnaceCards(field) {
 
 // ==================== MATERIAL CARD CREATION ====================
 
+
+function removeMaterialInlineDetail(cardId) {
+    document.querySelectorAll('.material-inline-detail').forEach(drawer => {
+        if (!cardId || drawer.getAttribute('data-card-id') === cardId) {
+            drawer.remove();
+        }
+    });
+
+    const panel = document.getElementById('material-detail-panel');
+    const placeholder = document.getElementById('mdp-placeholder');
+    const body = document.getElementById('mdp-body');
+    const title = document.getElementById('mdp-title');
+    const icon = document.getElementById('mdp-toggle-icon');
+
+    if (panel) panel.classList.add('collapsed');
+    if (placeholder) placeholder.style.display = 'block';
+    if (body) {
+        body.style.display = 'none';
+        body.innerHTML = '';
+    }
+    if (title) title.textContent = '📋 工件详情';
+    if (icon) icon.textContent = '▼';
+    setMdpCollapsed(true);
+}
+
+function buildMaterialDetailFormHtml(d, colorHex, cadPreview) {
+    return '<div class="mdp-row"><div class="mdp-field" style="flex:2;"><label>名称</label><input type="text" id="mdp-name" value="' + d.name + '"></div><div class="mdp-field"><label>形态</label><select id="mdp-shape"><option value="cuboid" ' + (d.shape==='cuboid'?'selected':'') + '>立方体</option><option value="cylinder" ' + (d.shape==='cylinder'?'selected':'') + '>圆柱体</option></select></div></div>' +
+        '<div class="mdp-row"><div class="mdp-field"><label>长度 L (mm)</label><input type="number" id="mdp-dim1" value="' + (d.shape==='cuboid'?d.dim1:'') + '"></div><div class="mdp-field"><label>宽度 W (mm)</label><input type="number" id="mdp-dim2" value="' + (d.shape==='cuboid'?d.dim2:'') + '"></div><div class="mdp-field"><label>高度 H (mm)</label><input type="number" id="mdp-dim3" value="' + d.dim3 + '"></div><div class="mdp-field"><label>直径 D (mm)</label><input type="number" id="mdp-diam" value="' + (d.shape==='cylinder'?d.dim1:'') + '"></div></div>' +
+        '<div class="mdp-row"><div class="mdp-field"><label>数量</label><input type="number" id="mdp-count" value="' + d.count + '" min="1"></div><div class="mdp-field"><label>总重量 (kg)</label><input type="number" id="mdp-weight" value="' + d.totalWeight + '"></div><div class="mdp-field" style="max-width:52px;"><label>颜色</label><input type="color" id="mdp-color" value="' + colorHex + '" style="padding:0;height:28px;width:100%;"></div></div>' +
+        '<div class="mdp-row"><div class="mdp-field"><label>材质</label><input type="text" id="mdp-material" value="' + d.material + '"></div><div class="mdp-field"><label>硬度要求</label><input type="text" id="mdp-hardness" value="' + d.hardness + '"></div></div>' +
+        '<div class="mdp-row"><div class="mdp-field"><label>工艺</label><input type="text" id="mdp-process" value="' + d.process + '"></div></div>' +
+        '<div class="mdp-row"><div class="mdp-field"><label>下单日期</label><input type="date" id="mdp-order-date" value="' + d.orderDate + '"></div><div class="mdp-field"><label>交付日期</label><input type="date" id="mdp-delivery-date" value="' + d.deliveryDate + '"></div></div>' +
+        '<div class="mdp-row"><div class="mdp-field"><label>CAD图纸 <span style="color:#555;font-size:9px;">（可选，图片文件）</span></label><input type="file" id="mdp-cad-file" accept="image/*" style="font-size:9px;padding:2px;">' + cadPreview + '</div></div>' +
+        '<div class="mdp-row"><div class="mdp-field"><label>备注</label><textarea id="mdp-remark">' + d.remark + '</textarea></div></div>' +
+        '<button class="mdp-save-btn" id="mdp-save-btn">💾 保存工件参数</button>';
+}
+
 export function createMaterialCard(name, shape, count, dim1, dim2, dim3, totalWeight, color, extraData) {
     const newMC = materialCounter + 1; setMaterialCounter(newMC);
     const cardId = 'material-card-' + newMC;
@@ -363,22 +477,19 @@ export function createMaterialCard(name, shape, count, dim1, dim2, dim3, totalWe
     const customer = extraData && extraData.customer ? extraData.customer : '';
     const metaExtra = (itemCode || customer) ? '<div class="item-meta">编码: ' + itemCode + ' | 客户: ' + customer + '</div>' : '';
     card.innerHTML = '<button class="m-delete" data-action="delete-material" data-mid="' + newMC + '">✕</button><div class="m-color-swatch" style="background-color:' + color + ';" title="' + name + '"></div><div class="m-info"><div class="m-name">' + name + '</div><div class="m-meta">' + shapeLabel + ' · ' + dimLabel + 'mm · ×' + count + '件 · ' + totalWeight + 'kg</div>' + metaExtra + '</div>';
-    
     card.addEventListener('click', (e) => {
         if (e.target.closest('[data-action="delete-material"]')) return;
+        if (e.target.closest('.material-inline-detail')) return;
 
         const wasSelected = card.classList.contains('active');
-
         selectMaterialCard(cardId);
 
         if (wasSelected) {
-            collapseMaterialDetailPanel();
+            removeMaterialInlineDetail(cardId);
         } else {
             showMaterialDetail(cardId);
-            expandMaterialDetailPanel();
         }
     });
-
     document.getElementById('material-cards-container').appendChild(card);
     // 刷新筛选条
     renderFilterBars(window._clearFurnaceResults);
@@ -390,24 +501,93 @@ export function createMaterialCard(name, shape, count, dim1, dim2, dim3, totalWe
 export function selectMaterialCard(cardId) { const card = document.getElementById(cardId); if (card && card.classList.contains('active')) { card.classList.remove('active'); setSelectedMaterialCardId(null); } else { document.querySelectorAll('.material-card').forEach(c => c.classList.remove('active')); if (card) { card.classList.add('active'); setSelectedMaterialCardId(cardId); } } }
 
 export function showMaterialDetail(cardId) {
-    const card = document.getElementById(cardId); if (!card) return;
+    const card = document.getElementById(cardId);
+    if (!card) return;
+
     const d = getMaterialDataFromCard(card);
-    document.getElementById('mdp-title').textContent = '📋 ' + d.name;
-    document.getElementById('mdp-placeholder').style.display = 'none';
-    const body = document.getElementById('mdp-body'); body.style.display = 'block';
     const colorHex = rgbToHex(d.color) || '#888888';
-    const cadPreview = d.cadImage ? '<div style="margin-top:4px;"><img src="' + d.cadImage + '" style="max-width:100%;max-height:60px;border-radius:3px;border:1px solid #333;" alt="CAD图纸预览"></div>' : '';
-    body.innerHTML = '<div class="mdp-row"><div class="mdp-field" style="flex:2;"><label>名称</label><input type="text" id="mdp-name" value="' + d.name + '"></div><div class="mdp-field"><label>形态</label><select id="mdp-shape"><option value="cuboid" ' + (d.shape==='cuboid'?'selected':'') + '>立方体</option><option value="cylinder" ' + (d.shape==='cylinder'?'selected':'') + '>圆柱体</option></select></div></div><div class="mdp-row"><div class="mdp-field"><label>长度 L (mm)</label><input type="number" id="mdp-dim1" value="' + (d.shape==='cuboid'?d.dim1:'') + '"></div><div class="mdp-field"><label>宽度 W (mm)</label><input type="number" id="mdp-dim2" value="' + (d.shape==='cuboid'?d.dim2:'') + '"></div><div class="mdp-field"><label>高度 H (mm)</label><input type="number" id="mdp-dim3" value="' + d.dim3 + '"></div><div class="mdp-field"><label>直径 D (mm)</label><input type="number" id="mdp-diam" value="' + (d.shape==='cylinder'?d.dim1:'') + '"></div></div><div class="mdp-row"><div class="mdp-field"><label>数量</label><input type="number" id="mdp-count" value="' + d.count + '" min="1"></div><div class="mdp-field"><label>总重量 (kg)</label><input type="number" id="mdp-weight" value="' + d.totalWeight + '"></div><div class="mdp-field" style="max-width:52px;"><label>颜色</label><input type="color" id="mdp-color" value="' + colorHex + '" style="padding:0;height:28px;width:100%;"></div></div><div class="mdp-row"><div class="mdp-field"><label>材质</label><input type="text" id="mdp-material" value="' + d.material + '"></div><div class="mdp-field"><label>硬度要求</label><input type="text" id="mdp-hardness" value="' + d.hardness + '"></div></div><div class="mdp-row"><div class="mdp-field"><label>工艺</label><input type="text" id="mdp-process" value="' + d.process + '"></div></div><div class="mdp-row"><div class="mdp-field"><label>下单日期</label><input type="date" id="mdp-order-date" value="' + d.orderDate + '"></div><div class="mdp-field"><label>交付日期</label><input type="date" id="mdp-delivery-date" value="' + d.deliveryDate + '"></div></div><div class="mdp-row"><div class="mdp-field"><label>CAD图纸 <span style="color:#555;font-size:9px;">（可选，图片文件）</span></label><input type="file" id="mdp-cad-file" accept="image/*" style="font-size:9px;padding:2px;">' + cadPreview + '</div></div><div class="mdp-row"><div class="mdp-field"><label>备注</label><textarea id="mdp-remark">' + d.remark + '</textarea></div></div><button class="mdp-save-btn" id="mdp-save-btn">💾 保存工件参数</button>';
-    document.getElementById('mdp-save-btn').addEventListener('click', () => saveMaterialDetail(cardId));
-    document.getElementById('mdp-cad-file').addEventListener('change', function(e) { const file = e.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = (ev) => { card.setAttribute('data-cad-image', ev.target.result); const existingPreview = document.querySelector('#mdp-body .mdp-field img'); if (existingPreview) existingPreview.src = ev.target.result; else { const previewDiv = document.createElement('div'); previewDiv.style.marginTop = '4px'; previewDiv.innerHTML = '<img src="' + ev.target.result + '" style="max-width:100%;max-height:60px;border-radius:3px;border:1px solid #333;" alt="CAD图纸预览">'; document.getElementById('mdp-cad-file').parentNode.appendChild(previewDiv); } }; reader.readAsDataURL(file); });
-    document.getElementById('mdp-shape').addEventListener('change', function() { const isCyl = this.value === 'cylinder'; document.getElementById('mdp-dim1').disabled = isCyl; document.getElementById('mdp-dim2').disabled = isCyl; document.getElementById('mdp-diam').disabled = !isCyl; if (isCyl) { document.getElementById('mdp-dim1').value = ''; document.getElementById('mdp-dim2').value = ''; } else { document.getElementById('mdp-diam').value = ''; } });
-    const isCyl = d.shape === 'cylinder'; document.getElementById('mdp-dim1').disabled = isCyl; document.getElementById('mdp-dim2').disabled = isCyl; document.getElementById('mdp-diam').disabled = !isCyl;
-    // if (mdpCollapsed) { 
-    //     setMdpCollapsed(false); 
-    //     document.getElementById('material-detail-panel').classList.remove('collapsed'); 
-    //     document.getElementById('mdp-toggle-icon').textContent = '▲'; 
-    // }
-    expandMaterialDetailPanel();
+    const cadPreview = d.cadImage
+        ? '<div style="margin-top:4px;"><img src="' + d.cadImage + '" style="max-width:100%;max-height:60px;border-radius:3px;border:1px solid #333;" alt="CAD图纸预览"></div>'
+        : '';
+
+    removeMaterialInlineDetail();
+
+    const drawer = document.createElement('div');
+    drawer.className = 'material-inline-detail';
+    drawer.setAttribute('data-card-id', cardId);
+    drawer.innerHTML =
+        '<div class="mid-header">' +
+            '<div class="mid-title">📋 ' + d.name + '</div>' +
+            '<button class="mid-close" type="button" title="收起详情">收起 ▲</button>' +
+        '</div>' +
+        '<div class="mdp-body">' + buildMaterialDetailFormHtml(d, colorHex, cadPreview) + '</div>';
+
+    card.insertAdjacentElement('afterend', drawer);
+
+    const closeBtn = drawer.querySelector('.mid-close');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const activeCard = document.getElementById(cardId);
+            if (activeCard && activeCard.classList.contains('active')) {
+                activeCard.classList.remove('active');
+                setSelectedMaterialCardId(null);
+            }
+            removeMaterialInlineDetail(cardId);
+        });
+    }
+
+    const saveBtn = drawer.querySelector('#mdp-save-btn');
+    if (saveBtn) saveBtn.addEventListener('click', () => saveMaterialDetail(cardId));
+
+    const cadFileInput = drawer.querySelector('#mdp-cad-file');
+    if (cadFileInput) {
+        cadFileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                card.setAttribute('data-cad-image', ev.target.result);
+                const existingPreview = drawer.querySelector('.mdp-field img');
+                if (existingPreview) {
+                    existingPreview.src = ev.target.result;
+                } else {
+                    const previewDiv = document.createElement('div');
+                    previewDiv.style.marginTop = '4px';
+                    previewDiv.innerHTML = '<img src="' + ev.target.result + '" style="max-width:100%;max-height:60px;border-radius:3px;border:1px solid #333;" alt="CAD图纸预览">';
+                    cadFileInput.parentNode.appendChild(previewDiv);
+                }
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+
+    const shapeSelect = drawer.querySelector('#mdp-shape');
+    if (shapeSelect) {
+        shapeSelect.addEventListener('change', function() {
+            const isCyl = this.value === 'cylinder';
+            drawer.querySelector('#mdp-dim1').disabled = isCyl;
+            drawer.querySelector('#mdp-dim2').disabled = isCyl;
+            drawer.querySelector('#mdp-diam').disabled = !isCyl;
+            if (isCyl) {
+                drawer.querySelector('#mdp-dim1').value = '';
+                drawer.querySelector('#mdp-dim2').value = '';
+            } else {
+                drawer.querySelector('#mdp-diam').value = '';
+            }
+        });
+    }
+
+    const isCyl = d.shape === 'cylinder';
+    const dim1 = drawer.querySelector('#mdp-dim1');
+    const dim2 = drawer.querySelector('#mdp-dim2');
+    const diam = drawer.querySelector('#mdp-diam');
+    if (dim1) dim1.disabled = isCyl;
+    if (dim2) dim2.disabled = isCyl;
+    if (diam) diam.disabled = !isCyl;
+
+    setMdpCollapsed(false);
+    drawer.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
 export function saveMaterialDetail(cardId) {
@@ -425,13 +605,25 @@ export function saveMaterialDetail(cardId) {
     card.querySelector('.m-meta').innerHTML = shapeLabel + ' · ' + dimLabel + 'mm · ×' + count + '件 · ' + totalWeight + 'kg';
     card.setAttribute('data-material', material); card.setAttribute('data-hardness', hardness); card.setAttribute('data-process', process);
     card.setAttribute('data-order-date', orderDate); card.setAttribute('data-delivery-date', deliveryDate); card.setAttribute('data-remark', remark);
-    document.getElementById('mdp-title').textContent = '📋 ' + name; updateTopSummary();
+    const mdpTitle = document.getElementById('mdp-title'); if (mdpTitle) mdpTitle.textContent = '📋 ' + name; const drawerTitle = document.querySelector('.material-inline-detail[data-card-id="' + cardId + '"] .mid-title'); if (drawerTitle) drawerTitle.textContent = '📋 ' + name; updateTopSummary();
     renderFilterBars(window._clearFurnaceResults);
     applyFilterAndClear(window._clearFurnaceResults);
     const btn = document.getElementById('mdp-save-btn'); if (btn) { btn.textContent = '✅ 已保存'; setTimeout(() => { btn.textContent = '💾 保存工件参数'; }, 1500); }
 }
 
-export function deleteMaterialCard(mid) { const card = document.getElementById('material-card-' + mid); if (card) card.remove(); if (selectedMaterialCardId === 'material-card-' + mid) { setSelectedMaterialCardId(null); document.getElementById('mdp-placeholder').style.display = 'block'; document.getElementById('mdp-body').style.display = 'none'; document.getElementById('mdp-title').textContent = '📋 工件详情'; } updateTopSummary(); renderFilterBars(window._clearFurnaceResults); applyFilterAndClear(window._clearFurnaceResults);}
+export function deleteMaterialCard(mid) {
+    const cardId = 'material-card-' + mid;
+    removeMaterialInlineDetail(cardId);
+    const card = document.getElementById(cardId);
+    if (card) card.remove();
+    if (selectedMaterialCardId === cardId) {
+        setSelectedMaterialCardId(null);
+        removeMaterialInlineDetail(cardId);
+    }
+    updateTopSummary();
+    renderFilterBars(window._clearFurnaceResults);
+    applyFilterAndClear(window._clearFurnaceResults);
+}
 
 export function rgbToHex(rgb) { if (!rgb) return '#888888'; if (rgb.startsWith('#')) return rgb; const m = rgb.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/); if (!m) return '#888888'; return '#' + [m[1],m[2],m[3]].map(x => parseInt(x).toString(16).padStart(2,'0')).join(''); }
 
@@ -1088,10 +1280,20 @@ export function renderFilterBars(onClearResults) {
         const filterBar = btn.closest('.filter-bar');
         if (!target || !filterBar) return;
 
-        // 从 localStorage 读取折叠状态并恢复（可选）
+        // 从 localStorage 读取折叠状态并恢复（可选）。紧凑筛选条默认收起，节省物料列表空间。
         const storageKey = `filter_${targetId}_collapsed`;
         const savedState = localStorage.getItem(storageKey);
-        if (savedState === 'true') {
+        const isCompactStrip = !!filterBar.closest('.material-filter-strip');
+
+        if (isCompactStrip) {
+            if (savedState === 'false') {
+                filterBar.classList.remove('collapsed');
+                btn.textContent = '▲';
+            } else {
+                filterBar.classList.add('collapsed');
+                btn.textContent = '▼';
+            }
+        } else if (savedState === 'true') {
             filterBar.classList.add('collapsed');
             btn.textContent = '▶';
         } else {
@@ -1100,9 +1302,20 @@ export function renderFilterBars(onClearResults) {
 
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
+
+            if (isCompactStrip) {
+                document.querySelectorAll('.material-filter-strip .filter-bar').forEach(bar => {
+                    if (bar !== filterBar) {
+                        bar.classList.add('collapsed');
+                        const otherBtn = bar.querySelector('.filter-collapse-btn');
+                        if (otherBtn) otherBtn.textContent = '▼';
+                    }
+                });
+            }
+
             filterBar.classList.toggle('collapsed');
             const isCollapsed = filterBar.classList.contains('collapsed');
-            btn.textContent = isCollapsed ? '▶' : '▼';
+            btn.textContent = isCompactStrip ? (isCollapsed ? '▼' : '▲') : (isCollapsed ? '▶' : '▼');
             localStorage.setItem(storageKey, isCollapsed);
         });
     });
@@ -1227,7 +1440,7 @@ export function openRulesModal() {
         if (descSpan) {
             // 需要导入 strategyConfig，或者简单映射
             const descMap = {
-                balanced: '少工件贴边对称，多工件兼顾重心，物理稳定',
+                balanced: '少物料贴边对称，多物料兼顾重心，物理稳定',
                 spaceUtil: '塞满炉子，忽略重心，强力贴边紧凑',
                 thermalBalance: '温度均匀，避免中心聚集，控制局部密度',
                 surfaceUniform: '最大暴露面积，避免遮挡，气流路径一致'
@@ -1239,7 +1452,7 @@ export function openRulesModal() {
             const descSpanLocal = document.getElementById('rule-strategy-desc');
             if (descSpanLocal) {
                 const descMap = {
-                    balanced: '少工件贴边对称，多工件兼顾重心，物理稳定',
+                    balanced: '少物料贴边对称，多物料兼顾重心，物理稳定',
                     spaceUtil: '塞满炉子，忽略重心，强力贴边紧凑',
                     thermalBalance: '温度均匀，避免中心聚集，控制局部密度',
                     surfaceUniform: '最大暴露面积，避免遮挡，气流路径一致'
@@ -1279,12 +1492,8 @@ export function saveRulesModal() {
     }
     document.getElementById('rules-modal-overlay').style.display = 'none';
     
-    const btn = document.getElementById('btn-rules');
-    if (btn) {
-        const orig = btn.textContent;
-        btn.textContent = '✅ 规则已保存';
-        setTimeout(() => { btn.textContent = orig; }, 1500);
-    }
+    const btn = document.getElementById('btn-rules'); const orig = btn.textContent;
+    btn.textContent = '✅ 规则已保存'; setTimeout(() => { btn.textContent = orig; }, 1500);
 }
 
 // ==================== MASTER VIEW ====================
@@ -1441,7 +1650,7 @@ export function renderJsonPreview(data) {
             (furnaces[0]?.dimensions?.height || 0) + '×' +
             (furnaces[0]?.dimensions?.depth || 0) + 'mm</span>';
         html += '<span class="ji-preview-tag">⚙️ 策略: ' + (data.loadingPlan.strategy || '-') + '</span>';
-        html += '<span class="ji-preview-tag">🧾 工件批次: ' + materials.length + '</span>';
+        html += '<span class="ji-preview-tag">🧾 物料批次: ' + materials.length + '</span>';
         html += '</div>';
 
         document.getElementById('ji-preview-box').innerHTML = html;
@@ -1459,7 +1668,7 @@ export function renderJsonPreview(data) {
     html += '<span class="ji-preview-tag">📋 ' + (data.title || '历史方案') + '</span>';
     html += '<span class="ji-preview-tag">🔥 ' + (f.name || '-') + '</span>';
     html += '<span class="ji-preview-tag">📐 ' + (f.width || 0) + '×' + (f.height || 0) + '×' + (f.depth || 0) + 'mm</span>';
-    html += '<span class="ji-preview-tag">📦 ' + materials.length + ' 个工件批次</span>';
+    html += '<span class="ji-preview-tag">📦 ' + materials.length + ' 个物料批次</span>';
     html += '</div>';
 
     document.getElementById('ji-preview-box').innerHTML = html;

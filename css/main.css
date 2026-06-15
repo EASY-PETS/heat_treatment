@@ -16,7 +16,7 @@
     --orange: #F59E0B;
     --furnace-accent: #F59E0B;
     --material-accent: #2563EB;
-    --left-panel-width: 400px;
+    --left-panel-width: 270px;
     --right-panel-width: 360px;
     --collapsed-panel-width: 40px;
 }
@@ -2358,19 +2358,19 @@ body:not(.ui-has-multiple-furnaces) .sort-bar {
     display: none !important;
 }
 
-/* 没有工件时，隐藏材质 / 工艺 / 硬度筛选条 */
+/* 没有物料时，隐藏材质 / 工艺 / 硬度筛选条 */
 body:not(.ui-has-materials) #material-filter-bar,
 body:not(.ui-has-materials) #process-filter-bar,
 body:not(.ui-has-materials) #hardness-filter-bar {
     display: none !important;
 }
 
-/* 没有选中炉膛设备时，隐藏设备参数面板 */
+/* 没有选中炉膛时，隐藏左下角进炉方向 / 工装详情面板 */
 body:not(.ui-has-selected-furnace) #furnace-detail-panel {
     display: none !important;
 }
 
-/* 没有选中工件时，隐藏工件详情面板 */
+/* 没有选中物料时，隐藏右下角工件详情面板 */
 body:not(.ui-has-selected-material) #material-detail-panel {
     display: none !important;
 }
@@ -2389,7 +2389,7 @@ body:not(.ui-plan-ready) .right-tab-btn[data-tab="simulation"] {
 
 /* 左侧空状态提示 */
 #furnace-cards-container:empty::before {
-    content: "暂无炉膛设备，请点击上方“增加设备”创建";
+    content: "暂无炉膛或工装，请点击上方“增加”创建料框";
     display: block;
     padding: 18px 10px;
     text-align: center;
@@ -2400,7 +2400,7 @@ body:not(.ui-plan-ready) .right-tab-btn[data-tab="simulation"] {
 
 /* 右侧空状态提示 */
 #material-cards-container:empty::before {
-    content: "暂无工件，请点击“增加”或“导入”添加";
+    content: "暂无物料，请点击“增加”或“导入”添加工件";
     display: block;
     padding: 18px 10px;
     text-align: center;
@@ -2893,7 +2893,7 @@ body.right-panel-collapsed {
 
 /* ---------- 1. 统一布局变量与安全区 ---------- */
 :root {
-    --left-panel-width: 400px;
+    --left-panel-width: 270px;
     --right-panel-width: 360px;
     --collapsed-panel-width: 36px;
 
@@ -3861,9 +3861,286 @@ body:has(#right-panel.collapsed) {
 #dock-thermal {
     display: none !important;
 }
-/* ==================== V6.1 PANEL RESTRUCTURE: left resources + right plan workbench ==================== */
-.left-panel-tabs,
-.right-panel-tabs {
+/* ==================== CENTER CLEANUP + CURRENT TOOLING HUD PATCH ==================== */
+#ai-summary-bar,
+#furnace-nav {
+    display: none !important;
+}
+
+#canvas-container {
+    position: relative;
+}
+
+.current-tooling-hud {
+    position: absolute;
+    top: 14px;
+    left: calc(var(--left-panel-width) + 16px);
+    width: 300px;
+    z-index: 18;
+    padding: 12px;
+    border: 1px solid rgba(226, 232, 240, 0.78);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.82);
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.10);
+    pointer-events: none;
+}
+
+body.left-panel-collapsed .current-tooling-hud {
+    left: 56px;
+}
+
+.current-tooling-hud .cth-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.current-tooling-hud .cth-kicker {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+
+.current-tooling-hud .cth-title {
+    font-size: 15px;
+    font-weight: 800;
+    color: var(--text-color);
+    max-width: 210px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.current-tooling-hud .cth-index {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--accent-color);
+    background: #EFF6FF;
+    border: 1px solid #BFDBFE;
+    border-radius: 999px;
+    padding: 3px 8px;
+    white-space: nowrap;
+}
+
+.current-tooling-hud .cth-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.current-tooling-hud .cth-item {
+    background: rgba(248, 250, 252, 0.88);
+    border: 1px solid rgba(226, 232, 240, 0.85);
+    border-radius: 12px;
+    padding: 7px 8px;
+}
+
+.current-tooling-hud .cth-item span {
+    display: block;
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-bottom: 2px;
+}
+
+.current-tooling-hud .cth-item strong {
+    font-size: 13px;
+    color: var(--text-color);
+    font-weight: 800;
+}
+
+.current-tooling-hud .cth-unpacked {
+    margin-top: 8px;
+    padding: 7px 8px;
+    border-radius: 10px;
+    background: #FEF2F2;
+    border: 1px solid #FECACA;
+    color: var(--danger-color);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+/* ==================== COMPACT MATERIAL FILTER STRIP PATCH ==================== */
+#left-tab-material.left-tab-pane.active {
+    display: flex !important;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.material-filter-strip {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border-color);
+    background: rgba(248, 250, 252, 0.92);
+    flex-shrink: 0;
+    z-index: 80;
+}
+
+#left-tab-material .material-filter-strip .filter-bar {
+    position: relative;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    min-height: 30px;
+}
+
+#left-tab-material .material-filter-strip .filter-bar-header {
+    height: 30px;
+    padding: 0 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: #FFFFFF;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+}
+
+#left-tab-material .material-filter-strip .filter-bar-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+#left-tab-material .material-filter-strip .filter-collapse-btn {
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 10px;
+    cursor: pointer;
+    padding: 0;
+}
+
+#left-tab-material .material-filter-strip .filter-tags {
+    display: none;
+    position: absolute;
+    top: 36px;
+    left: 0;
+    right: 0;
+    z-index: 120;
+    max-height: 180px;
+    overflow-y: auto;
+    padding: 8px;
+    background: rgba(255, 255, 255, 0.98);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.14);
+}
+
+#left-tab-material .material-filter-strip .filter-bar:not(.collapsed) .filter-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+#left-tab-material .material-filter-strip .filter-tag {
+    font-size: 11px;
+    padding: 3px 7px;
+    border-radius: 999px;
+}
+
+#left-tab-material #material-cards-container {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+#left-tab-material #material-detail-panel {
+    display: none !important;
+}
+
+/* ==================== MATERIAL INLINE DRAWER PATCH ==================== */
+.material-inline-detail {
+    margin: -2px 0 8px 0;
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid #BFDBFE;
+    border-left: 4px solid var(--furnace-accent);
+    border-radius: 0 0 16px 16px;
+    box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+    overflow: hidden;
+    animation: materialDrawerIn 0.18s ease-out;
+}
+
+.material-inline-detail .mid-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    background: #EFF6FF;
+    border-bottom: 1px solid #DBEAFE;
+}
+
+.material-inline-detail .mid-title {
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--accent-color);
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.material-inline-detail .mid-close {
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 13px;
+    padding: 2px 4px;
+}
+
+.material-inline-detail .mid-close:hover {
+    color: var(--danger-color);
+}
+
+.material-inline-detail .mdp-body {
+    padding: 10px;
+    max-height: 360px;
+    overflow-y: auto;
+}
+
+.material-inline-detail .mdp-row {
+    gap: 6px;
+    margin-bottom: 7px;
+}
+
+.material-inline-detail .mdp-field label {
+    font-size: 11px;
+}
+
+.material-inline-detail .mdp-field input,
+.material-inline-detail .mdp-field select,
+.material-inline-detail .mdp-field textarea {
+    height: 34px;
+    font-size: 12px;
+}
+
+.material-inline-detail .mdp-field textarea {
+    min-height: 38px;
+}
+
+.material-inline-detail .mdp-save-btn {
+    height: 34px;
+    font-size: 13px;
+}
+
+@keyframes materialDrawerIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+
+/* ==================== RECOVERY PATCH: LEFT PANEL TAB LAYOUT RESTORE ==================== */
+.left-panel-tabs {
     display: flex;
     gap: 6px;
     padding: 8px 10px;
@@ -3872,8 +4149,7 @@ body:has(#right-panel.collapsed) {
     flex-shrink: 0;
 }
 
-.left-tab-btn,
-.right-tab-btn {
+.left-tab-btn {
     flex: 1;
     height: 30px;
     border: none;
@@ -3886,489 +4162,79 @@ body:has(#right-panel.collapsed) {
     transition: all 0.15s ease;
 }
 
-.left-tab-btn:hover,
-.right-tab-btn:hover {
+.left-tab-btn:hover {
     background: #E2E8F0;
     color: var(--text-color);
 }
 
-.left-tab-btn.active,
-.right-tab-btn.active {
+.left-tab-btn.active {
     background: #EFF6FF;
     color: var(--accent-color);
 }
 
-.left-tab-pane,
-.right-tab-pane {
+.left-tab-pane {
     display: none;
     flex: 1;
     min-height: 0;
     overflow: hidden;
 }
 
-.left-tab-pane.active,
-.right-tab-pane.active {
+.left-tab-pane.active {
     display: flex;
     flex-direction: column;
 }
 
-.left-tab-toolbar,
-.plan-action-bar {
-    display: flex;
-    gap: 8px;
-    padding: 8px 10px;
-    border-bottom: 1px solid var(--border-color);
-    background: #FFFFFF;
-    flex-shrink: 0;
-}
-
 .left-tab-intro {
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--border-color);
-    background: linear-gradient(135deg, #FFFFFF, #F8FAFC);
     flex-shrink: 0;
+    padding: 10px 12px;
+    background: #FFFFFF;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.55;
 }
 
 .left-tab-intro strong {
     display: block;
+    color: var(--text-color);
     font-size: 13px;
-    color: var(--text-color);
     margin-bottom: 4px;
 }
 
-.left-tab-intro span {
-    display: block;
-    font-size: 11px;
-    line-height: 1.55;
-    color: var(--text-secondary);
-}
-
-.tooling-resource-panel {
-    padding: 12px;
-    overflow-y: auto;
-    min-height: 0;
-}
-
-.tooling-resource-title {
-    font-size: 13px;
-    font-weight: 700;
-    color: var(--text-color);
-    margin-bottom: 10px;
-}
-
-.tooling-resource-grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 8px;
-}
-
-.tooling-resource-card {
-    background: #FFFFFF;
-    border: 1px solid var(--border-color);
-    border-radius: 14px;
-    padding: 10px;
-    box-shadow: 0 4px 18px rgba(15, 23, 42, 0.04);
-}
-
-.tooling-resource-card strong {
-    display: block;
-    font-size: 13px;
-    color: var(--accent-color);
-    margin-bottom: 4px;
-}
-
-.tooling-resource-card span {
-    display: block;
-    font-size: 11px;
-    line-height: 1.5;
-    color: var(--text-secondary);
-}
-
-.tooling-resource-action {
-    width: 100%;
-    margin-top: 12px;
-    height: 34px;
-    color: #FFFFFF !important;
-    background: var(--accent-color) !important;
-    border-color: var(--accent-color) !important;
-}
-
-.tooling-resource-note {
-    margin-top: 10px;
-    padding: 9px 10px;
-    border-radius: 12px;
-    background: #EFF6FF;
-    color: var(--text-secondary);
-    font-size: 11px;
-    line-height: 1.5;
-}
-
-.material-actions-toolbar .btn-sm {
-    flex: 1;
-}
-
-#left-tab-furnace #furnace-detail-panel {
-    display: flex !important;
-    flex-direction: column;
-    flex: 1;
-    max-height: none;
-    border-top: none;
-    min-height: 0;
-}
-
-#left-tab-furnace #furnace-detail-panel .fdp-body,
-#left-tab-furnace #furnace-detail-panel #fdp-body-wrapper {
-    min-height: 0;
-}
-
-#left-tab-material #material-detail-panel {
-    flex-shrink: 0;
-    max-height: 300px;
-}
-
-#right-tab-library {
-    padding: 0;
-}
-
-#right-tab-library #master-view,
-#right-tab-library #master-view.active {
-    display: flex !important;
-    flex: 1;
-    min-height: 0;
-    background: #F8FAFC;
-}
-
-#right-tab-library #master-header {
-    padding: 10px;
-    gap: 8px;
-    background: #FFFFFF;
-    border-bottom: 1px solid var(--border-color);
-}
-
-#right-tab-library #master-header h3 {
-    width: 100%;
-    font-size: 14px;
-}
-
-#right-tab-library #master-header span {
-    flex: 1;
-    line-height: 1.4;
-}
-
-#right-tab-library #master-header .master-import-btn {
-    width: 100%;
-    padding: 7px 10px;
-    font-size: 12px;
-}
-
-#right-tab-library #master-content {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    overflow: hidden;
-}
-
-#right-tab-library #master-list {
-    width: 100%;
-    min-width: 0;
-    flex: 1;
-    padding: 10px;
-    border-right: none;
-    overflow-y: auto;
-}
-
-#right-tab-library #master-3d {
-    flex: 0 0 190px;
-    min-height: 190px;
-    border-top: 1px solid var(--border-color);
-    background: #FFFFFF;
-}
-
-#right-tab-library #master-canvas-container {
-    display: none;
-}
-
-#right-tab-library #master-detail-panel {
-    position: relative;
-    left: auto;
-    right: auto;
-    bottom: auto;
-    max-height: 190px;
-    height: 100%;
-    overflow-y: auto;
-    border-top: none;
-    padding: 12px;
-}
-
-.plan-action-bar {
-    flex-wrap: wrap;
-}
-
-.plan-action-btn {
-    flex: 1;
-    min-width: 92px;
-    height: 32px;
-    border: none;
-    border-radius: 9px;
-    background: #EFF6FF;
-    color: var(--accent-color);
-    font-size: 12px;
-    font-weight: 700;
-    cursor: pointer;
-}
-
-.plan-action-btn:hover {
-    background: #DBEAFE;
-}
-
-.plan-action-btn.primary {
-    background: var(--accent-color);
-    color: #FFFFFF;
-}
-
-.plan-action-btn.primary:hover {
-    background: var(--accent-hover);
-}
-
-/* 右侧工作台现在始终展示三个子页面，未生成方案时由页面空状态承接 */
-body:not(.ui-plan-ready) .right-tab-btn[data-tab="analysis"],
-body:not(.ui-plan-ready) .right-tab-btn[data-tab="simulation"],
-.right-tab-btn[data-tab="simulation"] {
-    display: block !important;
-}
-
-#right-tab-simulation.active {
-    display: flex !important;
-}
-
-/* 旧的独立方案库模式不再使用，避免遮挡左右面板 */
-body.library-mode #left-panel,
-body.library-mode #right-panel,
-body.library-mode #furnace-nav,
-body.library-mode #furnace-thumb-bar,
-body.library-mode #dock-bar,
-body.library-mode #ai-summary-bar {
-    display: initial !important;
-}
-
-/* ==================== Equipment / Tooling Separation Refinement ==================== */
-.tooling-actions-toolbar {
-    padding: 8px 10px 0 10px;
-}
-
-.tooling-instance-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-top: 10px;
-}
-
-.tooling-instance-card {
-    background: #FFFFFF;
-    border-left: 4px solid var(--material-accent);
-    border-radius: 14px;
-    padding: 10px 12px;
-    box-shadow: 0 4px 18px rgba(15, 23, 42, 0.06);
-}
-
-.tooling-instance-card:hover {
-    background: #EFF6FF;
-}
-
-.tooling-instance-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    margin-bottom: 5px;
-}
-
-.tooling-instance-head strong {
-    font-size: 14px;
-    color: var(--text-color);
-}
-
-.tooling-instance-head span {
-    font-size: 11px;
-    color: #D97706;
-    background: #FEF3C7;
-    border: 1px solid #FDE68A;
-    border-radius: 999px;
-    padding: 2px 7px;
-    white-space: nowrap;
-}
-
-.tooling-instance-meta {
-    font-size: 12px;
-    line-height: 1.5;
-    color: var(--text-muted);
-}
-
-.fdp-device-note {
-    margin: 8px 0 10px 0;
-    padding: 8px 10px;
-    border-radius: 10px;
-    background: #F8FAFC;
-    border: 1px dashed var(--border-color);
-    color: var(--text-secondary);
-    font-size: 12px;
-    line-height: 1.5;
-}
-
-.tooling-unlinked-placeholder {
-    color: var(--text-secondary);
-    font-size: 12px;
-    line-height: 1.6;
-    padding: 12px;
-    background: #F8FAFC;
-    border: 1px dashed var(--border-color);
-    border-radius: 12px;
-    text-align: center;
-}
-
-.tooling-add-field select {
-    width: 100%;
-    height: 40px;
-    border: 1px solid var(--border-color);
-    background: var(--input-bg);
-    border-radius: 8px;
-    padding: 4px 8px;
-    font-size: 14px;
-    color: var(--text-color);
-}
-
-/* ==================== Equipment-linked Tooling Workflow ==================== */
-.tooling-link-status {
-    margin-bottom: 12px;
-    padding: 10px 12px;
-    border-radius: 14px;
-    border: 1px dashed #CBD5E1;
-    background: #F8FAFC;
-}
-
-.tooling-link-status.has-equipment {
-    border-color: #BFDBFE;
-    background: linear-gradient(135deg, #EFF6FF, #F8FAFC);
-}
-
-.tooling-link-label {
-    font-size: 11px;
-    font-weight: 700;
-    color: var(--text-muted);
-    margin-bottom: 4px;
-}
-
-.tooling-link-name {
-    font-size: 14px;
-    font-weight: 800;
-    color: var(--text-color);
-    margin-bottom: 4px;
-}
-
-.tooling-link-status.has-equipment .tooling-link-name {
-    color: var(--accent-color);
-}
-
-.tooling-link-hint {
-    font-size: 11px;
-    line-height: 1.5;
-    color: var(--text-secondary);
-}
-
-.tooling-type-template-list {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 8px;
-    margin-top: 10px;
-}
-
-.tooling-type-template {
-    text-align: left;
-    border: 1px solid var(--border-color);
-    background: #FFFFFF;
-    border-radius: 14px;
-    padding: 10px 12px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    box-shadow: 0 4px 18px rgba(15, 23, 42, 0.04);
-}
-
-.tooling-type-template:hover {
-    border-color: var(--accent-color);
-    background: #EFF6FF;
-    transform: translateX(2px);
-}
-
-.tooling-type-template strong {
-    display: block;
-    font-size: 13px;
-    color: var(--text-color);
-    margin-bottom: 4px;
-}
-
-.tooling-type-template span {
-    display: block;
-    font-size: 11px;
-    line-height: 1.5;
-    color: var(--text-secondary);
-}
-
-.tooling-instance-title {
-    margin-top: 16px;
-}
-
-.tooling-empty-state {
-    padding: 18px 12px;
-    border: 1px dashed var(--border-color);
-    border-radius: 14px;
-    background: #F8FAFC;
-    color: var(--text-muted);
-    font-size: 12px;
-    text-align: center;
-    line-height: 1.6;
-}
-
-.tooling-instance-card.linked .tooling-instance-head span {
-    color: #16A34A;
-    background: #DCFCE7;
-    border-color: #BBF7D0;
-}
-
-
-/* ==================== WORKSHOP PLACEHOLDER ==================== */
 .workshop-placeholder {
-    margin: 12px 10px;
-    padding: 24px 16px;
+    margin: 16px 12px;
+    padding: 18px 14px;
     border-radius: 16px;
     background: #F8FAFC;
     border: 1px dashed #CBD5E1;
-    text-align: center;
     color: var(--text-muted);
+    text-align: center;
+    line-height: 1.55;
 }
-.workshop-placeholder-icon { font-size: 34px; margin-bottom: 10px; }
-.workshop-placeholder-title { font-size: 15px; font-weight: 700; color: var(--text-color); margin-bottom: 6px; }
-.workshop-placeholder-desc { font-size: 12px; line-height: 1.6; }
 
-/* 兼容误改名：如果 HTML 暂时用了 equipment-detail-panel，也沿用原详情样式 */
-#equipment-detail-panel {
-    flex-shrink: 0;
-    border-top: 1px solid var(--border-color);
-    background: #FAFBFC;
-    max-height: 280px;
-    overflow-y: auto;
-    transition: max-height 0.3s ease;
+.workshop-placeholder-icon {
+    font-size: 28px;
+    margin-bottom: 8px;
 }
-#equipment-detail-panel.collapsed { max-height: 36px; overflow: hidden; }
 
+.workshop-placeholder-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-color);
+    margin-bottom: 6px;
+}
 
-/* ==================== P9: Left Generate + Library Rules Cleanup ==================== */
+.workshop-placeholder-desc {
+    font-size: 12px;
+}
+
 .left-generate-action {
     flex-shrink: 0;
     padding: 10px 12px 8px 12px;
     background: #FFFFFF;
     border-bottom: 1px solid var(--border-color);
 }
+
 .left-generate-action .left-generate-btn {
     width: 100%;
     height: 36px;
@@ -4376,6 +4242,7 @@ body.library-mode #ai-summary-bar {
     border-radius: 10px !important;
     font-size: 14px !important;
 }
+
 .left-generate-hint {
     margin-top: 5px;
     font-size: 11px;
@@ -4384,404 +4251,484 @@ body.library-mode #ai-summary-bar {
     text-align: center;
 }
 
-/* 输入已准备但未生成方案时，突出左侧生成按钮 */
 body.ui-input-ready .left-generate-action .left-generate-btn {
     box-shadow: 0 8px 22px rgba(37, 99, 235, 0.24) !important;
 }
 
-/* 方案库页已经有右侧Tab标题，隐藏内部重复标题和详情预览区 */
-#right-tab-library #master-header h3 {
+/* 物料筛选三项压缩为一行。即使 HTML 未包裹 material-filter-strip，也兜底生效 */
+#left-tab-material > .filter-bar {
     display: none !important;
 }
-#right-tab-library #master-header .master-library-hint {
-    width: 100%;
+
+#left-tab-material .material-filter-strip {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border-color);
+    background: rgba(248, 250, 252, 0.92);
+    flex-shrink: 0;
+    z-index: 80;
+}
+
+#left-tab-material .material-filter-strip .filter-bar {
+    display: block !important;
+    position: relative;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    min-height: 30px;
+}
+
+#left-tab-material .material-filter-strip .filter-bar-header {
+    height: 30px;
+    padding: 0 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: #FFFFFF;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+}
+
+#left-tab-material .material-filter-strip .filter-bar-title {
     font-size: 11px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+#left-tab-material .material-filter-strip .filter-collapse-btn {
+    border: none;
+    background: transparent;
     color: var(--text-muted);
-    line-height: 1.4;
+    font-size: 10px;
+    cursor: pointer;
+    padding: 0;
 }
-#right-tab-library #master-3d {
-    display: none !important;
+
+#left-tab-material .material-filter-strip .filter-tags {
+    display: none;
+    position: absolute;
+    top: 36px;
+    left: 0;
+    right: 0;
+    z-index: 120;
+    max-height: 180px;
+    overflow-y: auto;
+    padding: 8px;
+    background: rgba(255, 255, 255, 0.98);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.14);
 }
-#right-tab-library #master-list {
-    width: 100% !important;
-    min-width: 0 !important;
-    flex: 1 1 auto !important;
-    border-right: none !important;
+
+#left-tab-material .material-filter-strip .filter-bar:not(.collapsed) .filter-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+#left-tab-material .material-filter-strip .filter-tag {
+    font-size: 11px;
+    padding: 3px 7px;
+    border-radius: 999px;
+}
+
+#left-tab-material #material-cards-container {
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
 }
-.library-rules-footer {
-    flex-shrink: 0;
-    padding: 10px;
-    border-top: 1px solid var(--border-color);
-    background: #FFFFFF;
-}
-.library-rule-btn {
-    width: 100%;
-    height: 32px;
-    color: var(--accent-color) !important;
-    background: #EFF6FF !important;
-    border-color: #BFDBFE !important;
-}
-.library-rule-btn:hover {
-    background: #DBEAFE !important;
-    border-color: var(--accent-color) !important;
-}
-.library-rule-hint {
-    margin-top: 6px;
-    font-size: 11px;
-    line-height: 1.45;
-    color: var(--text-muted);
-    text-align: center;
+
+#left-tab-material #material-detail-panel {
+    display: none !important;
 }
 
-
-/* ==================== V7.1 MATERIAL WORKSPACE REFINEMENT ==================== */
-.left-action-import {
-    color: var(--accent-color) !important;
-    background: #EFF6FF !important;
-    border-color: #BFDBFE !important;
+/* 右侧方案库内部旧视图兜底，避免 iframe/3D 子面板撑开遮挡 */
+#right-tab-library #master-view {
+    flex: 1;
+    min-height: 0;
 }
-.left-action-import:hover {
-    background: #DBEAFE !important;
-    border-color: var(--accent-color) !important;
+
+#right-tab-library #master-content {
+    flex: 1;
+    min-height: 0;
+}
+
+/* ==================== PATCH V8.1: 用户指定布局微调 ==================== */
+/* 1) 顶部品牌栏略微降低高度，给主工作区更多空间 */
+#top-bar {
+    height: 50px !important;
+    min-height: 50px !important;
+    padding: 0 16px !important;
+}
+.top-logo-title {
+    font-size: 15px !important;
+    line-height: 1.15 !important;
+}
+.top-logo-subtitle {
+    font-size: 9px !important;
+    line-height: 1.15 !important;
+}
+
+/* 2) 左侧顶部操作区：当前页主操作统一收口在资源配置标题栏 */
+#left-panel .panel-header {
+    min-height: 46px;
+}
+#left-panel .panel-header-actions .left-action-import {
+    display: none;
+}
+body.left-tab-material-active #left-panel .panel-header-actions .left-action-import {
+    display: inline-flex !important;
+}
+body.left-tab-tooling-active #left-panel .panel-header-actions .left-action-import,
+body.left-tab-furnace-active #left-panel .panel-header-actions .left-action-import {
+    display: none !important;
+}
+
+/* 原物料页内部工具条不再占用空间，避免和顶部操作重复 */
+#left-tab-material .material-actions-toolbar {
+    display: none !important;
+}
+
+/* 3) 物料卡片下方抽屉：与卡片产生重叠连接，像从卡片下方抽出 */
+.material-card {
+    z-index: 2;
+}
+.material-card.active {
+    position: relative;
+    z-index: 4;
+    border-bottom-left-radius: 12px;
+    border-bottom-right-radius: 12px;
+}
+.material-card.active + .material-inline-detail {
+    margin: -12px 14px 10px 16px !important;
+    width: calc(100% - 30px) !important;
+    border-top: 0 !important;
+    border-left-width: 3px !important;
+    border-radius: 0 0 14px 14px !important;
+    box-shadow: 0 12px 24px rgba(15, 23, 42, 0.10) !important;
+    transform-origin: top center;
+}
+.material-inline-detail .mid-header {
+    min-height: 30px;
+    padding: 6px 10px 6px 12px !important;
+    background: linear-gradient(180deg, #EFF6FF 0%, #F8FAFC 100%) !important;
+}
+.material-inline-detail .mid-title {
+    font-size: 12px !important;
+}
+.material-inline-detail .mid-close {
+    font-size: 11px !important;
+}
+.material-inline-detail .mdp-body {
+    padding: 10px 10px 12px 10px !important;
+    max-height: 300px !important;
+}
+
+/* 4) 右侧装炉规则提升到方案工作台标题栏，与折叠按钮同一层级 */
+#right-panel .panel-header-actions {
+    align-items: center;
 }
 .right-rule-top-btn {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    height: 28px;
+    padding: 0 10px !important;
+    border-radius: 8px !important;
     color: var(--accent-color) !important;
     background: #EFF6FF !important;
     border-color: #BFDBFE !important;
-    height: 26px;
-    padding: 3px 8px !important;
+    font-weight: 800 !important;
 }
 .right-rule-top-btn:hover {
     background: #DBEAFE !important;
-    border-color: var(--accent-color) !important;
-}
-#left-tab-material {
-    min-height: 0;
-}
-#left-tab-material #material-cards-container {
-    min-height: 220px;
-}
-#left-tab-material #material-detail-panel {
-    max-height: 240px;
-}
-#left-tab-material #material-detail-panel.collapsed {
-    max-height: 36px;
-    overflow: hidden;
 }
 .library-rules-footer {
     display: none !important;
 }
 
-/* ==================== AI THINKING OVERLAY - FULLSCREEN V7 ==================== */
-#ai-loading-overlay {
-    position: fixed !important;
-    inset: 0 !important;
-    z-index: 3000 !important;
-    display: none !important;
-    align-items: center !important;
-    justify-content: center !important;
-    background: rgba(15, 23, 42, 0.62) !important;
-    backdrop-filter: blur(12px) saturate(120%) !important;
-    -webkit-backdrop-filter: blur(12px) saturate(120%) !important;
-    padding: 28px;
+/* =========================================================
+   V8.0 OFF-CANVAS PANEL DRAWER + TOOLING INLINE DETAIL
+   目标：废弃 36px 缩进方案，改为完整面板离屏 + 独立悬浮展开按钮。
+========================================================= */
+
+/* 1) 左右面板折叠时不再改变宽度，只做离屏位移，避免内部按钮/内容漏出 */
+#left-panel,
+#right-panel {
+    transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1),
+                opacity 0.18s ease,
+                box-shadow 0.18s ease !important;
+    will-change: transform;
 }
-#ai-loading-overlay.active {
-    display: flex !important;
-}
-.ai-thinking-modal {
-    position: relative;
-    width: min(940px, calc(100vw - 64px));
-    max-height: calc(100vh - 64px);
-    overflow: hidden;
-    background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.96));
-    border: 1px solid rgba(226, 232, 240, 0.95);
-    border-radius: 24px;
-    box-shadow: 0 30px 90px rgba(15, 23, 42, 0.34), 0 0 0 1px rgba(255,255,255,0.35) inset;
-    padding: 34px 42px 26px 42px;
-    color: var(--text-color);
-}
-.ai-thinking-modal::before {
-    content: '';
-    position: absolute;
-    inset: 0;
+
+body.left-panel-collapsed #left-panel {
+    transform: translateX(calc(-1 * var(--left-panel-width) - 24px)) !important;
+    opacity: 0;
     pointer-events: none;
-    background:
-        radial-gradient(circle at 24% 22%, rgba(37,99,235,0.12), transparent 28%),
-        radial-gradient(circle at 75% 65%, rgba(96,165,250,0.10), transparent 32%);
 }
-.ai-thinking-cancel {
-    position: absolute;
-    top: 18px;
-    right: 20px;
-    z-index: 2;
-    height: 32px;
-    padding: 0 12px;
-    border: 1px solid rgba(203, 213, 225, 0.9);
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.78);
-    color: var(--text-secondary);
-    font-size: 12px;
-    font-weight: 700;
-    cursor: pointer;
-    transition: all .18s ease;
+
+body.right-panel-collapsed #right-panel {
+    transform: translateX(calc(var(--right-panel-width) + 24px)) !important;
+    opacity: 0;
+    pointer-events: none;
 }
-.ai-thinking-cancel:hover {
-    color: var(--text-color);
-    background: #fff;
-    transform: translateY(-1px);
+
+/* 覆盖旧的 #panel.collapsed 缩窄方案，防止缓存或旧逻辑残留造成按钮消失 */
+#left-panel.collapsed,
+#right-panel.collapsed {
+    width: var(--left-panel-width) !important;
+    min-width: var(--left-panel-width) !important;
+    max-width: var(--left-panel-width) !important;
+    overflow: visible !important;
 }
-.ai-thinking-head {
-    position: relative;
-    z-index: 1;
-    display: grid;
-    grid-template-columns: 200px 1fr;
-    gap: 30px;
+#right-panel.collapsed {
+    width: var(--right-panel-width) !important;
+    min-width: var(--right-panel-width) !important;
+    max-width: var(--right-panel-width) !important;
+}
+#left-panel.collapsed > *,
+#right-panel.collapsed > * {
+    display: inherit;
+}
+
+/* 旧的面板内部展开按钮不再作为主入口，避免被裁切 */
+.panel-expand-btn-left,
+.panel-expand-btn-right {
+    display: none !important;
+}
+
+/* 2) 独立悬浮展开按钮：不属于面板内部，所以不会被裁切 */
+.edge-panel-handle {
+    position: fixed;
+    top: 54%;
+    transform: translateY(-50%);
+    z-index: 80;
+    display: none;
     align-items: center;
-    margin-bottom: 24px;
-}
-.ai-thinking-orb {
-    position: relative;
-    width: 164px;
-    height: 164px;
-    margin: 0 auto;
-    display: grid;
-    place-items: center;
-}
-.ai-orb-core {
-    width: 86px;
-    height: 86px;
-    border-radius: 50%;
-    display: grid;
-    place-items: center;
-    font-size: 24px;
-    font-weight: 900;
-    color: #fff;
-    background: radial-gradient(circle at 38% 32%, #93C5FD, #2563EB 62%, #1E3A8A 100%);
-    box-shadow: 0 0 32px rgba(37,99,235,.55), inset 0 0 20px rgba(255,255,255,.35);
-    animation: ai-core-pulse 1.9s ease-in-out infinite;
-}
-.ai-orb-ring {
-    position: absolute;
-    border-radius: 50%;
-    border: 1px solid rgba(37,99,235,.25);
-}
-.ai-orb-ring.ring-1 { inset: 18px; animation: ai-ring-spin 8s linear infinite; }
-.ai-orb-ring.ring-2 { inset: 0; border-style: dashed; animation: ai-ring-spin 13s linear reverse infinite; }
-.ai-orb-dot {
-    position: absolute;
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: #2563EB;
-    box-shadow: 0 0 12px rgba(37,99,235,.75);
-}
-.ai-orb-dot.dot-1 { top: 18px; left: 48px; }
-.ai-orb-dot.dot-2 { right: 20px; top: 70px; }
-.ai-orb-dot.dot-3 { left: 32px; bottom: 28px; }
-@keyframes ai-core-pulse { 0%,100%{ transform: scale(1); } 50%{ transform: scale(1.06); } }
-.ai-thinking-title-block { text-align: left; }
-.ai-thinking-kicker {
-    display: inline-flex;
-    align-items: center;
-    height: 28px;
-    padding: 0 10px;
-    border-radius: 999px;
-    background: #EFF6FF;
+    justify-content: center;
+    width: 38px;
+    min-height: 76px;
+    padding: 10px 6px;
+    border: 1px solid rgba(203, 213, 225, 0.95);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.92);
     color: var(--accent-color);
-    font-size: 12px;
-    font-weight: 800;
-    margin-bottom: 10px;
-}
-.ai-thinking-title-block h3 {
-    margin: 0;
-    font-size: 30px;
-    line-height: 1.2;
-    letter-spacing: -0.02em;
-    color: #0F172A;
-}
-.ai-thinking-title-block p {
-    margin: 10px 0 0 0;
-    color: var(--text-secondary);
-    font-size: 14px;
-    line-height: 1.7;
-}
-.ai-thinking-steps {
-    position: relative;
-    z-index: 1;
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 12px;
-    margin: 8px 0 20px;
-}
-.ai-thinking-step {
-    position: relative;
-    min-height: 106px;
-    padding: 16px 14px 14px;
-    border: 1px solid rgba(226,232,240,.9);
-    border-radius: 18px;
-    background: rgba(255,255,255,.74);
-    opacity: .68;
-    transition: all .24s ease;
-}
-.ai-thinking-step.done,
-.ai-thinking-step.active {
-    opacity: 1;
-    border-color: rgba(37,99,235,.35);
-    background: rgba(239,246,255,.78);
-}
-.ai-thinking-step.active {
-    box-shadow: 0 10px 30px rgba(37,99,235,.12);
-}
-.ai-thinking-step .step-dot {
-    width: 30px;
-    height: 30px;
-    border-radius: 50%;
-    display: grid;
-    place-items: center;
-    margin-bottom: 10px;
-    background: #F1F5F9;
-    color: #94A3B8;
     font-size: 13px;
-    font-weight: 900;
-}
-.ai-thinking-step.done .step-dot {
-    color: #fff;
-    background: var(--accent-color);
-}
-.ai-thinking-step.done .step-dot::before { content: '✓'; }
-.ai-thinking-step.done .step-dot { font-size: 0; }
-.ai-thinking-step.done .step-dot::before { font-size: 14px; }
-.ai-thinking-step.active .step-dot {
-    color: #fff;
-    background: var(--accent-color);
-    box-shadow: 0 0 0 6px rgba(37,99,235,.10);
-}
-.ai-thinking-step strong {
-    display: block;
-    font-size: 14px;
     font-weight: 800;
-    color: var(--text-color);
-    margin-bottom: 6px;
+    line-height: 1.1;
+    letter-spacing: 2px;
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    cursor: pointer;
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.14);
+    backdrop-filter: blur(14px) saturate(150%);
+    -webkit-backdrop-filter: blur(14px) saturate(150%);
+    user-select: none;
 }
-.ai-thinking-step span {
-    display: block;
-    font-size: 12px;
-    line-height: 1.5;
-    color: var(--text-muted);
+
+.edge-panel-handle:hover {
+    background: #EFF6FF;
+    border-color: #93C5FD;
+    box-shadow: 0 16px 36px rgba(37, 99, 235, 0.18);
 }
-.ai-thinking-progress-row {
+
+.edge-panel-handle.left { left: 12px; }
+.edge-panel-handle.right { right: 12px; }
+
+body.left-panel-collapsed #left-edge-handle { display: flex; }
+body.right-panel-collapsed #right-edge-handle { display: flex; }
+
+/* 面板离屏后，中心顶部内容和 HUD 不再预留 36px 假边栏 */
+body.left-panel-collapsed { --left-panel-safe-width: 0px; }
+body.right-panel-collapsed { --right-panel-safe-width: 0px; }
+
+/* 3) 工装卡片下方抽屉，复用物料详情的“卡片内拉出”心智 */
+#left-tab-furnace #furnace-detail-panel {
+    display: none !important;
+}
+
+.furnace-card {
+    z-index: 2;
+}
+
+.furnace-card.active {
     position: relative;
-    z-index: 1;
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 18px;
-    align-items: center;
-    margin-bottom: 18px;
+    z-index: 4;
+    border-bottom-left-radius: 12px;
+    border-bottom-right-radius: 12px;
 }
-.ai-thinking-progress-track {
-    height: 7px;
+
+.furnace-inline-detail {
+    margin: -12px 14px 10px 16px;
+    width: calc(100% - 30px);
+    background: rgba(255, 255, 255, 0.97);
+    border: 1px solid #FDE68A;
+    border-top: 0;
+    border-left: 3px solid var(--furnace-accent);
+    border-radius: 0 0 14px 14px;
+    box-shadow: 0 12px 24px rgba(15, 23, 42, 0.10);
     overflow: hidden;
-    border-radius: 999px;
-    background: #E2E8F0;
+    animation: toolingDrawerIn 0.18s ease-out;
+    transform-origin: top center;
 }
-.ai-thinking-progress-fill {
-    height: 100%;
-    width: 0%;
-    border-radius: inherit;
-    background: linear-gradient(90deg, #2563EB, #60A5FA);
-    transition: width .28s ease;
-}
-.ai-thinking-time {
-    color: var(--text-secondary);
-    font-size: 12px;
-    font-weight: 800;
-    white-space: nowrap;
-}
-.ai-thinking-body {
-    position: relative;
-    z-index: 1;
-    display: grid;
-    grid-template-columns: 1fr 300px;
-    gap: 16px;
-}
-.ai-thinking-log-card,
-.ai-thinking-insight-card {
-    border: 1px solid rgba(226,232,240,.92);
-    background: rgba(255,255,255,.74);
-    border-radius: 18px;
-    padding: 16px;
-}
-.ai-thinking-section-title,
-.insight-title {
-    font-size: 13px;
-    font-weight: 900;
-    color: #0F172A;
-    margin-bottom: 10px;
-}
-.ai-thinking-log {
-    display: flex;
-    flex-direction: column;
-    gap: 7px;
-    min-height: 124px;
-}
-.log-line {
-    font-size: 12px;
-    line-height: 1.5;
-    color: var(--text-muted);
+
+.furnace-inline-detail .fid-header {
+    min-height: 30px;
+    padding: 6px 10px 6px 12px;
     display: flex;
     align-items: center;
-    gap: 8px;
+    justify-content: space-between;
+    background: linear-gradient(180deg, #FFFBEB 0%, #F8FAFC 100%);
+    border-bottom: 1px solid #FEF3C7;
 }
-.log-line::before {
-    content: '';
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-    border: 1px solid #CBD5E1;
-    flex: 0 0 auto;
+
+.furnace-inline-detail .fid-title {
+    font-size: 12px;
+    font-weight: 800;
+    color: #B45309;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
-.log-line.done { color: var(--text-secondary); }
-.log-line.done::before { background: var(--accent-color); border-color: var(--accent-color); box-shadow: inset 0 0 0 2px #fff; }
-.log-line.active { color: #1D4ED8; font-weight: 800; }
-.log-line.active::before { background: #fff; border-color: var(--accent-color); box-shadow: 0 0 0 4px rgba(37,99,235,.12); }
-.insight-text {
-    color: var(--text-secondary);
-    font-size: 13px;
-    line-height: 1.7;
-    min-height: 46px;
-}
-.insight-stack {
-    position: relative;
-    height: 86px;
-    margin-top: 12px;
-}
-.insight-stack span {
-    position: absolute;
-    left: 50%;
-    width: 96px;
-    height: 26px;
-    border-radius: 10px;
-    transform: translateX(-50%) rotateX(56deg) rotateZ(-45deg);
-    background: linear-gradient(135deg, rgba(37,99,235,.18), rgba(147,197,253,.5));
-    box-shadow: 0 10px 22px rgba(37,99,235,.08);
-}
-.insight-stack span:nth-child(1) { bottom: 2px; }
-.insight-stack span:nth-child(2) { bottom: 24px; width: 74px; opacity: .75; }
-.insight-stack span:nth-child(3) { bottom: 44px; width: 52px; opacity: .55; }
-.ai-thinking-footer {
-    position: relative;
-    z-index: 1;
-    margin-top: 18px;
-    text-align: center;
+
+.furnace-inline-detail .fid-close {
+    border: none;
+    background: transparent;
     color: var(--text-muted);
+    cursor: pointer;
+    font-size: 11px;
+    padding: 2px 4px;
+}
+
+.furnace-inline-detail .fid-close:hover {
+    color: var(--danger-color);
+}
+
+.furnace-inline-detail .fdp-body {
+    padding: 10px 10px 12px 10px;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.furnace-inline-detail .fdp-row {
+    gap: 6px;
+    margin-bottom: 7px;
+}
+
+.furnace-inline-detail .fdp-field label {
+    font-size: 11px;
+}
+
+.furnace-inline-detail .fdp-field input,
+.furnace-inline-detail .fdp-field select,
+.furnace-inline-detail .fdp-field textarea {
+    height: 34px;
     font-size: 12px;
 }
-.ai-thinking-footer strong { color: var(--accent-color); }
-@media (max-width: 980px) {
-    .ai-thinking-head { grid-template-columns: 1fr; text-align: center; }
-    .ai-thinking-title-block { text-align: center; }
-    .ai-thinking-steps { grid-template-columns: 1fr 1fr; }
-    .ai-thinking-body { grid-template-columns: 1fr; }
-    .ai-thinking-modal { padding: 28px 24px; overflow-y: auto; }
+
+.furnace-inline-detail .fdp-save-btn {
+    height: 34px;
+    font-size: 13px;
+}
+
+.fid-extra-section {
+    margin-top: 8px;
+    padding: 9px 10px;
+    border-radius: 12px;
+    border: 1px dashed #FCD34D;
+    background: #FFFBEB;
+}
+
+.fid-extra-title {
+    font-size: 11px;
+    color: #B45309;
+    margin-bottom: 7px;
+    font-weight: 800;
+}
+
+.fid-muted {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+@keyframes toolingDrawerIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* ==================== PATCH: MOVE GENERATE BUTTON TO LEFT PANEL FOOTER ==================== */
+/* 生成方案改为底部主操作，避免与“增加工装 / 导入 / 清空”靠太近造成误触 */
+#left-panel .left-generate-action.left-generate-bottom {
+    order: 999;
+    flex-shrink: 0;
+    margin-top: auto;
+    padding: 12px 14px 14px 14px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.96), #FFFFFF);
+    border-top: 1px solid var(--border-color);
+    border-bottom: none !important;
+    box-shadow: 0 -10px 22px rgba(15, 23, 42, 0.045);
+}
+
+#left-panel .left-generate-action.left-generate-bottom .left-generate-btn {
+    height: 42px;
+    border-radius: 12px !important;
+    font-size: 15px !important;
+    font-weight: 800 !important;
+    letter-spacing: 0.2px;
+}
+
+#left-panel .left-generate-action.left-generate-bottom .left-generate-hint {
+    margin-top: 6px;
+    font-size: 11px;
+    line-height: 1.35;
+    color: var(--text-muted);
+}
+
+/* 左侧内容滚动区给底部主按钮留出呼吸空间 */
+#left-panel .left-tab-pane.active {
+    min-height: 0;
+}
+
+#left-panel .panel-header-actions {
+    flex-wrap: nowrap;
+}
+
+body.left-panel-collapsed #left-panel .left-generate-action.left-generate-bottom {
+    pointer-events: none;
+}
+
+
+/* ==================== PATCH: 方案库保存后可见性修复 ==================== */
+/* 右侧方案库现在内嵌在方案工作台中，不再依赖旧的 library-mode 才显示。 */
+#right-tab-library.active #master-view,
+#right-tab-library #master-view.active {
+    display: flex !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    flex-direction: column !important;
+}
+
+#right-tab-library.active #master-content {
+    display: flex !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    flex-direction: column !important;
+}
+
+#right-tab-library.active #master-list {
+    display: block !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+}
+
+#right-tab-library .master-plan-card {
+    display: block;
 }

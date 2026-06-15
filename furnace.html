@@ -36,28 +36,34 @@
     <!-- ==================== MAIN CONTENT ==================== -->
     <div id="main-content">
 
-        <!-- LEFT PANEL: Furnace Config -->
+        <button id="left-edge-handle" class="edge-panel-handle left" type="button" title="展开资源配置">资源</button>
+        <button id="right-edge-handle" class="edge-panel-handle right" type="button" title="展开方案工作台">方案</button>
+
+        <!-- LEFT PANEL: Equipment / Tooling / Workpiece Resources -->
         <div id="left-panel">
             <div class="panel-header">
                 <h3>资源配置</h3>
                 <div class="panel-header-actions">
                     <span class="panel-expand-btn-left" id="panel-expand-btn-left" title="展开面板" style="display:none;">▶</span>
                     <button class="btn-sm btn-toggle-panel" id="btn-toggle-left-panel" title="折叠/展开面板">◀</button>
-                    <button class="btn-sm" id="btn-add-furnace" title="按当前页面执行主要操作">新增工装</button>
-                    <button class="btn-sm left-action-import" id="btn-import-excel" title="导入Excel工件" style="display:none;">导入工件</button>
+                    <button class="btn-sm" id="btn-add-furnace" title="按当前页面执行主要操作">增加工装</button>
+                    <button class="btn-sm left-action-import" id="btn-import-excel" title="导入Excel工件" style="display:none;">导入</button>
                     <button class="btn-sm btn-reset-danger" id="btn-clear-all-furnaces" title="按当前页面清空数据">清空</button>
                 </div>
             </div>
-            <div class="left-generate-action">
-                <button class="btn btn-generate left-generate-btn" id="btn-generate-plan">AI装炉</button>
-                <div class="left-generate-hint">配置工装与物料后生成装炉方案</div>
-            </div>
+
+
             <div class="left-panel-tabs">
-                <button class="left-tab-btn active" data-tab="furnace">工装</button>
-                <button class="left-tab-btn" data-tab="tooling">车间</button>
-                <button class="left-tab-btn" data-tab="material">物料</button>
+                <button class="left-tab-btn active" data-tab="furnace">装载工装</button>
+                <button class="left-tab-btn" data-tab="tooling">生产车间</button>
+                <button class="left-tab-btn" data-tab="material">工件详情</button>
             </div>
+
             <div class="left-tab-pane active" id="left-tab-furnace">
+                <div class="left-tab-intro">
+                    <strong>装载工装 = 承载工件的一级载具</strong>
+                    <span>当前阶段不建真实炉膛，只用工装尺寸作为装载空间，测试不同数量、不同类型料框/料盘/网篮的装载效果。</span>
+                </div>
                 <div class="sort-bar">
                     <span style="font-size:10px;color:#666;margin-right:2px;"></span>
                     <button class="sort-btn" id="sort-name" data-field="name">名称</button>
@@ -77,6 +83,7 @@
                     </div>
                 </div>
             </div>
+
             <div class="left-tab-pane" id="left-tab-tooling">
                 <div class="left-tab-intro tooling-intro">
                     <strong>生产车间</strong>
@@ -88,56 +95,61 @@
                     <div class="workshop-placeholder-desc">后续可在这里维护车间 → 设备 → 炉膛的真实关系。当前装炉算法只测试“工件装入工装”的空间排布。</div>
                 </div>
             </div>
+
             <div class="left-tab-pane" id="left-tab-material">
-
-            <!-- 材质筛选条 -->
-            <div class="filter-bar" id="material-filter-bar">
-                <div class="filter-bar-header">
-                    <div class="filter-bar-title">🔧 材质</div>
-                    <button class="filter-collapse-btn" data-target="material-filter-tags">▼</button>
+                <div class="left-tab-intro">
+                    <strong>工件详情</strong>
+                    <span>管理待热处理产品 / 模具的尺寸、数量、重量、材质、工艺、硬度、交期与 CAD 图片。</span>
                 </div>
-                <div class="filter-tags" id="material-filter-tags"></div>
-            </div>
-            <!-- 工艺筛选条 -->
-            <div class="filter-bar" id="process-filter-bar">
-                <div class="filter-bar-header">
-                    <div class="filter-bar-title">⚙️ 工艺</div>
-                    <button class="filter-collapse-btn" data-target="process-filter-tags">▼</button>
+                <div class="material-filter-strip" aria-label="工件筛选">
+                    <!-- 材质筛选 -->
+                    <div class="filter-bar collapsed" id="material-filter-bar">
+                        <div class="filter-bar-header">
+                            <div class="filter-bar-title">🔧 材质</div>
+                            <button class="filter-collapse-btn" data-target="material-filter-tags">▼</button>
+                        </div>
+                        <div class="filter-tags" id="material-filter-tags"></div>
+                    </div>
+                    <!-- 工艺筛选 -->
+                    <div class="filter-bar collapsed" id="process-filter-bar">
+                        <div class="filter-bar-header">
+                            <div class="filter-bar-title">⚙️ 工艺</div>
+                            <button class="filter-collapse-btn" data-target="process-filter-tags">▼</button>
+                        </div>
+                        <div class="filter-tags" id="process-filter-tags"></div>
+                    </div>
+                    <!-- 硬度筛选 -->
+                    <div class="filter-bar collapsed" id="hardness-filter-bar">
+                        <div class="filter-bar-header">
+                            <div class="filter-bar-title">🧪 硬度</div>
+                            <button class="filter-collapse-btn" data-target="hardness-filter-tags">▼</button>
+                        </div>
+                        <div class="filter-tags" id="hardness-filter-tags"></div>
+                    </div>
                 </div>
-                <div class="filter-tags" id="process-filter-tags"></div>
-            </div>
-            <!-- 硬度筛选条 -->
-            <div class="filter-bar" id="hardness-filter-bar">
-                <div class="filter-bar-header">
-                    <div class="filter-bar-title">🧪 硬度</div>
-                    <button class="filter-collapse-btn" data-target="hardness-filter-tags">▼</button>
-                </div>
-                <div class="filter-tags" id="hardness-filter-tags"></div>
-            </div>
-            <div class="panel-scroll" id="material-cards-container"></div>
-            <div id="material-detail-panel" class="collapsed">
-                <div class="mdp-header" id="mdp-toggle-btn">
-                    <span id="mdp-title">📋 工件详情</span>
-                    <span class="mdp-toggle" id="mdp-toggle-icon">▼</span>
-                </div>
-                <div id="mdp-body-wrapper">
-                    <div class="mdp-placeholder" id="mdp-placeholder">点击左侧工件卡片查看详情</div>
-                    <div class="mdp-body" id="mdp-body" style="display:none;"></div>
+                <div class="panel-scroll" id="material-cards-container"></div>
+                <div id="material-detail-panel">
+                    <div class="mdp-header" id="mdp-toggle-btn">
+                        <span id="mdp-title">📋 工件详情</span>
+                        <span class="mdp-toggle" id="mdp-toggle-icon">▲</span>
+                    </div>
+                    <div id="mdp-body-wrapper">
+                        <div class="mdp-placeholder" id="mdp-placeholder">点击左侧工件卡片查看详情</div>
+                        <div class="mdp-body" id="mdp-body" style="display:none;"></div>
+                    </div>
                 </div>
             </div>
-
+            <div class="left-generate-action left-generate-bottom">
+                <button class="btn btn-generate left-generate-btn" id="btn-generate-plan">生成方案</button>
+                <div class="left-generate-hint">配置工装与工件后，生成装炉方案</div>
             </div>
-            <!-- V4.0: 车间选择器 -->
-            <!-- <div class="spacing-line">
-                默认安全间距 <input type="number" id="global-spacing" value="5" min="0"> mm
-            </div> -->
         </div>
 
         <!-- CENTER: 3D View -->
         <div id="canvas-area">
             <!-- AI 推荐方案水平信息条（V6.0：移出3D场景，置于顶部） -->
             <div id="ai-summary-bar" class="ai-summary-bar">
-                <div class="ai-bar-empty" id="ai-bar-empty">点击左侧 <b>AI装炉</b> 查看AI推荐</div>
+                <div class="ai-bar-empty" id="ai-bar-empty">点击左侧 <b>生成方案</b> 查看AI推荐</div>
                 <div class="ai-bar-content" id="ai-bar-content" style="display:none;"></div>
                 <div class="ai-bar-toggle" id="ai-bar-toggle" style="display:none;" title="展开炉次明细">📋</div>
             </div>
@@ -165,10 +177,28 @@
                     <div class="big-icon">📦</div>
                     <div class="msg">
                         <b style="color:#1E293B;">开始创建装炉方案</b><br>
-                        ① 左侧添加炉膛 / 工装<br>
-                        ② 左侧“工件详情”添加或导入物料<br>
-                        ③ 点击右上角 <b style="color:#2563EB;">生成方案</b>
+                        ① 左侧“装载工装”增加料框/料盘/网篮/环形工装<br>
+                        ② 左侧“工件详情”添加或导入工件<br>
+                        ③ 点击左侧 <b style="color:#2563EB;">生成方案</b>
                     </div>
+                </div>
+                <div id="current-tooling-hud" class="current-tooling-hud" style="display:none;">
+                    <div class="cth-head">
+                        <div>
+                            <div class="cth-kicker">当前工装</div>
+                            <div class="cth-title" id="cth-title">-</div>
+                        </div>
+                        <div class="cth-index" id="cth-index">-/-</div>
+                    </div>
+                    <div class="cth-grid">
+                        <div class="cth-item"><span>已装工件</span><strong id="cth-packed-count">-</strong></div>
+                        <div class="cth-item"><span>装载重量</span><strong id="cth-weight">-</strong></div>
+                        <div class="cth-item"><span>重量利用率</span><strong id="cth-weight-rate">-</strong></div>
+                        <div class="cth-item"><span>空间利用率</span><strong id="cth-space-rate">-</strong></div>
+                        <div class="cth-item"><span>层数</span><strong id="cth-layers">-</strong></div>
+                        <div class="cth-item"><span>承重上限</span><strong id="cth-max-weight">-</strong></div>
+                    </div>
+                    <div class="cth-unpacked" id="cth-unpacked" style="display:none;"></div>
                 </div>
             </div>
             <!-- 炉膛缩略图栏 -->
@@ -243,8 +273,7 @@
             <div id="master-view" class="active">
                 <div id="master-header">
                     <button class="master-back-btn" id="btn-master-back" style="display:none;">← 返回</button>
-                    <h3>📚 方案库</h3>
-                    <span style="font-size:11px;color:#888;">保存、加载、删除历史装炉方案</span>
+                    <span class="master-library-hint">保存、加载、删除历史装炉方案</span>
                     <button class="master-import-btn" id="btn-master-import-json">📥 导入JSON到工作台</button>
                 </div>
                 <div id="master-content">
@@ -446,17 +475,17 @@
         </div>
     </div>
 
-    <!-- Tooling Add Overlay - 工装类型选择 + 尺寸配置 -->
+    <!-- Tooling Add Overlay - 装载工装参数配置 -->
     <div id="tooling-add-overlay">
         <div id="tooling-add-modal">
-            <h3>选择工装类型并配置尺寸</h3>
-            <p class="tooling-add-subtitle">先选择工装类型，再配置炉膛尺寸参数，确认后添加炉膛</p>
+            <h3>增加装载工装</h3>
+            <p class="tooling-add-subtitle">当前阶段只维护装载工装：工装名称、类型、装载空间尺寸、承重、数量、适用工艺与安全间距。真实炉膛/设备/车间关系后续再链接。</p>
             <div class="tooling-add-body">
-                <!-- 左侧：工装类型选择 -->
+                <!-- 左侧：工装类型说明 -->
                 <div class="tooling-add-left">
-                    <div class="tooling-type-label">选择工装类型</div>
+                    <div class="tooling-type-label">工装类型</div>
                     <div class="tooling-type-cards" id="tooling-type-cards">
-                        <!-- 动态渲染工装类型卡片 -->
+                        <div class="tooling-unlinked-placeholder">标准料框 / 料盘 / 网篮 / 环形工装<br><b>当前未链接真实设备</b></div>
                     </div>
                 </div>
                 <!-- 右侧：尺寸配置 -->
@@ -465,27 +494,27 @@
                         <div class="tooling-add-section-title"></div>
                         <div class="tooling-add-dim-row">
                             <div class="tooling-add-field">
-                                <label>炉膛名称</label>
+                                <label>工装名称</label>
                                 <input type="text" id="ta-name" value="">
                             </div>
                         </div>
                         <div class="tooling-add-dim-row">
                             <div class="tooling-add-field">
-                                <label>宽度 X (mm)</label>
+                                <label>工装宽度 X (mm)</label>
                                 <input type="number" id="ta-width" value="900" min="100" max="5000">
                             </div>
                             <div class="tooling-add-field">
-                                <label>高度 Y (mm)</label>
+                                <label>工装高度 Y (mm)</label>
                                 <input type="number" id="ta-height" value="1200" min="100" max="5000">
                             </div>
                             <div class="tooling-add-field">
-                                <label>纵深 Z (mm)</label>
+                                <label>工装纵深 Z (mm)</label>
                                 <input type="number" id="ta-depth" value="900" min="100" max="5000">
                             </div>
                         </div>
                         <div class="tooling-add-dim-row">
                             <div class="tooling-add-field">
-                                <label>承重上限 (kg)</label>
+                                <label>工装承重上限 (kg)</label>
                                 <input type="number" id="ta-weight" value="1000" min="1" max="50000">
                             </div>
                             <div class="tooling-add-field">
@@ -494,21 +523,32 @@
                             </div>
                         </div>
                         <div class="tooling-add-dim-row">
-                            <!-- <div class="tooling-add-field">
-                                <label>计划装载炉次</label>
-                                <input type="number" id="ta-planned" value="0" min="0" max="1000">
-                            </div> -->
                             <div class="tooling-add-field">
-                                <label>安全间距 (mm) <span style="color:#666;font-size:9px;">留空=用默认</span></label>
+                                <label>适用加工工艺</label>
+                                <input type="text" id="ta-processes" value="渗碳淬火" placeholder="如：渗碳淬火、氮化、真空淬火">
+                            </div>
+                            <div class="tooling-add-field">
+                                <label>装载方向</label>
+                                <select id="ta-load-direction">
+                                    <option value="前进前出">前进前出</option>
+                                    <option value="前进后出">前进后出</option>
+                                    <option value="吊装入炉">吊装入炉</option>
+                                    <option value="顶部装入">顶部装入</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="tooling-add-dim-row">
+                            <div class="tooling-add-field">
+                                <label>工装安全间距 (mm) <span style="color:#666;font-size:9px;">留空=默认</span></label>
                                 <input type="number" id="ta-spacing" value="" placeholder="默认5mm">
                             </div>
                         </div>
                     </div>
                     <!-- 工装预览信息 -->
                     <div class="tooling-add-section">
-                        <div class="tooling-add-section-title">工装参数预览</div>
+                        <div class="tooling-add-section-title">当前链接状态</div>
                         <div class="tooling-add-preview" id="ta-preview">
-                            <span style="color:#666;">请先在左侧选择工装类型</span>
+                            <span style="color:#666;">当前工装未链接真实热处理设备；系统会先按该工装尺寸进行装载测试。</span>
                         </div>
                     </div>
                     <!-- 工装实拍图预览 -->
