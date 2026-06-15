@@ -931,6 +931,57 @@ export function renderThermalSimulationPanel(metrics = null, mode = null) {
         const suggestion = metrics?.suggestion || '点击“辐射暴露”后，系统会用少量有效/遮挡射线解释工件辐射可达性。';
         const selected = metrics?.selectedItem || null;
         const selectedBatch = metrics?.selectedBatch || null;
+        const sectionView = selected?.sectionView || metrics?.sectionView || null;
+        const sectionActive = !!sectionView?.active;
+        const sectionButtonHtml = selected
+            ? `<button class="plan-action-btn" type="button" data-action="${sectionActive ? 'radiation-section-exit' : 'radiation-section-view'}" style="margin-top:10px;width:100%;">${sectionActive ? '退出真实剖面' : '开启真实剖面切割'}</button>`
+            : '';
+        const sectionDirections = [
+            { key: 'x+', label: '+X' },
+            { key: 'x-', label: '-X' },
+            { key: 'y+', label: '+Y' },
+            { key: 'y-', label: '-Y' },
+            { key: 'z+', label: '+Z' },
+            { key: 'z-', label: '-Z' }
+        ];
+        const sectionDirectionButtons = sectionDirections.map(d => `
+            <button class="clip-dir-btn ${sectionView?.directionKey === d.key ? 'active' : ''}" type="button" data-action="radiation-section-direction" data-section-dir="${d.key}">
+                ${d.label}
+            </button>
+        `).join('');
+        const sectionOffset = Number(sectionView?.offset || 0);
+        const sectionMinOffset = Number(sectionView?.minOffset ?? -300);
+        const sectionMaxOffset = Number(sectionView?.maxOffset ?? 300);
+        const sectionInfoHtml = sectionActive ? `
+                <div class="thermal-stage-title" style="margin-top:10px;">真实剖面切割 Clip Plane</div>
+                <div class="thermal-risk-row"><span>切割面</span><strong>${escapeSimHtml(sectionView.axisLabel || '-')}</strong></div>
+                <div class="thermal-risk-row"><span>法线方向</span><strong>${escapeSimHtml(sectionView.normalText || '-')} · ${escapeSimHtml(sectionView.keepLabel || '-')}</strong></div>
+                <div class="thermal-risk-row"><span>当前偏移</span><strong>${Math.round(sectionOffset)}mm</strong></div>
+                <div class="thermal-risk-row"><span>切面坐标</span><strong>${escapeSimHtml(sectionView.axis || '-').toUpperCase()}=${Math.round(sectionView.planeCoord || 0)}mm</strong></div>
+                <div class="clip-plane-control">
+                    <div class="clip-plane-control-title">选择切割方向</div>
+                    <div class="clip-dir-grid">${sectionDirectionButtons}</div>
+                    <div class="clip-offset-head">
+                        <span>沿法线拖动</span>
+                        <strong>${Math.round(sectionOffset)}mm</strong>
+                    </div>
+                    <input class="clip-offset-slider" type="range"
+                        data-action="radiation-section-offset"
+                        min="${sectionMinOffset}"
+                        max="${sectionMaxOffset}"
+                        value="${sectionOffset}"
+                        step="5">
+                    <div class="clip-offset-scale">
+                        <span>${sectionMinOffset}mm</span>
+                        <span>0</span>
+                        <span>${sectionMaxOffset}mm</span>
+                    </div>
+                    <button class="clip-reset-btn" type="button" data-action="radiation-section-reset">回到选中工件中心</button>
+                </div>
+                <div class="thermal-mini-note strong-note">蓝色半透明面是真实 Three.js clipping plane：可直接在 3D 里拖动蓝色切面，也可用上方滑块沿法线移动。</div>
+                <div class="thermal-risk-row"><span>主要遮挡方向</span><strong>${escapeSimHtml(sectionView.dominantDirection || '-')}</strong></div>
+                <div class="thermal-risk-row"><span>遮挡来源</span><strong>${escapeSimHtml(sectionView.blockerText || '-')}</strong></div>
+            ` : '';
         const blockerList = selected?.blockers?.length
             ? selected.blockers.map(b => `<div class="thermal-risk-row"><span>${escapeSimHtml(b.name)}</span><strong>${b.count} 条路径</strong></div>`).join('')
             : '<div class="thermal-mini-note">暂无明确遮挡来源。</div>';
@@ -949,6 +1000,8 @@ export function renderThermalSimulationPanel(metrics = null, mode = null) {
                     <div class="thermal-metric"><span>遮挡路径</span><strong>${selected.blockedRayCount}</strong></div>
                 </div>
                 <div class="thermal-mini-note strong-note">${escapeSimHtml(selected.suggestion)}</div>
+                ${sectionButtonHtml}
+                ${sectionInfoHtml}
                 <div class="thermal-stage-title" style="margin-top:10px;">主要遮挡工件</div>
                 ${blockerList}
             </div>

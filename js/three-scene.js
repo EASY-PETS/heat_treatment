@@ -121,9 +121,12 @@ let thermalSimRuntime = {
     selectedRadiationItemId: null,
     selectedRadiationEntry: null,
     selectedRadiationBatch: null,
+    selectedRadiationSection: null,
     onUpdate: null,
     onFinish: null
 };
+
+let radiationSectionDragState = null;
 
 let thermalSceneThemeActive = false;
 let thermalSavedSceneBackground = null;
@@ -236,6 +239,7 @@ function clearThermalGroupChildren() {
 
 export function clearThermalSimulationLayer() {
     clearThermalGroupChildren();
+    clearRadiationClipPlanes();
     restoreThermalItemMaterials();
     setThermalSceneTheme(false);
 
@@ -249,6 +253,7 @@ export function clearThermalSimulationLayer() {
     thermalSimRuntime.selectedRadiationItemId = null;
     thermalSimRuntime.selectedRadiationEntry = null;
     thermalSimRuntime.selectedRadiationBatch = null;
+    thermalSimRuntime.selectedRadiationSection = null;
     thermalSimRuntime.onUpdate = null;
     thermalSimRuntime.onFinish = null;
 }
@@ -258,7 +263,90 @@ function getMeshMaterials(mesh) {
     return Array.isArray(mesh.material) ? mesh.material.filter(Boolean) : [mesh.material];
 }
 
+function clearRadiationClipPlanes() {
+    if (!furnaceGroups || typeof furnaceGroups.forEach !== 'function') return;
+    furnaceGroups.forEach(group => {
+        if (!group) return;
+        group.traverse(child => {
+            if (!child.isMesh || !child.material) return;
+            getMeshMaterials(child).forEach(mat => {
+                if (!mat) return;
+                const saved = mat.userData && mat.userData._radiationClipOriginal;
+                if (saved) {
+                    mat.clippingPlanes = saved.clippingPlanes || null;
+                    mat.clipIntersection = !!saved.clipIntersection;
+                    mat.clipShadows = !!saved.clipShadows;
+                    delete mat.userData._radiationClipOriginal;
+                } else if (mat.userData && mat.userData._radiationClipApplied) {
+                    mat.clippingPlanes = null;
+                    mat.clipIntersection = false;
+                    mat.clipShadows = false;
+                }
+                if (mat.userData) delete mat.userData._radiationClipApplied;
+                mat.needsUpdate = true;
+            });
+        });
+    });
+}
+
+function createClipPlaneFromSectionInfo(sectionInfo) {
+    if (!sectionInfo || !sectionInfo.normal) return null;
+    const normal = new THREE.Vector3(sectionInfo.normal.x, sectionInfo.normal.y, sectionInfo.normal.z);
+    if (normal.lengthSq() < 1e-6) return null;
+    normal.normalize();
+    const origin = new THREE.Vector3(
+        sectionInfo.origin?.x || 0,
+        sectionInfo.origin?.y || 0,
+        sectionInfo.origin?.z || 0
+    );
+    return new THREE.Plane(normal, -normal.dot(origin));
+}
+
+function applyRadiationClipPlaneToCurrentFurnace(sectionInfo) {
+    const clipPlane = createClipPlaneFromSectionInfo(sectionInfo);
+    const group = furnaceGroups.get(currentFurnaceIndex);
+    if (!clipPlane || !group) return;
+
+    if (renderer) renderer.localClippingEnabled = true;
+
+    group.traverse(child => {
+        if (!child.isMesh || !child.material) return;
+        getMeshMaterials(child).forEach(mat => {
+            if (!mat) return;
+            if (!mat.userData) mat.userData = {};
+            if (!mat.userData._radiationClipOriginal) {
+                mat.userData._radiationClipOriginal = {
+                    clippingPlanes: mat.clippingPlanes ? mat.clippingPlanes.slice() : null,
+                    clipIntersection: !!mat.clipIntersection,
+                    clipShadows: !!mat.clipShadows
+                };
+            }
+            mat.clippingPlanes = [clipPlane];
+            mat.clipIntersection = false;
+            mat.clipShadows = true;
+            mat.userData._radiationClipApplied = true;
+            mat.needsUpdate = true;
+        });
+    });
+}
+
+function getSectionDirectionNormal(directionKey) {
+    const meta = getRadiationSectionAxisMeta(directionKey);
+    if (meta.axis === 'x') return new THREE.Vector3(meta.sign, 0, 0);
+    if (meta.axis === 'y') return new THREE.Vector3(0, meta.sign, 0);
+    return new THREE.Vector3(0, 0, meta.sign);
+}
+
+function projectWorldToScreen(point, rect) {
+    const p = point.clone().project(camera);
+    return {
+        x: rect.left + (p.x + 1) * 0.5 * rect.width,
+        y: rect.top + (-p.y + 1) * 0.5 * rect.height
+    };
+}
+
 function restoreThermalItemMaterials() {
+    clearRadiationClipPlanes();
     if (!furnaceGroups || typeof furnaceGroups.forEach !== 'function') return;
     furnaceGroups.forEach(group => {
         if (!group) return;
@@ -1118,6 +1206,324 @@ function applySelectedRadiationTintToItems(furnace, scoreMap, selectedItemId, bl
     });
 }
 
+
+
+function getRadiationSectionAxisMeta(directionKey = 'z+') {
+    const raw = String(directionKey || 'z+').toLowerCase().trim();
+    let axis = raw[0];
+    if (!['x', 'y', 'z'].includes(axis)) axis = 'z';
+    const sign = raw.includes('-') ? -1 : 1;
+    const key = `${axis}${sign > 0 ? '+' : '-'}`;
+
+    const labels = {
+        'x+': { axisLabel: '+X 方向切割', planeLabel: 'YZ 剖面', keepLabel: '保留右侧 / +X 侧', normalText: '+X' },
+        'x-': { axisLabel: '-X 方向切割', planeLabel: 'YZ 剖面', keepLabel: '保留左侧 / -X 侧', normalText: '-X' },
+        'y+': { axisLabel: '+Y 方向切割', planeLabel: 'XZ 水平剖面', keepLabel: '保留上层 / +Y 侧', normalText: '+Y' },
+        'y-': { axisLabel: '-Y 方向切割', planeLabel: 'XZ 水平剖面', keepLabel: '保留下层 / -Y 侧', normalText: '-Y' },
+        'z+': { axisLabel: '+Z 方向切割', planeLabel: 'XY 剖面', keepLabel: '保留后侧 / +Z 侧', normalText: '+Z' },
+        'z-': { axisLabel: '-Z 方向切割', planeLabel: 'XY 剖面', keepLabel: '保留前侧 / -Z 侧', normalText: '-Z' }
+    };
+
+    return {
+        axis,
+        sign,
+        directionKey: key,
+        coordKey: axis,
+        ...(labels[key] || labels['z+'])
+    };
+}
+
+function calculateBestSectionAxis(furnace, entry) {
+    const target = entry?.item;
+    if (!furnace || !target) return getRadiationSectionAxisMeta('z+');
+
+    const targetCenter = getItemCenterWorld(target, furnace);
+    const axisWeight = { x: 0, y: 0, z: 0 };
+    let dominant = null;
+
+    (entry.blockers || []).forEach(({ item, count }) => {
+        if (!item) return;
+        const c = getItemCenterWorld(item, furnace);
+        const diffVec = c.clone().sub(targetCenter);
+        const diff = {
+            x: Math.abs(diffVec.x),
+            y: Math.abs(diffVec.y),
+            z: Math.abs(diffVec.z)
+        };
+        const weight = Math.max(1, count || 1);
+        axisWeight.x += diff.x * weight;
+        axisWeight.y += diff.y * weight;
+        axisWeight.z += diff.z * weight;
+        const maxAxis = diff.x >= diff.y && diff.x >= diff.z ? 'x' : (diff.y >= diff.z ? 'y' : 'z');
+        const score = diff[maxAxis] * weight;
+        if (!dominant || score > dominant.score) {
+            dominant = { item, axis: maxAxis, score, diff: diffVec, count: weight };
+        }
+    });
+
+    let axis = 'z';
+    if (axisWeight.x >= axisWeight.y && axisWeight.x >= axisWeight.z) axis = 'x';
+    else if (axisWeight.y >= axisWeight.z) axis = 'y';
+
+    if (!dominant) {
+        const dims = { x: target.w || 0, y: target.h || 0, z: target.d || 0 };
+        axis = dims.x >= dims.y && dims.x >= dims.z ? 'x' : (dims.y >= dims.z ? 'y' : 'z');
+    } else {
+        axis = dominant.axis;
+    }
+
+    const diffValue = dominant ? dominant.diff[axis] : 1;
+    const sign = diffValue < 0 ? -1 : 1;
+    const meta = getRadiationSectionAxisMeta(`${axis}${sign > 0 ? '+' : '-'}`);
+    meta.dominantBlocker = dominant?.item || null;
+    meta.dominantDirection = dominant ? describeSectionDirection(dominant.diff, dominant.axis) : '当前工件中心剖面';
+    return meta;
+}
+
+function describeSectionDirection(diff, axis) {
+    if (!diff) return '当前工件中心剖面';
+    if (axis === 'x') return diff.x < 0 ? '左侧遮挡' : '右侧遮挡';
+    if (axis === 'y') return diff.y < 0 ? '下层遮挡' : '上层遮挡';
+    return diff.z < 0 ? '前侧遮挡' : '后侧遮挡';
+}
+
+function getSectionAxisWorldRange(furnace, axis) {
+    const fw = Number(furnace?.w || 600);
+    const fh = Number(furnace?.h || 600);
+    const fd = Number(furnace?.d || 600);
+    if (axis === 'x') return { min: -fw / 2, max: fw / 2 };
+    if (axis === 'y') return { min: THERMAL_BASE_Y, max: THERMAL_BASE_Y + fh };
+    return { min: -fd / 2, max: fd / 2 };
+}
+
+function clampSectionOffset(furnace, baseCoord, axisMeta, offset = 0) {
+    const range = getSectionAxisWorldRange(furnace, axisMeta.axis);
+    const minOffset = Math.ceil(axisMeta.sign > 0 ? range.min - baseCoord : baseCoord - range.max);
+    const maxOffset = Math.floor(axisMeta.sign > 0 ? range.max - baseCoord : baseCoord - range.min);
+    const safeOffset = Math.max(minOffset, Math.min(maxOffset, Number(offset) || 0));
+    return { offset: safeOffset, minOffset, maxOffset };
+}
+
+function buildRadiationSectionInfo(furnace, entry, axisMeta, options = {}) {
+    const target = entry?.item;
+    const c = target ? getItemCenterWorld(target, furnace) : new THREE.Vector3();
+    const fw = Number(furnace?.w || 600);
+    const fh = Number(furnace?.h || 600);
+    const fd = Number(furnace?.d || 600);
+    const baseBand = axisMeta.axis === 'x' ? target?.w : (axisMeta.axis === 'y' ? target?.h : target?.d);
+    const focusBand = Math.round(Math.max(90, Math.min(Math.max(fw, fh, fd) * 0.26, (baseBand || 80) * 1.8 + 60)));
+
+    const baseCoord = c[axisMeta.axis] || 0;
+    const offsetInfo = clampSectionOffset(furnace, baseCoord, axisMeta, options.offset ?? 0);
+    const planeCoord = baseCoord + axisMeta.sign * offsetInfo.offset;
+
+    const normal = getSectionDirectionNormal(axisMeta.directionKey);
+    const origin = new THREE.Vector3(c.x, c.y, c.z);
+    origin[axisMeta.axis] = planeCoord;
+
+    const blockers = (entry.blockers || []).slice(0, 4).map(({ item, count }) => ({
+        id: item?.id,
+        name: item?.name || '遮挡工件',
+        count: count || 0
+    }));
+
+    const blockerNames = blockers.map(b => b.name).join(' / ') || '暂无集中遮挡物';
+    const blockerText = axisMeta.dominantBlocker?.name || blockers[0]?.name || '暂无集中遮挡物';
+    const suggestion = blockers.length
+        ? `已沿 ${axisMeta.normalText} 法线生成真实 clipping plane。蓝色切面可直接拖动，优先观察 ${blockerText} 与当前工件之间的红色遮挡路径。`
+        : `当前件没有明显集中遮挡来源，已以当前工件中心为基准生成真实 clipping plane，可切换六个方向复核周边空间。`;
+
+    return {
+        active: true,
+        trueClip: true,
+        draggable: true,
+        axis: axisMeta.axis,
+        sign: axisMeta.sign,
+        directionKey: axisMeta.directionKey,
+        axisLabel: `${axisMeta.axisLabel} · ${axisMeta.planeLabel}`,
+        planeLabel: axisMeta.planeLabel,
+        keepLabel: axisMeta.keepLabel,
+        normalText: axisMeta.normalText,
+        dominantDirection: axisMeta.dominantDirection,
+        focusBand,
+        baseCoord: Math.round(baseCoord),
+        planeCoord: Math.round(planeCoord),
+        offset: Math.round(offsetInfo.offset),
+        minOffset: offsetInfo.minOffset,
+        maxOffset: offsetInfo.maxOffset,
+        center: { x: Math.round(c.x), y: Math.round(c.y), z: Math.round(c.z) },
+        origin: { x: origin.x, y: origin.y, z: origin.z },
+        normal: { x: normal.x, y: normal.y, z: normal.z },
+        blockerText,
+        blockerNames,
+        blockers,
+        suggestion
+    };
+}
+
+function buildRadiationSectionPlane(furnace, entry, sectionInfo) {
+    const group = new THREE.Group();
+    group.name = 'radiationSectionPlane';
+    if (!furnace || !entry?.item || !sectionInfo) return group;
+
+    const fw = Number(furnace.w || 600);
+    const fh = Number(furnace.h || 600);
+    const fd = Number(furnace.d || 600);
+    const c = getItemCenterWorld(entry.item, furnace);
+    const yMid = THERMAL_BASE_Y + fh / 2;
+
+    let width = fw;
+    let height = fh;
+    let position = new THREE.Vector3(0, yMid, 0);
+    let rotation = new THREE.Euler(0, 0, 0);
+
+    if (sectionInfo.axis === 'x') {
+        width = fd;
+        height = fh;
+        position = new THREE.Vector3(sectionInfo.planeCoord, yMid, 0);
+        rotation = new THREE.Euler(0, Math.PI / 2, 0);
+    } else if (sectionInfo.axis === 'y') {
+        width = fw;
+        height = fd;
+        position = new THREE.Vector3(0, sectionInfo.planeCoord, 0);
+        rotation = new THREE.Euler(-Math.PI / 2, 0, 0);
+    } else {
+        width = fw;
+        height = fh;
+        position = new THREE.Vector3(0, yMid, sectionInfo.planeCoord);
+        rotation = new THREE.Euler(0, 0, 0);
+    }
+
+    const geo = new THREE.PlaneGeometry(width, height);
+    const mat = new THREE.MeshBasicMaterial({
+        color: 0x38bdf8,
+        transparent: true,
+        opacity: 0.22,
+        side: THREE.DoubleSide,
+        depthWrite: false
+    });
+    const plane = new THREE.Mesh(geo, mat);
+    plane.name = 'radiationClipPlaneSurface';
+    plane.position.copy(position);
+    plane.rotation.copy(rotation);
+    plane.renderOrder = 45;
+    plane.userData = {
+        isRadiationRiskMarker: true,
+        isRadiationSectionPlane: true,
+        isRadiationClipDragHandle: true
+    };
+    group.add(plane);
+
+    const edgeGeo = new THREE.EdgesGeometry(geo);
+    const edgeMat = new THREE.LineBasicMaterial({
+        color: 0x7dd3fc,
+        transparent: true,
+        opacity: 0.86,
+        depthWrite: false
+    });
+    const edges = new THREE.LineSegments(edgeGeo, edgeMat);
+    edges.position.copy(position);
+    edges.rotation.copy(rotation);
+    edges.renderOrder = 46;
+    edges.userData = { isRadiationRiskMarker: true, isRadiationSectionPlane: true };
+    group.add(edges);
+
+    const normal = getSectionDirectionNormal(sectionInfo.directionKey);
+    const arrowLength = Math.max(90, Math.min(180, Math.max(fw, fh, fd) * 0.16));
+    const arrow = new THREE.ArrowHelper(normal, position.clone(), arrowLength, 0x7dd3fc, arrowLength * 0.28, arrowLength * 0.14);
+    arrow.name = 'radiationClipPlaneNormalArrow';
+    arrow.renderOrder = 47;
+    arrow.userData = { isRadiationRiskMarker: true, isRadiationSectionPlane: true };
+    group.add(arrow);
+
+    const lineMat = new THREE.LineBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.52,
+        depthWrite: false
+    });
+    let p1, p2;
+    if (sectionInfo.axis === 'y') {
+        p1 = new THREE.Vector3(-fw / 2, sectionInfo.planeCoord, c.z);
+        p2 = new THREE.Vector3(fw / 2, sectionInfo.planeCoord, c.z);
+    } else {
+        const axisCoord = sectionInfo.planeCoord;
+        p1 = new THREE.Vector3(c.x, THERMAL_BASE_Y, c.z);
+        p2 = new THREE.Vector3(c.x, THERMAL_BASE_Y + fh, c.z);
+        p1[sectionInfo.axis] = axisCoord;
+        p2[sectionInfo.axis] = axisCoord;
+    }
+    const lineGeo = new THREE.BufferGeometry().setFromPoints([p1, p2]);
+    const centerLine = new THREE.Line(lineGeo, lineMat);
+    centerLine.renderOrder = 47;
+    centerLine.userData = { isRadiationRiskMarker: true, isRadiationSectionCenterLine: true };
+    group.add(centerLine);
+
+    group.userData = {
+        isRadiationSectionPlaneGroup: true,
+        pickTargets: [plane]
+    };
+
+    return group;
+}
+
+function applySectionFocusTintToItems(furnace, scoreMap, entry, sectionInfo) {
+    const group = furnaceGroups.get(currentFurnaceIndex);
+    if (!group || !furnace || !entry?.item || !sectionInfo) return;
+
+    const itemMap = new Map((furnace.packedItems || []).map(item => [item.id, item]));
+    const selectedId = entry.item.id;
+    const blockerIds = new Set((entry.blockers || []).map(b => b.item?.id).filter(Boolean));
+    const axis = sectionInfo.axis || 'z';
+    const planeCoord = Number(sectionInfo.planeCoord || 0);
+    const focusBand = Math.max(1, sectionInfo.focusBand || 140);
+
+    group.traverse(child => {
+        if (!child.isMesh || !child.userData || !child.userData.itemId) return;
+        const itemId = child.userData.itemId;
+        const item = itemMap.get(itemId);
+        const score = scoreMap.get(itemId)?.score ?? 0.55;
+        const c = item ? getItemCenterWorld(item, furnace) : new THREE.Vector3();
+        const distance = Math.abs(c[axis] - planeCoord);
+        const nearPlane = distance <= focusBand;
+        const isSelected = itemId === selectedId;
+        const isBlocker = blockerIds.has(itemId);
+
+        let tint = getRadiationScoreColor(score);
+        let opacity = nearPlane ? 0.42 : 0.18;
+        let emissiveScale = nearPlane ? 0.16 : 0.06;
+        let emissiveIntensity = nearPlane ? 0.12 : 0.05;
+
+        if (isSelected) {
+            tint = new THREE.Color(0xfacc15);
+            opacity = 0.98;
+            emissiveScale = 0.75;
+            emissiveIntensity = 0.72;
+        } else if (isBlocker) {
+            tint = new THREE.Color(0xff1744);
+            opacity = 0.78;
+            emissiveScale = 0.58;
+            emissiveIntensity = 0.48;
+        }
+
+        getMeshMaterials(child).forEach(mat => {
+            if (!mat.color) return;
+            saveOriginalMaterialIfNeeded(mat);
+            mat.color.copy(tint);
+            if (mat.emissive) {
+                mat.emissive.copy(tint);
+                mat.emissive.multiplyScalar(emissiveScale);
+                mat.emissiveIntensity = emissiveIntensity;
+            }
+            mat.transparent = true;
+            mat.opacity = opacity;
+            mat.needsUpdate = true;
+        });
+    });
+
+    applyRadiationClipPlaneToCurrentFurnace(sectionInfo);
+}
+
 function buildSelectedRadiationMetric(furnace, scoreMap, entry) {
     const metrics = calculateRadiationMetrics(furnace, scoreMap);
     if (!entry) return metrics;
@@ -1191,6 +1597,7 @@ export function renderRadiationExposureSimulation() {
     thermalSimRuntime.selectedRadiationItemId = null;
     thermalSimRuntime.selectedRadiationEntry = null;
     thermalSimRuntime.selectedRadiationBatch = null;
+    thermalSimRuntime.selectedRadiationSection = null;
     thermalSimRuntime.metrics = calculateRadiationMetrics(furnace, scores);
     return thermalSimRuntime.metrics;
 }
@@ -1437,6 +1844,7 @@ export function selectRadiationExposureBatch(criteria = {}) {
     thermalSimRuntime.selectedRadiationItemId = null;
     thermalSimRuntime.selectedRadiationEntry = null;
     thermalSimRuntime.selectedRadiationBatch = criteria;
+    thermalSimRuntime.selectedRadiationSection = null;
     thermalSimRuntime.metrics = buildBatchRadiationMetric(furnace, scores, matchedEntries, criteria);
     return thermalSimRuntime.metrics;
 }
@@ -1487,8 +1895,162 @@ export function selectRadiationExposureItem(itemId) {
     thermalSimRuntime.selectedRadiationItemId = itemId;
     thermalSimRuntime.selectedRadiationEntry = entry;
     thermalSimRuntime.selectedRadiationBatch = null;
+    thermalSimRuntime.selectedRadiationSection = null;
     thermalSimRuntime.metrics = buildSelectedRadiationMetric(furnace, scores, entry);
     return thermalSimRuntime.metrics;
+}
+
+
+
+export function enterRadiationSectionView(options = {}) {
+    const furnace = getCurrentThermalFurnace();
+    const itemId = options.itemId || thermalSimRuntime.selectedRadiationItemId;
+    if (!furnace || !itemId) return thermalSimRuntime.metrics || null;
+
+    clearThermalGroupChildren();
+    restoreThermalItemMaterials();
+    setThermalSceneTheme(true);
+
+    const group = ensureThermalSimulationGroup();
+    const { scores, sources } = calculateRadiationExposureScores(furnace);
+    const entry = scores.get(itemId);
+    if (!entry) return renderRadiationExposureSimulation();
+
+    const currentSection = thermalSimRuntime.selectedRadiationSection || null;
+    const autoMeta = calculateBestSectionAxis(furnace, entry);
+    const requestedDirection = options.directionKey || options.direction || currentSection?.directionKey || autoMeta.directionKey;
+    const axisMeta = getRadiationSectionAxisMeta(requestedDirection);
+    axisMeta.dominantBlocker = autoMeta.dominantBlocker || null;
+    axisMeta.dominantDirection = autoMeta.dominantDirection || axisMeta.keepLabel;
+
+    const offset = options.offset != null
+        ? Number(options.offset)
+        : (currentSection && currentSection.directionKey === axisMeta.directionKey ? Number(currentSection.offset || 0) : 0);
+
+    const sectionInfo = buildRadiationSectionInfo(furnace, entry, axisMeta, { offset });
+
+    const sourceVisual = buildRadiationHeatSourcesVisual(furnace, sources);
+    const rays = buildSingleRadiationRays(entry);
+    const markers = buildSelectedRadiationMarkers(furnace, entry);
+    const sectionPlane = buildRadiationSectionPlane(furnace, entry, sectionInfo);
+
+    group.add(sourceVisual);
+    group.add(sectionPlane);
+    group.add(rays);
+    group.add(markers);
+    group.visible = true;
+
+    applySectionFocusTintToItems(furnace, scores, entry, sectionInfo);
+
+    thermalSimRuntime.visible = true;
+    thermalSimRuntime.activeMode = 'radiation';
+    thermalSimRuntime.isPlaying = false;
+    thermalSimRuntime.paused = false;
+    thermalSimRuntime.progress = 0;
+    thermalSimRuntime.sourceGroup = sourceVisual;
+    thermalSimRuntime.rayGroup = rays;
+    thermalSimRuntime.riskGroup = markers;
+    thermalSimRuntime.radiationScores = scores;
+    thermalSimRuntime.selectedRadiationItemId = itemId;
+    thermalSimRuntime.selectedRadiationEntry = entry;
+    thermalSimRuntime.selectedRadiationBatch = null;
+    thermalSimRuntime.selectedRadiationSection = sectionInfo;
+
+    const metrics = buildSelectedRadiationMetric(furnace, scores, entry);
+    metrics.sectionView = sectionInfo;
+    if (metrics.selectedItem) {
+        metrics.selectedItem.sectionView = sectionInfo;
+        metrics.selectedItem.suggestion = sectionInfo.suggestion;
+    }
+    metrics.suggestion = sectionInfo.suggestion;
+    thermalSimRuntime.metrics = metrics;
+    return thermalSimRuntime.metrics;
+}
+
+export function setRadiationSectionDirection(directionKey) {
+    if (!thermalSimRuntime.selectedRadiationItemId) return thermalSimRuntime.metrics || null;
+    return enterRadiationSectionView({ directionKey, offset: 0 });
+}
+
+export function setRadiationSectionOffset(offset) {
+    const section = thermalSimRuntime.selectedRadiationSection;
+    if (!thermalSimRuntime.selectedRadiationItemId || !section) return thermalSimRuntime.metrics || null;
+    return enterRadiationSectionView({ directionKey: section.directionKey, offset });
+}
+
+export function exitRadiationSectionView() {
+    const itemId = thermalSimRuntime.selectedRadiationItemId;
+    radiationSectionDragState = null;
+    thermalSimRuntime.selectedRadiationSection = null;
+    clearRadiationClipPlanes();
+    if (controls) controls.enabled = true;
+    if (itemId) return selectRadiationExposureItem(itemId);
+    return renderRadiationExposureSimulation();
+}
+
+export function tryStartRadiationSectionDragAtClientPoint(clientX, clientY) {
+    if (!renderer || !renderer.domElement || !camera) return false;
+    const section = thermalSimRuntime.selectedRadiationSection;
+    if (!section?.active || !thermalSimulationGroup) return false;
+
+    const rect = renderer.domElement.getBoundingClientRect();
+    if (!rect.width || !rect.height) return false;
+
+    const pointer = new THREE.Vector2(
+        ((clientX - rect.left) / rect.width) * 2 - 1,
+        -((clientY - rect.top) / rect.height) * 2 + 1
+    );
+
+    const pickTargets = [];
+    thermalSimulationGroup.traverse(child => {
+        if (child.userData?.isRadiationClipDragHandle) pickTargets.push(child);
+    });
+    if (!pickTargets.length) return false;
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(pointer, camera);
+    const hits = raycaster.intersectObjects(pickTargets, true);
+    if (!hits.length) return false;
+
+    const origin = new THREE.Vector3(section.origin?.x || 0, section.origin?.y || 0, section.origin?.z || 0);
+    const normal = new THREE.Vector3(section.normal?.x || 0, section.normal?.y || 0, section.normal?.z || 0).normalize();
+    if (normal.lengthSq() < 1e-6) return false;
+
+    const s0 = projectWorldToScreen(origin, rect);
+    const s1 = projectWorldToScreen(origin.clone().add(normal.clone().multiplyScalar(100)), rect);
+    const screenDir = { x: s1.x - s0.x, y: s1.y - s0.y };
+    const pixelPer100 = Math.hypot(screenDir.x, screenDir.y);
+    if (pixelPer100 < 4) return false;
+
+    radiationSectionDragState = {
+        startX: clientX,
+        startY: clientY,
+        startOffset: Number(section.offset || 0),
+        directionKey: section.directionKey,
+        screenDir: { x: screenDir.x / pixelPer100, y: screenDir.y / pixelPer100 },
+        pixelsPerUnit: pixelPer100 / 100
+    };
+
+    if (controls) controls.enabled = false;
+    if (renderer.domElement) renderer.domElement.style.cursor = 'ew-resize';
+    return true;
+}
+
+export function dragRadiationSectionPlaneToClientPoint(clientX, clientY) {
+    if (!radiationSectionDragState) return thermalSimRuntime.metrics || null;
+    const dx = clientX - radiationSectionDragState.startX;
+    const dy = clientY - radiationSectionDragState.startY;
+    const projectedPixels = dx * radiationSectionDragState.screenDir.x + dy * radiationSectionDragState.screenDir.y;
+    const delta = projectedPixels / Math.max(0.001, radiationSectionDragState.pixelsPerUnit);
+    const nextOffset = radiationSectionDragState.startOffset + delta;
+    return setRadiationSectionOffset(Math.round(nextOffset));
+}
+
+export function endRadiationSectionDrag() {
+    radiationSectionDragState = null;
+    if (controls) controls.enabled = true;
+    if (renderer?.domElement) renderer.domElement.style.cursor = '';
+    return thermalSimRuntime.metrics || null;
 }
 
 export function clearRadiationExposureSelection() {
@@ -1528,7 +2090,8 @@ export function getRadiationExposureRuntime() {
         scores: thermalSimRuntime.radiationScores,
         selectedItemId: thermalSimRuntime.selectedRadiationItemId,
         selectedItem: thermalSimRuntime.metrics?.selectedItem || null,
-        selectedBatch: thermalSimRuntime.metrics?.selectedBatch || null
+        selectedBatch: thermalSimRuntime.metrics?.selectedBatch || null,
+        sectionView: thermalSimRuntime.metrics?.sectionView || thermalSimRuntime.selectedRadiationSection || null
     };
 }
 
@@ -1968,6 +2531,8 @@ export function initThree() {
     const newRenderer = new THREE.WebGLRenderer({ antialias: true });
     newRenderer.setSize(container.clientWidth, container.clientHeight);
     newRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // V2.7: 限制像素比以优化性能
+    // 真实剖面切割需要开启 local clipping，默认关闭会导致 clippingPlanes 不生效。
+    newRenderer.localClippingEnabled = true;
     newRenderer.shadowMap.enabled = true;
     newRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(newRenderer.domElement);

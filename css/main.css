@@ -6081,3 +6081,82 @@ body:not(.ui-plan-ready) .right-workbench-footer {
     color: var(--text-muted);
     text-align: center;
 }
+
+/* ==================== RADIATION TRUE CLIP PLANE CONTROLS ==================== */
+.clip-plane-control {
+    margin-top: 10px;
+    padding: 10px;
+    border-radius: 12px;
+    background: rgba(14, 165, 233, 0.08);
+    border: 1px solid rgba(14, 165, 233, 0.20);
+}
+.clip-plane-control-title {
+    font-size: 11px;
+    font-weight: 800;
+    color: #0369A1;
+    margin-bottom: 8px;
+}
+.clip-dir-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    margin-bottom: 10px;
+}
+.clip-dir-btn {
+    border: 1px solid rgba(14, 165, 233, 0.22);
+    background: rgba(255, 255, 255, 0.82);
+    color: #0F172A;
+    border-radius: 9px;
+    height: 28px;
+    font-size: 11px;
+    font-weight: 800;
+    cursor: pointer;
+}
+.clip-dir-btn:hover {
+    background: rgba(224, 242, 254, 0.95);
+}
+.clip-dir-btn.active {
+    color: #FFFFFF;
+    background: linear-gradient(135deg, #0284C7, #38BDF8);
+    border-color: rgba(2, 132, 199, 0.65);
+}
+.clip-offset-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: #64748B;
+    font-size: 10px;
+    margin-bottom: 5px;
+}
+.clip-offset-head strong {
+    color: #0284C7;
+}
+.clip-offset-slider {
+    width: 100%;
+    accent-color: #0284C7;
+}
+.clip-offset-scale {
+    display: flex;
+    justify-content: space-between;
+    font-size: 9px;
+    color: #94A3B8;
+    margin-top: 3px;
+}
+.clip-reset-btn {
+    width: 100%;
+    margin-top: 8px;
+    border: none;
+    border-radius: 9px;
+    height: 28px;
+    font-size: 11px;
+    font-weight: 800;
+    color: #0369A1;
+    background: rgba(224, 242, 254, 0.9);
+    cursor: pointer;
+}
+.clip-reset-btn:hover {
+    background: rgba(186, 230, 253, 0.98);
+}
+body.radiation-pick-mode #canvas-container canvas {
+    cursor: crosshair;
+}

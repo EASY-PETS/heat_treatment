@@ -130,6 +130,13 @@ import {
     selectRadiationExposureBatch,
     selectLowestRadiationExposureItemInCurrentBatch,
     selectRadiationExposureItemAtClientPoint,
+    enterRadiationSectionView,
+    setRadiationSectionDirection,
+    setRadiationSectionOffset,
+    tryStartRadiationSectionDragAtClientPoint,
+    dragRadiationSectionPlaneToClientPoint,
+    endRadiationSectionDrag,
+    exitRadiationSectionView,
     clearRadiationExposureSelection,
     clearThermalSimulationLayer,
     showAILoadingLoading, hideAILoadingLoading
@@ -2144,6 +2151,7 @@ function ensureRadiationOverviewVisible() {
 }
 
 let radiationPickPointerDown = null;
+let radiationSectionPlaneDragging = false;
 
 // function renderSelectedRadiationMetrics(metrics) {
 //     if (!metrics) return;
@@ -2165,12 +2173,6 @@ function renderSelectedRadiationMetrics(metrics) {
     processSimulationMode = 'radiation';
     document.body.classList.add('radiation-pick-mode');
     activateRightPanelTab('thermal');
-
-    console.log('[radiation diagnosis render]', {
-        selectedItem: metrics.selectedItem,
-        selectedBatch: metrics.selectedBatch,
-        mode: metrics.mode
-    });
 
     renderThermalSimulationPanel(metrics, 'radiation');
     syncThermalControlState(metrics);
@@ -2221,13 +2223,48 @@ function bindRadiationDiagnosisActions() {
 
     document.addEventListener('click', (event) => {
         const locateBtn = event.target.closest('[data-action="radiation-locate-worst"]');
-        if (!locateBtn) return;
+        const sectionBtn = event.target.closest('[data-action="radiation-section-view"]');
+        const sectionExitBtn = event.target.closest('[data-action="radiation-section-exit"]');
+        const sectionDirBtn = event.target.closest('[data-action="radiation-section-direction"]');
+        const sectionResetBtn = event.target.closest('[data-action="radiation-section-reset"]');
+
+        if (!locateBtn && !sectionBtn && !sectionExitBtn && !sectionDirBtn && !sectionResetBtn) return;
+
         event.preventDefault();
         event.stopPropagation();
+
         processSimulationMode = 'radiation';
         document.body.classList.add('radiation-pick-mode');
         ensureRadiationOverviewVisible();
-        const metrics = selectLowestRadiationExposureItemInCurrentBatch();
+
+        let metrics = null;
+        if (locateBtn) {
+            metrics = selectLowestRadiationExposureItemInCurrentBatch();
+        } else if (sectionBtn) {
+            metrics = enterRadiationSectionView();
+        } else if (sectionExitBtn) {
+            metrics = exitRadiationSectionView();
+        } else if (sectionDirBtn) {
+            metrics = setRadiationSectionDirection(sectionDirBtn.getAttribute('data-section-dir') || 'z+');
+        } else if (sectionResetBtn) {
+            metrics = setRadiationSectionOffset(0);
+        }
+
+        renderSelectedRadiationMetrics(metrics || getRadiationExposureRuntime()?.metrics || null);
+    }, true);
+
+    document.addEventListener('input', (event) => {
+        const offsetInput = event.target.closest('[data-action="radiation-section-offset"]');
+        if (!offsetInput) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        processSimulationMode = 'radiation';
+        document.body.classList.add('radiation-pick-mode');
+        ensureRadiationOverviewVisible();
+
+        const metrics = setRadiationSectionOffset(parseFloat(offsetInput.value || '0'));
         renderSelectedRadiationMetrics(metrics || getRadiationExposureRuntime()?.metrics || null);
     }, true);
 }
@@ -2249,6 +2286,17 @@ function bindRadiationItemSelection() {
 
     container.addEventListener('pointerdown', (event) => {
         if (!isRadiationModeActive() || !isRadiationCanvasEventTarget(event)) return;
+
+        // 如果点中蓝色 clipping plane，进入沿法线拖动模式，不再触发普通 3D 工件拾取。
+        if (tryStartRadiationSectionDragAtClientPoint(event.clientX, event.clientY)) {
+            radiationSectionPlaneDragging = true;
+            radiationPickPointerDown = null;
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+            return;
+        }
+
         radiationPickPointerDown = {
             x: event.clientX,
             y: event.clientY,
@@ -2256,7 +2304,26 @@ function bindRadiationItemSelection() {
         };
     }, true);
 
+    container.addEventListener('pointermove', (event) => {
+        if (!radiationSectionPlaneDragging) return;
+        const metrics = dragRadiationSectionPlaneToClientPoint(event.clientX, event.clientY);
+        renderSelectedRadiationMetrics(metrics || getRadiationExposureRuntime()?.metrics || null);
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+    }, true);
+
     container.addEventListener('pointerup', (event) => {
+        if (radiationSectionPlaneDragging) {
+            radiationSectionPlaneDragging = false;
+            const metrics = endRadiationSectionDrag();
+            renderSelectedRadiationMetrics(metrics || getRadiationExposureRuntime()?.metrics || null);
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+            return;
+        }
+
         if (!isRadiationModeActive() || !isRadiationCanvasEventTarget(event)) return;
         if (!radiationPickPointerDown) return;
 
@@ -2268,7 +2335,6 @@ function bindRadiationItemSelection() {
         // OrbitControls 拖拽旋转时不触发选择。
         if (dx > 6 || dy > 6 || dt > 700) return;
 
-
         processSimulationMode = 'radiation';
         document.body.classList.add('radiation-pick-mode');
         ensureRadiationOverviewVisible();
@@ -2276,16 +2342,16 @@ function bindRadiationItemSelection() {
         const metrics = selectRadiationExposureItemAtClientPoint(event.clientX, event.clientY);
 
         // 关键：3D 单件点击不能 fallback 到 runtime.metrics。
-        // 因为 runtime.metrics 可能还是上一次的批次诊断，
-        // 会导致点击 3D 工件失败时，右侧继续显示批次诊断，看起来像“单件诊断没触发”。
         if (metrics && metrics.selectedItem) {
             renderSelectedRadiationMetrics(metrics);
         }
-        // processSimulationMode = 'radiation';
-        // document.body.classList.add('radiation-pick-mode');
-        // ensureRadiationOverviewVisible();
-        // const metrics = selectRadiationExposureItemAtClientPoint(event.clientX, event.clientY);
-        // renderSelectedRadiationMetrics(metrics || getRadiationExposureRuntime()?.metrics || null);
+    }, true);
+
+    window.addEventListener('pointerup', () => {
+        if (!radiationSectionPlaneDragging) return;
+        radiationSectionPlaneDragging = false;
+        const metrics = endRadiationSectionDrag();
+        renderSelectedRadiationMetrics(metrics || getRadiationExposureRuntime()?.metrics || null);
     }, true);
 }
 
