@@ -167,6 +167,32 @@ export function createFurnaceCard(name, depth, width, height, maxWeight, count, 
     return { cardId, furnaceCounter: newFC, name, depth, width, height, maxWeight, count, plannedHeats: 0, basketType: basketType || 'grid', toolingType: tt };
 }
 
+function collapseMaterialDetailPanel() {
+    const panel = document.getElementById('material-detail-panel');
+    const placeholder = document.getElementById('mdp-placeholder');
+    const body = document.getElementById('mdp-body');
+    const title = document.getElementById('mdp-title');
+    const icon = document.getElementById('mdp-toggle-icon');
+
+    if (placeholder) placeholder.style.display = 'block';
+    if (body) body.style.display = 'none';
+    if (title) title.textContent = '📋 工件详情';
+    if (panel) panel.classList.add('collapsed');
+    if (icon) icon.textContent = '▼';
+
+    setMdpCollapsed(true);
+}
+
+function expandMaterialDetailPanel() {
+    const panel = document.getElementById('material-detail-panel');
+    const icon = document.getElementById('mdp-toggle-icon');
+
+    if (panel) panel.classList.remove('collapsed');
+    if (icon) icon.textContent = '▲';
+
+    setMdpCollapsed(false);
+}
+
 // export function selectFurnaceCard(cardId) { document.querySelectorAll('.furnace-card').forEach(c => c.classList.remove('active')); const card = document.getElementById(cardId); if (card) { card.classList.add('active'); setSelectedFurnaceCardId(cardId); } }
 export function selectFurnaceCard(cardId) { 
     const card = document.getElementById(cardId); 
@@ -337,7 +363,22 @@ export function createMaterialCard(name, shape, count, dim1, dim2, dim3, totalWe
     const customer = extraData && extraData.customer ? extraData.customer : '';
     const metaExtra = (itemCode || customer) ? '<div class="item-meta">编码: ' + itemCode + ' | 客户: ' + customer + '</div>' : '';
     card.innerHTML = '<button class="m-delete" data-action="delete-material" data-mid="' + newMC + '">✕</button><div class="m-color-swatch" style="background-color:' + color + ';" title="' + name + '"></div><div class="m-info"><div class="m-name">' + name + '</div><div class="m-meta">' + shapeLabel + ' · ' + dimLabel + 'mm · ×' + count + '件 · ' + totalWeight + 'kg</div>' + metaExtra + '</div>';
-    card.addEventListener('click', (e) => { if (e.target.closest('[data-action="delete-material"]')) return; const wasSelected = card.classList.contains('active'); selectMaterialCard(cardId); if (!wasSelected) { showMaterialDetail(cardId); } else { document.getElementById('mdp-placeholder').style.display = 'block'; document.getElementById('mdp-body').style.display = 'none'; document.getElementById('mdp-title').textContent = '📋 工件详情'; } });
+    
+    card.addEventListener('click', (e) => {
+        if (e.target.closest('[data-action="delete-material"]')) return;
+
+        const wasSelected = card.classList.contains('active');
+
+        selectMaterialCard(cardId);
+
+        if (wasSelected) {
+            collapseMaterialDetailPanel();
+        } else {
+            showMaterialDetail(cardId);
+            expandMaterialDetailPanel();
+        }
+    });
+
     document.getElementById('material-cards-container').appendChild(card);
     // 刷新筛选条
     renderFilterBars(window._clearFurnaceResults);
@@ -356,13 +397,17 @@ export function showMaterialDetail(cardId) {
     const body = document.getElementById('mdp-body'); body.style.display = 'block';
     const colorHex = rgbToHex(d.color) || '#888888';
     const cadPreview = d.cadImage ? '<div style="margin-top:4px;"><img src="' + d.cadImage + '" style="max-width:100%;max-height:60px;border-radius:3px;border:1px solid #333;" alt="CAD图纸预览"></div>' : '';
-    body.innerHTML = '<div class="mdp-row"><div class="mdp-field" style="flex:2;"><label>名称</label><input type="text" id="mdp-name" value="' + d.name + '"></div><div class="mdp-field"><label>形态</label><select id="mdp-shape"><option value="cuboid" ' + (d.shape==='cuboid'?'selected':'') + '>立方体</option><option value="cylinder" ' + (d.shape==='cylinder'?'selected':'') + '>圆柱体</option></select></div></div><div class="mdp-row"><div class="mdp-field"><label>长度 L (mm)</label><input type="number" id="mdp-dim1" value="' + (d.shape==='cuboid'?d.dim1:'') + '"></div><div class="mdp-field"><label>宽度 W (mm)</label><input type="number" id="mdp-dim2" value="' + (d.shape==='cuboid'?d.dim2:'') + '"></div><div class="mdp-field"><label>高度 H (mm)</label><input type="number" id="mdp-dim3" value="' + d.dim3 + '"></div><div class="mdp-field"><label>直径 D (mm)</label><input type="number" id="mdp-diam" value="' + (d.shape==='cylinder'?d.dim1:'') + '"></div></div><div class="mdp-row"><div class="mdp-field"><label>数量</label><input type="number" id="mdp-count" value="' + d.count + '" min="1"></div><div class="mdp-field"><label>总重量 (kg)</label><input type="number" id="mdp-weight" value="' + d.totalWeight + '"></div><div class="mdp-field" style="max-width:52px;"><label>颜色</label><input type="color" id="mdp-color" value="' + colorHex + '" style="padding:0;height:28px;width:100%;"></div></div><div class="mdp-row"><div class="mdp-field"><label>材质</label><input type="text" id="mdp-material" value="' + d.material + '"></div><div class="mdp-field"><label>硬度要求</label><input type="text" id="mdp-hardness" value="' + d.hardness + '"></div></div><div class="mdp-row"><div class="mdp-field"><label>工艺</label><input type="text" id="mdp-process" value="' + d.process + '"></div></div><div class="mdp-row"><div class="mdp-field"><label>下单日期</label><input type="date" id="mdp-order-date" value="' + d.orderDate + '"></div><div class="mdp-field"><label>交付日期</label><input type="date" id="mdp-delivery-date" value="' + d.deliveryDate + '"></div></div><div class="mdp-row"><div class="mdp-field"><label>CAD图纸 <span style="color:#555;font-size:9px;">（可选，图片文件）</span></label><input type="file" id="mdp-cad-file" accept="image/*" style="font-size:9px;padding:2px;">' + cadPreview + '</div></div><div class="mdp-row"><div class="mdp-field"><label>备注</label><textarea id="mdp-remark">' + d.remark + '</textarea></div></div><button class="mdp-save-btn" id="mdp-save-btn">💾 保存工件参数</button><button class="mdp-import-btn" id="mdp-import-btn-inline">📥 从Excel导入工件列表</button>';
+    body.innerHTML = '<div class="mdp-row"><div class="mdp-field" style="flex:2;"><label>名称</label><input type="text" id="mdp-name" value="' + d.name + '"></div><div class="mdp-field"><label>形态</label><select id="mdp-shape"><option value="cuboid" ' + (d.shape==='cuboid'?'selected':'') + '>立方体</option><option value="cylinder" ' + (d.shape==='cylinder'?'selected':'') + '>圆柱体</option></select></div></div><div class="mdp-row"><div class="mdp-field"><label>长度 L (mm)</label><input type="number" id="mdp-dim1" value="' + (d.shape==='cuboid'?d.dim1:'') + '"></div><div class="mdp-field"><label>宽度 W (mm)</label><input type="number" id="mdp-dim2" value="' + (d.shape==='cuboid'?d.dim2:'') + '"></div><div class="mdp-field"><label>高度 H (mm)</label><input type="number" id="mdp-dim3" value="' + d.dim3 + '"></div><div class="mdp-field"><label>直径 D (mm)</label><input type="number" id="mdp-diam" value="' + (d.shape==='cylinder'?d.dim1:'') + '"></div></div><div class="mdp-row"><div class="mdp-field"><label>数量</label><input type="number" id="mdp-count" value="' + d.count + '" min="1"></div><div class="mdp-field"><label>总重量 (kg)</label><input type="number" id="mdp-weight" value="' + d.totalWeight + '"></div><div class="mdp-field" style="max-width:52px;"><label>颜色</label><input type="color" id="mdp-color" value="' + colorHex + '" style="padding:0;height:28px;width:100%;"></div></div><div class="mdp-row"><div class="mdp-field"><label>材质</label><input type="text" id="mdp-material" value="' + d.material + '"></div><div class="mdp-field"><label>硬度要求</label><input type="text" id="mdp-hardness" value="' + d.hardness + '"></div></div><div class="mdp-row"><div class="mdp-field"><label>工艺</label><input type="text" id="mdp-process" value="' + d.process + '"></div></div><div class="mdp-row"><div class="mdp-field"><label>下单日期</label><input type="date" id="mdp-order-date" value="' + d.orderDate + '"></div><div class="mdp-field"><label>交付日期</label><input type="date" id="mdp-delivery-date" value="' + d.deliveryDate + '"></div></div><div class="mdp-row"><div class="mdp-field"><label>CAD图纸 <span style="color:#555;font-size:9px;">（可选，图片文件）</span></label><input type="file" id="mdp-cad-file" accept="image/*" style="font-size:9px;padding:2px;">' + cadPreview + '</div></div><div class="mdp-row"><div class="mdp-field"><label>备注</label><textarea id="mdp-remark">' + d.remark + '</textarea></div></div><button class="mdp-save-btn" id="mdp-save-btn">💾 保存工件参数</button>';
     document.getElementById('mdp-save-btn').addEventListener('click', () => saveMaterialDetail(cardId));
-    document.getElementById('mdp-import-btn-inline').addEventListener('click', () => { document.getElementById('excel-file-input').click(); });
     document.getElementById('mdp-cad-file').addEventListener('change', function(e) { const file = e.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = (ev) => { card.setAttribute('data-cad-image', ev.target.result); const existingPreview = document.querySelector('#mdp-body .mdp-field img'); if (existingPreview) existingPreview.src = ev.target.result; else { const previewDiv = document.createElement('div'); previewDiv.style.marginTop = '4px'; previewDiv.innerHTML = '<img src="' + ev.target.result + '" style="max-width:100%;max-height:60px;border-radius:3px;border:1px solid #333;" alt="CAD图纸预览">'; document.getElementById('mdp-cad-file').parentNode.appendChild(previewDiv); } }; reader.readAsDataURL(file); });
     document.getElementById('mdp-shape').addEventListener('change', function() { const isCyl = this.value === 'cylinder'; document.getElementById('mdp-dim1').disabled = isCyl; document.getElementById('mdp-dim2').disabled = isCyl; document.getElementById('mdp-diam').disabled = !isCyl; if (isCyl) { document.getElementById('mdp-dim1').value = ''; document.getElementById('mdp-dim2').value = ''; } else { document.getElementById('mdp-diam').value = ''; } });
     const isCyl = d.shape === 'cylinder'; document.getElementById('mdp-dim1').disabled = isCyl; document.getElementById('mdp-dim2').disabled = isCyl; document.getElementById('mdp-diam').disabled = !isCyl;
-    if (mdpCollapsed) { setMdpCollapsed(false); document.getElementById('material-detail-panel').classList.remove('collapsed'); document.getElementById('mdp-toggle-icon').textContent = '▲'; }
+    // if (mdpCollapsed) { 
+    //     setMdpCollapsed(false); 
+    //     document.getElementById('material-detail-panel').classList.remove('collapsed'); 
+    //     document.getElementById('mdp-toggle-icon').textContent = '▲'; 
+    // }
+    expandMaterialDetailPanel();
 }
 
 export function saveMaterialDetail(cardId) {

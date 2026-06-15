@@ -16,7 +16,7 @@
     --orange: #F59E0B;
     --furnace-accent: #F59E0B;
     --material-accent: #2563EB;
-    --left-panel-width: 270px;
+    --left-panel-width: 400px;
     --right-panel-width: 360px;
     --collapsed-panel-width: 40px;
 }
@@ -2893,7 +2893,7 @@ body.right-panel-collapsed {
 
 /* ---------- 1. 统一布局变量与安全区 ---------- */
 :root {
-    --left-panel-width: 270px;
+    --left-panel-width: 400px;
     --right-panel-width: 360px;
     --collapsed-panel-width: 36px;
 
@@ -4432,4 +4432,356 @@ body.ui-input-ready .left-generate-action .left-generate-btn {
     line-height: 1.45;
     color: var(--text-muted);
     text-align: center;
+}
+
+
+/* ==================== V7.1 MATERIAL WORKSPACE REFINEMENT ==================== */
+.left-action-import {
+    color: var(--accent-color) !important;
+    background: #EFF6FF !important;
+    border-color: #BFDBFE !important;
+}
+.left-action-import:hover {
+    background: #DBEAFE !important;
+    border-color: var(--accent-color) !important;
+}
+.right-rule-top-btn {
+    color: var(--accent-color) !important;
+    background: #EFF6FF !important;
+    border-color: #BFDBFE !important;
+    height: 26px;
+    padding: 3px 8px !important;
+}
+.right-rule-top-btn:hover {
+    background: #DBEAFE !important;
+    border-color: var(--accent-color) !important;
+}
+#left-tab-material {
+    min-height: 0;
+}
+#left-tab-material #material-cards-container {
+    min-height: 220px;
+}
+#left-tab-material #material-detail-panel {
+    max-height: 240px;
+}
+#left-tab-material #material-detail-panel.collapsed {
+    max-height: 36px;
+    overflow: hidden;
+}
+.library-rules-footer {
+    display: none !important;
+}
+
+/* ==================== AI THINKING OVERLAY - FULLSCREEN V7 ==================== */
+#ai-loading-overlay {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 3000 !important;
+    display: none !important;
+    align-items: center !important;
+    justify-content: center !important;
+    background: rgba(15, 23, 42, 0.62) !important;
+    backdrop-filter: blur(12px) saturate(120%) !important;
+    -webkit-backdrop-filter: blur(12px) saturate(120%) !important;
+    padding: 28px;
+}
+#ai-loading-overlay.active {
+    display: flex !important;
+}
+.ai-thinking-modal {
+    position: relative;
+    width: min(940px, calc(100vw - 64px));
+    max-height: calc(100vh - 64px);
+    overflow: hidden;
+    background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.96));
+    border: 1px solid rgba(226, 232, 240, 0.95);
+    border-radius: 24px;
+    box-shadow: 0 30px 90px rgba(15, 23, 42, 0.34), 0 0 0 1px rgba(255,255,255,0.35) inset;
+    padding: 34px 42px 26px 42px;
+    color: var(--text-color);
+}
+.ai-thinking-modal::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+        radial-gradient(circle at 24% 22%, rgba(37,99,235,0.12), transparent 28%),
+        radial-gradient(circle at 75% 65%, rgba(96,165,250,0.10), transparent 32%);
+}
+.ai-thinking-cancel {
+    position: absolute;
+    top: 18px;
+    right: 20px;
+    z-index: 2;
+    height: 32px;
+    padding: 0 12px;
+    border: 1px solid rgba(203, 213, 225, 0.9);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.78);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all .18s ease;
+}
+.ai-thinking-cancel:hover {
+    color: var(--text-color);
+    background: #fff;
+    transform: translateY(-1px);
+}
+.ai-thinking-head {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 30px;
+    align-items: center;
+    margin-bottom: 24px;
+}
+.ai-thinking-orb {
+    position: relative;
+    width: 164px;
+    height: 164px;
+    margin: 0 auto;
+    display: grid;
+    place-items: center;
+}
+.ai-orb-core {
+    width: 86px;
+    height: 86px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-size: 24px;
+    font-weight: 900;
+    color: #fff;
+    background: radial-gradient(circle at 38% 32%, #93C5FD, #2563EB 62%, #1E3A8A 100%);
+    box-shadow: 0 0 32px rgba(37,99,235,.55), inset 0 0 20px rgba(255,255,255,.35);
+    animation: ai-core-pulse 1.9s ease-in-out infinite;
+}
+.ai-orb-ring {
+    position: absolute;
+    border-radius: 50%;
+    border: 1px solid rgba(37,99,235,.25);
+}
+.ai-orb-ring.ring-1 { inset: 18px; animation: ai-ring-spin 8s linear infinite; }
+.ai-orb-ring.ring-2 { inset: 0; border-style: dashed; animation: ai-ring-spin 13s linear reverse infinite; }
+.ai-orb-dot {
+    position: absolute;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #2563EB;
+    box-shadow: 0 0 12px rgba(37,99,235,.75);
+}
+.ai-orb-dot.dot-1 { top: 18px; left: 48px; }
+.ai-orb-dot.dot-2 { right: 20px; top: 70px; }
+.ai-orb-dot.dot-3 { left: 32px; bottom: 28px; }
+@keyframes ai-core-pulse { 0%,100%{ transform: scale(1); } 50%{ transform: scale(1.06); } }
+.ai-thinking-title-block { text-align: left; }
+.ai-thinking-kicker {
+    display: inline-flex;
+    align-items: center;
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 999px;
+    background: #EFF6FF;
+    color: var(--accent-color);
+    font-size: 12px;
+    font-weight: 800;
+    margin-bottom: 10px;
+}
+.ai-thinking-title-block h3 {
+    margin: 0;
+    font-size: 30px;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    color: #0F172A;
+}
+.ai-thinking-title-block p {
+    margin: 10px 0 0 0;
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1.7;
+}
+.ai-thinking-steps {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin: 8px 0 20px;
+}
+.ai-thinking-step {
+    position: relative;
+    min-height: 106px;
+    padding: 16px 14px 14px;
+    border: 1px solid rgba(226,232,240,.9);
+    border-radius: 18px;
+    background: rgba(255,255,255,.74);
+    opacity: .68;
+    transition: all .24s ease;
+}
+.ai-thinking-step.done,
+.ai-thinking-step.active {
+    opacity: 1;
+    border-color: rgba(37,99,235,.35);
+    background: rgba(239,246,255,.78);
+}
+.ai-thinking-step.active {
+    box-shadow: 0 10px 30px rgba(37,99,235,.12);
+}
+.ai-thinking-step .step-dot {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    margin-bottom: 10px;
+    background: #F1F5F9;
+    color: #94A3B8;
+    font-size: 13px;
+    font-weight: 900;
+}
+.ai-thinking-step.done .step-dot {
+    color: #fff;
+    background: var(--accent-color);
+}
+.ai-thinking-step.done .step-dot::before { content: '✓'; }
+.ai-thinking-step.done .step-dot { font-size: 0; }
+.ai-thinking-step.done .step-dot::before { font-size: 14px; }
+.ai-thinking-step.active .step-dot {
+    color: #fff;
+    background: var(--accent-color);
+    box-shadow: 0 0 0 6px rgba(37,99,235,.10);
+}
+.ai-thinking-step strong {
+    display: block;
+    font-size: 14px;
+    font-weight: 800;
+    color: var(--text-color);
+    margin-bottom: 6px;
+}
+.ai-thinking-step span {
+    display: block;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-muted);
+}
+.ai-thinking-progress-row {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 18px;
+    align-items: center;
+    margin-bottom: 18px;
+}
+.ai-thinking-progress-track {
+    height: 7px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: #E2E8F0;
+}
+.ai-thinking-progress-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #2563EB, #60A5FA);
+    transition: width .28s ease;
+}
+.ai-thinking-time {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 800;
+    white-space: nowrap;
+}
+.ai-thinking-body {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: 1fr 300px;
+    gap: 16px;
+}
+.ai-thinking-log-card,
+.ai-thinking-insight-card {
+    border: 1px solid rgba(226,232,240,.92);
+    background: rgba(255,255,255,.74);
+    border-radius: 18px;
+    padding: 16px;
+}
+.ai-thinking-section-title,
+.insight-title {
+    font-size: 13px;
+    font-weight: 900;
+    color: #0F172A;
+    margin-bottom: 10px;
+}
+.ai-thinking-log {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    min-height: 124px;
+}
+.log-line {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.log-line::before {
+    content: '';
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    border: 1px solid #CBD5E1;
+    flex: 0 0 auto;
+}
+.log-line.done { color: var(--text-secondary); }
+.log-line.done::before { background: var(--accent-color); border-color: var(--accent-color); box-shadow: inset 0 0 0 2px #fff; }
+.log-line.active { color: #1D4ED8; font-weight: 800; }
+.log-line.active::before { background: #fff; border-color: var(--accent-color); box-shadow: 0 0 0 4px rgba(37,99,235,.12); }
+.insight-text {
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.7;
+    min-height: 46px;
+}
+.insight-stack {
+    position: relative;
+    height: 86px;
+    margin-top: 12px;
+}
+.insight-stack span {
+    position: absolute;
+    left: 50%;
+    width: 96px;
+    height: 26px;
+    border-radius: 10px;
+    transform: translateX(-50%) rotateX(56deg) rotateZ(-45deg);
+    background: linear-gradient(135deg, rgba(37,99,235,.18), rgba(147,197,253,.5));
+    box-shadow: 0 10px 22px rgba(37,99,235,.08);
+}
+.insight-stack span:nth-child(1) { bottom: 2px; }
+.insight-stack span:nth-child(2) { bottom: 24px; width: 74px; opacity: .75; }
+.insight-stack span:nth-child(3) { bottom: 44px; width: 52px; opacity: .55; }
+.ai-thinking-footer {
+    position: relative;
+    z-index: 1;
+    margin-top: 18px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+.ai-thinking-footer strong { color: var(--accent-color); }
+@media (max-width: 980px) {
+    .ai-thinking-head { grid-template-columns: 1fr; text-align: center; }
+    .ai-thinking-title-block { text-align: center; }
+    .ai-thinking-steps { grid-template-columns: 1fr 1fr; }
+    .ai-thinking-body { grid-template-columns: 1fr; }
+    .ai-thinking-modal { padding: 28px 24px; overflow-y: auto; }
 }

@@ -1035,8 +1035,10 @@ function init() {
     if (btnRulesSave) btnRulesSave.addEventListener("click", saveRulesModal);
     const btnGeneratePlan = document.getElementById("btn-generate-plan");
     if (btnGeneratePlan) btnGeneratePlan.addEventListener("click", showGenerationOptions);
-    document.getElementById("btn-animate").addEventListener("click", playCurrentSimulation);
-    document.getElementById("btn-export-pdf").addEventListener("click", showPdfSelectModal);
+    const btnAnimate = document.getElementById("btn-animate");
+    if (btnAnimate) btnAnimate.addEventListener("click", playCurrentSimulation);
+    const btnExportPdf = document.getElementById("btn-export-pdf");
+    if (btnExportPdf) btnExportPdf.addEventListener("click", showPdfSelectModal);
     // JSON 导出并入 PDF 导出弹窗，顶部不再单独提供入口
     // const btnExportJson = document.getElementById('btn-export-json');
     // if (btnExportJson) {
@@ -1079,11 +1081,15 @@ function init() {
         const icon = document.getElementById("fdp-toggle-icon");
         if (icon) icon.textContent = collapsed ? "▼" : "▲";
     });
-    document.getElementById("mdp-toggle-btn").addEventListener("click", () => {
-        const collapsed = !document.getElementById("material-detail-panel").classList.contains("collapsed");
+    const mdpToggleBtn = document.getElementById("mdp-toggle-btn");
+    if (mdpToggleBtn) mdpToggleBtn.addEventListener("click", () => {
+        const materialDetailPanel = document.getElementById("material-detail-panel");
+        if (!materialDetailPanel) return;
+        const collapsed = !materialDetailPanel.classList.contains("collapsed");
         setMdpCollapsed(collapsed);
-        document.getElementById("material-detail-panel").classList.toggle("collapsed", collapsed);
-        document.getElementById("mdp-toggle-icon").textContent = collapsed ? "▼" : "▲";
+        materialDetailPanel.classList.toggle("collapsed", collapsed);
+        const icon = document.getElementById("mdp-toggle-icon");
+        if (icon) icon.textContent = collapsed ? "▼" : "▲";
     });
     const furnaceCardsContainer = document.getElementById("furnace-cards-container") || document.getElementById("equipment-cards-container");
     if (furnaceCardsContainer) furnaceCardsContainer.addEventListener("click", (e) => {
@@ -1134,20 +1140,19 @@ function init() {
             }
         }
     });
-    document.getElementById("material-cards-container").addEventListener("click", (e) => {
+    const materialCardsContainer = document.getElementById("material-cards-container");
+    if (materialCardsContainer) materialCardsContainer.addEventListener("click", (e) => {
         const btn = e.target.closest("[data-action=\"delete-material\"]");
         if (!btn) return;
         e.stopPropagation();
         deleteMaterialCard(parseInt(btn.getAttribute("data-mid")));
     });
-    document.getElementById("btn-add-item").addEventListener("click", () => {
-        const color = generateUniqueColor(usedColors);
-        createMaterialCard("新工件批次", "cuboid", 50, 150, 150, 60, 10, color);
-        updateTopSummary();
-        updateWorkbenchUiMode();
-    });
-    document.getElementById("nav-prev").addEventListener("click", () => navigateFurnace(-1));
-    document.getElementById("nav-next").addEventListener("click", () => navigateFurnace(1));
+    const btnAddItem = document.getElementById("btn-add-item");
+    if (btnAddItem) btnAddItem.addEventListener("click", addDefaultMaterial);
+    const navPrev = document.getElementById("nav-prev");
+    if (navPrev) navPrev.addEventListener("click", () => navigateFurnace(-1));
+    const navNext = document.getElementById("nav-next");
+    if (navNext) navNext.addEventListener("click", () => navigateFurnace(1));
     const spacingEL = document.getElementById("global-spacing");
     if (spacingEL) {
         spacingEL.addEventListener("change", () => {
@@ -1164,7 +1169,8 @@ function init() {
             }
         });
     }
-    document.getElementById("btn-anim-pause").addEventListener("click", () => {
+    const btnAnimPause = document.getElementById("btn-anim-pause");
+    if (btnAnimPause) btnAnimPause.addEventListener("click", () => {
         if (!isAnimating) return;
         const paused = !animPaused;
         setAnimPaused(paused);
@@ -1172,15 +1178,18 @@ function init() {
         document.getElementById("btn-anim-pause").style.background = paused ? "#10b981" : "#f59e0b";
         document.getElementById("btn-anim-pause").style.color = paused ? "#fff" : "#000";
     });
-    document.getElementById("btn-anim-stop").addEventListener("click", () => {
+    const btnAnimStop = document.getElementById("btn-anim-stop");
+    if (btnAnimStop) btnAnimStop.addEventListener("click", () => {
         if (!isAnimating) return;
         setAnimStopped(true);
         setAnimPaused(false);
     });
-    document.getElementById("btn-import-excel").addEventListener("click", () => {
+    const btnImportExcel = document.getElementById("btn-import-excel");
+    if (btnImportExcel) btnImportExcel.addEventListener("click", () => {
         document.getElementById("excel-file-input").click();
     });
-    document.getElementById("excel-file-input").addEventListener("change", (e) => {
+    const excelFileInput = document.getElementById("excel-file-input");
+    if (excelFileInput) excelFileInput.addEventListener("change", (e) => {
         const file = e.target.files[0];
         if (!file) return;
         const reader = new FileReader();
@@ -1201,26 +1210,32 @@ function init() {
         reader.readAsArrayBuffer(file);
         e.target.value = "";
     });
-    document.getElementById("btn-import-cancel").addEventListener("click", () => {
+    const btnImportCancel = document.getElementById("btn-import-cancel");
+    if (btnImportCancel) btnImportCancel.addEventListener("click", () => {
         document.getElementById("import-preview-overlay").style.display = "none";
     });
-    document.getElementById("btn-import-replace").addEventListener("click", () => {
+    const btnImportReplace = document.getElementById("btn-import-replace");
+    if (btnImportReplace) btnImportReplace.addEventListener("click", () => {
         applyImportData(true);
         scheduleWorkbenchUiModeUpdate();
     });
 
-    document.getElementById("btn-import-append").addEventListener("click", () => {
+    const btnImportAppend = document.getElementById("btn-import-append");
+    if (btnImportAppend) btnImportAppend.addEventListener("click", () => {
         applyImportData(false);
         scheduleWorkbenchUiModeUpdate();
     });
-    document.getElementById("btn-pdf-cancel").addEventListener("click", () => {
+    const btnPdfCancel = document.getElementById("btn-pdf-cancel");
+    if (btnPdfCancel) btnPdfCancel.addEventListener("click", () => {
         document.getElementById("pdf-select-overlay").style.display = "none";
     });
-    document.getElementById("pdf-select-overlay").addEventListener("click", (e) => {
+    const pdfSelectOverlay = document.getElementById("pdf-select-overlay");
+    if (pdfSelectOverlay) pdfSelectOverlay.addEventListener("click", (e) => {
         if (e.target === document.getElementById("pdf-select-overlay"))
             document.getElementById("pdf-select-overlay").style.display = "none";
     });
-    document.getElementById("btn-pdf-confirm").addEventListener("click", () => {
+    const btnPdfConfirm = document.getElementById("btn-pdf-confirm");
+    if (btnPdfConfirm) btnPdfConfirm.addEventListener("click", () => {
         const selectedIds = getSelectedPdfFurnaceIds();
         if (selectedIds.length === 0) {
             alert("请至少选择一个装炉方案");
@@ -1237,7 +1252,8 @@ function init() {
             exportCurrentPlanJson();
         }
     });
-    document.getElementById("btn-ji-parse").addEventListener("click", () => {
+    const btnJiParse = document.getElementById("btn-ji-parse");
+    if (btnJiParse) btnJiParse.addEventListener("click", () => {
         const jsonStr = document.getElementById("ji-json-textarea").value.trim();
 
         if (!jsonStr) {
@@ -1277,7 +1293,8 @@ function init() {
             document.getElementById("btn-ji-import").disabled = true;
         }
 });
-    document.getElementById("btn-ji-import").addEventListener("click", () => {
+    const btnJiImport = document.getElementById("btn-ji-import");
+    if (btnJiImport) btnJiImport.addEventListener("click", () => {
         if (!window._jiParsedPlan) return;
 
         // 新格式：直接恢复到当前装炉工作台
@@ -1301,27 +1318,32 @@ function init() {
 
         document.getElementById("json-import-overlay").style.display = "none";
     });
-    document.getElementById("btn-ji-cancel").addEventListener("click", () => {
+    const btnJiCancel = document.getElementById("btn-ji-cancel");
+    if (btnJiCancel) btnJiCancel.addEventListener("click", () => {
         document.getElementById("json-import-overlay").style.display = "none";
     });
-    document.getElementById("json-import-overlay").addEventListener("click", (e) => {
+    const jsonImportOverlay = document.getElementById("json-import-overlay");
+    if (jsonImportOverlay) jsonImportOverlay.addEventListener("click", (e) => {
         if (e.target === document.getElementById("json-import-overlay"))
             document.getElementById("json-import-overlay").style.display = "none";
     });
     const jiDropZone = document.getElementById("ji-drop-zone");
-    jiDropZone.addEventListener("click", () => document.getElementById("json-file-input").click());
-    jiDropZone.addEventListener("dragover", (e) => {
-        e.preventDefault();
-        jiDropZone.classList.add("drag-over");
-    });
-    jiDropZone.addEventListener("dragleave", () => jiDropZone.classList.remove("drag-over"));
-    jiDropZone.addEventListener("drop", (e) => {
-        e.preventDefault();
-        jiDropZone.classList.remove("drag-over");
-        const file = e.dataTransfer.files[0];
-        if (file) readJsonFile(file);
-    });
-    document.getElementById("json-file-input").addEventListener("change", (e) => {
+    if (jiDropZone) {
+        jiDropZone.addEventListener("click", () => document.getElementById("json-file-input")?.click());
+        jiDropZone.addEventListener("dragover", (e) => {
+            e.preventDefault();
+            jiDropZone.classList.add("drag-over");
+        });
+        jiDropZone.addEventListener("dragleave", () => jiDropZone.classList.remove("drag-over"));
+        jiDropZone.addEventListener("drop", (e) => {
+            e.preventDefault();
+            jiDropZone.classList.remove("drag-over");
+            const file = e.dataTransfer.files[0];
+            if (file) readJsonFile(file);
+        });
+    }
+    const jsonFileInput = document.getElementById("json-file-input");
+    if (jsonFileInput) jsonFileInput.addEventListener("change", (e) => {
         const file = e.target.files[0];
         if (file) readJsonFile(file);
         e.target.value = "";
@@ -1402,33 +1424,56 @@ function getActiveLeftPanelTab() {
 }
 
 function syncLeftPanelActionButton(tab = getActiveLeftPanelTab()) {
-    const btn = document.getElementById('btn-add-furnace') || document.getElementById('btn-add-equipmente');
-    if (!btn) return;
+    const addBtn = document.getElementById('btn-add-furnace');
+    const importBtn = document.getElementById('btn-import-excel');
+    const clearBtn = document.getElementById('btn-clear-all-furnaces');
+
+    if (!addBtn || !clearBtn) return;
 
     if (tab === 'furnace') {
-        btn.textContent = '增加工装';
-        btn.title = '新增标准料框、料盘、网篮、环形工装等装载工装';
-        btn.disabled = false;
-        return;
-    }
+        addBtn.textContent = '新增工装';
+        addBtn.title = '新增标准料框、料盘、网篮或环形工装';
+        addBtn.disabled = false;
 
-    if (tab === 'tooling') {
-        btn.textContent = '待链接设备';
-        btn.title = '生产车间模块暂不配置，后续用于链接车间、设备与炉膛';
-        btn.disabled = true;
+        if (importBtn) importBtn.style.display = 'none';
+        clearBtn.textContent = '清空';
+        clearBtn.title = '清空所有工装、工件和装炉结果';
+        clearBtn.style.display = 'inline-flex';
         return;
     }
 
     if (tab === 'material') {
-        btn.textContent = '新增工件';
-        btn.title = '新增待热处理工件';
-        btn.disabled = false;
+        addBtn.textContent = '新增工件';
+        addBtn.title = '新增待热处理工件';
+        addBtn.disabled = false;
+
+        if (importBtn) {
+            importBtn.textContent = '导入工件';
+            importBtn.style.display = 'inline-flex';
+        }
+
+        clearBtn.textContent = '清空';
+        clearBtn.title = '清空所有待装工件，保留工装';
+        clearBtn.style.display = 'inline-flex';
         return;
     }
 
-    btn.textContent = '增加工装';
-    btn.title = '新增装载工装';
-    btn.disabled = false;
+    if (tab === 'tooling') {
+        addBtn.textContent = '待链接设备';
+        addBtn.title = '生产车间功能后续用于链接真实工厂设备';
+        addBtn.disabled = true;
+
+        if (importBtn) importBtn.style.display = 'none';
+        clearBtn.style.display = 'none';
+    }
+}
+
+
+function addDefaultMaterial() {
+    const color = generateUniqueColor(usedColors);
+    createMaterialCard("新工件批次", "cuboid", 50, 150, 150, 60, 10, color);
+    updateTopSummary();
+    updateWorkbenchUiMode();
 }
 
 function handleLeftPanelPrimaryAction() {
@@ -1446,8 +1491,7 @@ function handleLeftPanelPrimaryAction() {
     }
 
     if (tab === 'material') {
-        const btn = document.getElementById('btn-add-item');
-        if (btn) btn.click();
+        addDefaultMaterial();
         return;
     }
 }
@@ -1606,108 +1650,207 @@ function activateRightPanelTab(tab) {
  * @returns {void}
  */
 function initGenerationOptions() {
-    const overlay = document.getElementById("gen-option-overlay");
-    const cards = document.querySelectorAll(".gen-option-card");
-    const cancelBtn = document.getElementById("btn-gen-option-cancel");
-
-    // 点击卡片选择模式
-    cards.forEach(card => {
-        card.addEventListener("click", () => {
-            const mode = card.getAttribute("data-mode");
-
-            // 添加选中效果
-            cards.forEach(c => c.classList.remove("selected"));
-            card.classList.add("selected");
-
-            // 延迟关闭弹窗并执行对应模式
-            setTimeout(() => {
-                hideGenerationOptions();
-                if (mode === "animate") {
-                    executeWithAnimation();
-                } else if (mode === "skip") {
-                    executeWithAILoading();
-                }
-            }, 200);
+    const cancelBtn = document.getElementById('btn-ai-thinking-cancel');
+    if (cancelBtn) {
+        cancelBtn.addEventListener('click', () => {
+            // 当前算法仍是同步计算，取消按钮主要用于计算完成后的遮罩关闭；
+            // 未来迁移 Web Worker 后可在这里中止计算线程。
+            if (!window._aiThinkingComputing) {
+                hideAIThinkingOverlay();
+            }
         });
-    });
-
-    // 取消按钮
-    cancelBtn.addEventListener("click", hideGenerationOptions);
-
-    // 点击遮罩关闭
-    overlay.addEventListener("click", (e) => {
-        if (e.target === overlay) hideGenerationOptions();
-    });
+    }
 }
 
 /**
- * 显示生成模式选择弹窗。在显示前会检查是否有足够的炉膛和物料数据。
- * @returns {void}
+ * AI装炉入口：不再显示“装炉仿真 / 直接生成方案”二选一，直接进入 AI 思考遮罩。
  */
 function showGenerationOptions() {
-    if (isAnimating) return;
+    if (isAnimating || window._aiThinkingRunning) return;
 
-    // 检查是否有炉膛和物料数据
-    let hasFurnaces = document.querySelectorAll(".furnace-card").length > 0;
-    let hasMaterials = document.querySelectorAll(".material-card").length > 0;
+    const hasFurnaces = document.querySelectorAll(".furnace-card").length > 0;
+    const hasMaterials = document.querySelectorAll(".material-card").length > 0;
+
     if (!hasFurnaces || !hasMaterials) {
         alert("请先在左侧增加装载工装，再在左侧“工件详情”添加待处理工件");
         return;
     }
 
-    const overlay = document.getElementById("gen-option-overlay");
-    const cards = document.querySelectorAll(".gen-option-card");
-    // 清除之前的选中状态
-    cards.forEach(c => c.classList.remove("selected"));
-    overlay.classList.add("active");
+    executeWithAILoading();
 }
 
-/**
- * 隐藏生成模式选择弹窗。
- * @returns {void}
- */
 function hideGenerationOptions() {
-    const overlay = document.getElementById("gen-option-overlay");
-    overlay.classList.remove("active");
+    hideAIThinkingOverlay();
 }
 
-/**
- * 执行装炉算法并播放逐帧装框动画。
- * @returns {void}
- */
 function executeWithAnimation() {
-    executeAndRender();
-
-    setTimeout(() => {
-        playCurrentSimulation();
-    }, 300);
+    executeWithAILoading().then(() => {
+        setTimeout(() => playCurrentSimulation(), 300);
+    });
 }
 
-/**
- * 执行装炉算法，显示 AI 思考加载动画，然后直接呈现结果，跳过逐帧动画。
- * @returns {Promise<void>}
- */
+const AI_THINK_MIN_DURATION_MS = 8000;
+let aiThinkingTimer = null;
+let aiThinkingStartedAt = 0;
+let aiThinkingCurrentStep = 1;
+
+const AI_THINK_LOGS = [
+    '正在读取工件清单与属性　{items} 件，{weight} kg',
+    '识别工件外形特征与工艺约束　淬火 / 真空淬火优先',
+    '评估工装容量与限制　承重、容积与安全间距',
+    '计算层级结构与安全间距　进行中…',
+    '优化空间利用率与热场均匀性　等待中…',
+    '生成装炉方案并校验可行性　等待中…'
+];
+
+function getAIThinkingInputStats() {
+    let itemCount = 0;
+    let totalWeight = 0;
+
+    document.querySelectorAll('.material-card').forEach(card => {
+        const meta = card.querySelector('.m-meta')?.textContent || '';
+        const countMatch = meta.match(/×(\d+)件/);
+        const weightMatch = meta.match(/(\d+(?:\.\d+)?)\s*kg/);
+        itemCount += countMatch ? parseInt(countMatch[1]) : 0;
+        totalWeight += weightMatch ? parseFloat(weightMatch[1]) : 0;
+    });
+
+    return {
+        items: itemCount || document.querySelectorAll('.material-card').length,
+        weight: totalWeight.toFixed(1)
+    };
+}
+
+function formatClock(ms) {
+    const total = Math.max(0, Math.ceil(ms / 1000));
+    const mm = String(Math.floor(total / 60)).padStart(2, '0');
+    const ss = String(total % 60).padStart(2, '0');
+    return `${mm}:${ss}`;
+}
+
+function setAIThinkingStep(activeStep) {
+    aiThinkingCurrentStep = activeStep;
+    document.querySelectorAll('[data-ai-step]').forEach(stepEl => {
+        const step = parseInt(stepEl.getAttribute('data-ai-step'));
+        stepEl.classList.toggle('done', step < activeStep);
+        stepEl.classList.toggle('active', step === activeStep);
+    });
+}
+
+function renderAIThinkingLogs(activeStep) {
+    const logEl = document.getElementById('ai-thinking-log');
+    if (!logEl) return;
+
+    const stats = getAIThinkingInputStats();
+    const now = new Date();
+    const baseSeconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+
+    logEl.innerHTML = AI_THINK_LOGS.map((raw, idx) => {
+        const sec = baseSeconds + idx * 2;
+        const hh = String(Math.floor(sec / 3600) % 24).padStart(2, '0');
+        const mm = String(Math.floor(sec / 60) % 60).padStart(2, '0');
+        const ss = String(sec % 60).padStart(2, '0');
+        const text = raw.replace('{items}', stats.items).replace('{weight}', stats.weight);
+        const cls = idx + 1 < activeStep ? 'done' : (idx + 1 === activeStep ? 'active' : '');
+        return `<div class="log-line ${cls}">${hh}:${mm}:${ss}　${text}</div>`;
+    }).join('');
+}
+
+function updateAIThinkingOverlay(forceRatio = null) {
+    const elapsed = performance.now() - aiThinkingStartedAt;
+    const ratio = forceRatio == null
+        ? Math.min(0.96, elapsed / AI_THINK_MIN_DURATION_MS)
+        : forceRatio;
+
+    const progressFill = document.getElementById('ai-thinking-progress-fill');
+    if (progressFill) progressFill.style.width = `${Math.round(ratio * 100)}%`;
+
+    const timeEl = document.getElementById('ai-thinking-time');
+    if (timeEl) {
+        const remaining = Math.max(0, AI_THINK_MIN_DURATION_MS - elapsed);
+        timeEl.textContent = ratio >= 1 ? '即将呈现结果' : `预计剩余 ${formatClock(remaining)}`;
+    }
+
+    const activeStep = ratio < 0.25 ? 1 : ratio < 0.5 ? 2 : ratio < 0.75 ? 3 : 4;
+    if (activeStep !== aiThinkingCurrentStep || forceRatio === 1) {
+        setAIThinkingStep(forceRatio === 1 ? 5 : activeStep);
+        renderAIThinkingLogs(forceRatio === 1 ? 6 : activeStep);
+    }
+}
+
+function showAIThinkingOverlay() {
+    const overlay = document.getElementById('ai-loading-overlay');
+    if (!overlay) return;
+
+    window._aiThinkingRunning = true;
+    window._aiThinkingComputing = false;
+    aiThinkingStartedAt = performance.now();
+    aiThinkingCurrentStep = 0;
+
+    overlay.setAttribute('aria-hidden', 'false');
+    overlay.classList.add('active');
+    setAIThinkingStep(1);
+    renderAIThinkingLogs(1);
+    updateAIThinkingOverlay(0.02);
+
+    if (aiThinkingTimer) clearInterval(aiThinkingTimer);
+    aiThinkingTimer = setInterval(() => updateAIThinkingOverlay(), 180);
+}
+
+function hideAIThinkingOverlay() {
+    const overlay = document.getElementById('ai-loading-overlay');
+    if (aiThinkingTimer) {
+        clearInterval(aiThinkingTimer);
+        aiThinkingTimer = null;
+    }
+
+    if (overlay) {
+        overlay.classList.remove('active');
+        overlay.setAttribute('aria-hidden', 'true');
+    }
+
+    window._aiThinkingRunning = false;
+    window._aiThinkingComputing = false;
+}
+
+function nextPaint() {
+    return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+}
+
 async function executeWithAILoading() {
-    // 显示 AI 思考加载动画
-    showAILoadingLoading();
+    showAIThinkingOverlay();
 
-    // 在后台执行装炉算法
-    executeAndRender();
+    // 先让浏览器完成一次绘制，避免同步算法太快时弹窗来不及显示。
+    await nextPaint();
 
-    // AI 思考模拟：1~3 秒随机（单位 ms）
-    const aiThinkDuration = 2000 + Math.floor(Math.random() * 2000);
+    const displayStart = performance.now();
+    const computeStart = performance.now();
+    let computeMs = 0;
 
-    await sleep(aiThinkDuration);
+    try {
+        window._aiThinkingComputing = true;
+        executeAndRender();
+        computeMs = performance.now() - computeStart;
+    } catch (err) {
+        console.error('AI装炉计算失败:', err);
+        hideAIThinkingOverlay();
+        alert('AI装炉计算失败：' + (err?.message || err));
+        return;
+    } finally {
+        window._aiThinkingComputing = false;
+    }
 
-    // 隐藏加载动画
-    hideAILoadingLoading();
+    const elapsedDisplayMs = performance.now() - displayStart;
+    const waitMs = Math.max(0, AI_THINK_MIN_DURATION_MS - elapsedDisplayMs);
+
+    await sleep(waitMs);
+    updateAIThinkingOverlay(1);
+    await sleep(450);
+
+    console.info(`AI装炉真实计算耗时：${Math.round(computeMs)}ms；弹窗展示耗时：${Math.round(performance.now() - displayStart)}ms`);
+    hideAIThinkingOverlay();
 }
 
-/**
- * 简易延时函数，用于异步操作中的等待。
- * @param {number} ms - 延时毫秒数。
- * @returns {Promise<void>}
- */
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -1833,6 +1976,23 @@ function clearAllFurnaces() {
     updateWorkbenchUiMode();
 }
 
+
+function handleLeftPanelClearAction() {
+    const tab = getActiveLeftPanelTab();
+
+    if (tab === 'material') {
+        clearAllMaterials();
+        return;
+    }
+
+    if (tab === 'furnace') {
+        clearAllFurnaces();
+        return;
+    }
+
+    showCapacityFeedback('success', '生产车间模块暂未启用，暂无需要清空的车间数据。');
+}
+
 /**
  * 折叠/展开左面板
  */
@@ -1919,7 +2079,7 @@ init();
 (function bindNewEvents() {
     // 重置按钮
     const btnClearFurnaces = document.getElementById('btn-clear-all-furnaces');
-    if (btnClearFurnaces) btnClearFurnaces.addEventListener('click', clearAllFurnaces);
+    if (btnClearFurnaces) btnClearFurnaces.addEventListener('click', handleLeftPanelClearAction);
 
     const btnClearMaterials = document.getElementById('btn-clear-all-materials');
     if (btnClearMaterials) btnClearMaterials.addEventListener('click', clearAllMaterials);
