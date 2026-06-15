@@ -84,6 +84,7 @@ import { createPlanLibraryController } from './plan-library.js';
 import { analyzeFurnaces } from './plan-analysis.js';
 import { renderPlanAnalysisPanel, renderCandidatePlanCards, renderLoadingSimulationPanel } from './ui.js';
 import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
     isAnimating, animPaused, animStopped,
     globalFurnacesResult, globalUnpackedItems, aggregationStats,
@@ -144,6 +145,97 @@ import {
 let candidatePlans = [];
 let currentCandidatePlanIndex = 0;
 let simulationViewMode = 'cumulative';
+
+
+let currentWorkspaceIdentity = {
+    id: '',
+    title: '当前工作台方案',
+    source: 'draft',
+    status: 'draft',
+    createdAt: '',
+    updatedAt: ''
+};
+
+function makeWorkspaceId() {
+    return 'WS-' + new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
+}
+
+function formatWorkspaceTime(value) {
+    if (!value) return '';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return '';
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mi = String(d.getMinutes()).padStart(2, '0');
+    return `${mm}-${dd} ${hh}:${mi}`;
+}
+
+function ensureCurrentWorkspaceIdentity() {
+    if (!currentWorkspaceIdentity.id) {
+        const now = new Date().toISOString();
+        currentWorkspaceIdentity = {
+            id: makeWorkspaceId(),
+            title: '当前工作台方案',
+            source: 'draft',
+            status: 'draft',
+            createdAt: now,
+            updatedAt: now
+        };
+    }
+    return currentWorkspaceIdentity;
+}
+
+function buildAutoWorkspaceTitle(strategyLabel = '') {
+    const furnaces = globalFurnacesResult || [];
+    if (!furnaces.length) return '当前工作台方案';
+    const first = furnaces[0] || {};
+    const toolingName = first.typeName || first.instanceId || '装炉方案';
+    const totalItems = furnaces.reduce((sum, f) => sum + ((f.packedItems || []).length), 0);
+    const totalWeight = furnaces.reduce((sum, f) => sum + Number(f.totalWeight || 0), 0);
+    const strategy = strategyLabel || STRATEGY_LABELS[placementRules.strategy] || placementRules.strategy || 'balanced';
+    return `${toolingName}_${totalItems}件_${totalWeight.toFixed(1)}kg_${strategy}`;
+}
+
+function setCurrentWorkspaceIdentityFromPlan(strategyLabel = '') {
+    const existed = ensureCurrentWorkspaceIdentity();
+    const now = new Date().toISOString();
+    currentWorkspaceIdentity = {
+        ...existed,
+        title: buildAutoWorkspaceTitle(strategyLabel),
+        source: 'generated',
+        status: 'unsaved',
+        createdAt: existed.createdAt || now,
+        updatedAt: now
+    };
+}
+
+function getCurrentWorkspaceTitle() {
+    ensureCurrentWorkspaceIdentity();
+    return currentWorkspaceIdentity.title || '当前工作台方案';
+}
+
+function resetCurrentWorkspaceIdentity() {
+    currentWorkspaceIdentity = {
+        id: '',
+        title: '当前工作台方案',
+        source: 'draft',
+        status: 'draft',
+        createdAt: '',
+        updatedAt: ''
+    };
+}
+
+function markCurrentWorkspaceSaved(title) {
+    const existed = ensureCurrentWorkspaceIdentity();
+    currentWorkspaceIdentity = {
+        ...existed,
+        title: title || existed.title,
+        status: 'saved',
+        updatedAt: new Date().toISOString()
+    };
+    refreshPlanLibraryWorkbench();
+}
 
 const STRATEGY_LABELS = {
     balanced: '均衡方案',
@@ -235,6 +327,7 @@ function applyCandidatePlan(index) {
     setCurrentFurnaceIndex(0);
 
     window._currentPlanAnalysis = plan.analysis;
+    setCurrentWorkspaceIdentityFromPlan(plan.label);
 
     renderPlanAnalysisPanel(plan.analysis);
     renderCandidatePlanCards(candidatePlans, index, applyCandidatePlan);
@@ -391,6 +484,7 @@ function executeAndRender() {
     );
 
     window._currentPlanAnalysis = analysis;
+    setCurrentWorkspaceIdentityFromPlan(bestPlan?.label || '');
 
     renderPlanAnalysisPanel(analysis);
     renderCandidatePlanCards(candidatePlans, currentCandidatePlanIndex, applyCandidatePlan);
@@ -546,8 +640,10 @@ const planLibrary = createPlanLibraryController({
     },
 
     buildCurrentRecord: (title) => {
+        const finalTitle = title || getCurrentWorkspaceTitle();
+        markCurrentWorkspaceSaved(finalTitle);
         return buildCurrentDigitalTwinRecord({
-            title,
+            title: finalTitle,
             materials: collectMaterialBatchesForRecord(),
             tooling: collectToolingForRecord()
         });
@@ -579,6 +675,7 @@ const planLibrary = createPlanLibraryController({
 export function clearFurnaceResults() {
     exitCompareMode(false);
     clearHistoryViewState();
+    resetCurrentWorkspaceIdentity();
     window._currentPlanAnalysis = null;
 
     setGlobalFurnacesResult(null);
@@ -642,6 +739,67 @@ function setHudText(id, value) {
     if (el) el.textContent = value;
 }
 
+let currentToolingHudCollapsed = false;
+
+function syncCurrentToolingHudControls(totalCount = 0) {
+    const hud = document.getElementById('current-tooling-hud');
+    if (!hud) return;
+
+    hud.classList.toggle('collapsed', currentToolingHudCollapsed);
+
+    const toggleBtn = document.getElementById('cth-toggle');
+    if (toggleBtn) {
+        toggleBtn.textContent = currentToolingHudCollapsed ? '展开' : '收起';
+        toggleBtn.setAttribute('aria-expanded', currentToolingHudCollapsed ? 'false' : 'true');
+    }
+
+    const canSwitch = totalCount > 1;
+    const prevBtn = document.getElementById('cth-prev');
+    const nextBtn = document.getElementById('cth-next');
+    if (prevBtn) prevBtn.disabled = !canSwitch;
+    if (nextBtn) nextBtn.disabled = !canSwitch;
+}
+
+function bindCurrentToolingHudControls() {
+    const hud = document.getElementById('current-tooling-hud');
+    if (!hud) return;
+
+    // 防止点击 HUD 按钮时被 Three.js OrbitControls 当作拖拽/旋转处理。
+    ['pointerdown', 'mousedown', 'click', 'touchstart', 'wheel'].forEach(eventName => {
+        hud.addEventListener(eventName, (event) => {
+            event.stopPropagation();
+        }, { passive: eventName === 'wheel' });
+    });
+
+    const prevBtn = document.getElementById('cth-prev');
+    if (prevBtn) {
+        prevBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            navigateFurnace(-1);
+        });
+    }
+
+    const nextBtn = document.getElementById('cth-next');
+    if (nextBtn) {
+        nextBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            navigateFurnace(1);
+        });
+    }
+
+    const toggleBtn = document.getElementById('cth-toggle');
+    if (toggleBtn) {
+        toggleBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            currentToolingHudCollapsed = !currentToolingHudCollapsed;
+            syncCurrentToolingHudControls(globalFurnacesResult?.length || 0);
+        });
+    }
+}
+
 function updateCurrentToolingHud() {
     const hud = document.getElementById('current-tooling-hud');
     if (!hud) return;
@@ -695,6 +853,7 @@ function updateCurrentToolingHud() {
         }
     }
 
+    syncCurrentToolingHudControls(globalFurnacesResult.length);
     hud.style.display = 'block';
 }
 
@@ -946,6 +1105,7 @@ function markHistoryView(record, title) {
     workspaceViewState.mode = 'history';
     workspaceViewState.historyTitle = title || getPlanRecordTitle(record) || '历史方案';
     document.body.classList.add('history-view-mode');
+    updateHistoryEditorReadonly();
 }
 
 function clearHistoryViewState() {
@@ -953,6 +1113,29 @@ function clearHistoryViewState() {
     workspaceViewState.historyTitle = '';
     workspaceViewState.backupRecord = null;
     document.body.classList.remove('history-view-mode');
+    updateHistoryEditorReadonly();
+}
+
+
+function updateHistoryEditorReadonly() {
+    const locked = workspaceViewState.mode === 'history';
+    document.body.classList.toggle('history-view-mode', locked);
+
+    ['btn-add-furnace', 'btn-import-excel', 'btn-clear-all-furnaces', 'btn-generate-plan'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = locked;
+    });
+
+    document.querySelectorAll(
+        '#left-panel input, #left-panel select, #left-panel textarea, #left-panel button'
+    ).forEach(el => {
+        const keepClickable = el.id === 'btn-toggle-left-panel' ||
+            el.id === 'panel-expand-btn-left' ||
+            el.closest('.left-tab-btn') ||
+            el.closest('.fid-close') ||
+            el.closest('.mid-close');
+        if (!keepClickable) el.disabled = locked;
+    });
 }
 
 function restoreCurrentWorkspaceFromHistory() {
@@ -999,18 +1182,21 @@ function renderCurrentWorkbenchPlanCard() {
     const totalItems = globalFurnacesResult.reduce((sum, f) => sum + ((f.packedItems || []).length), 0);
     const totalWeight = globalFurnacesResult.reduce((sum, f) => sum + Number(f.totalWeight || 0), 0);
     const unpacked = globalUnpackedItems ? globalUnpackedItems.length : 0;
-    const first = globalFurnacesResult[0];
-    const title = first?.instanceId || first?.typeName || '当前装炉方案';
+    ensureCurrentWorkspaceIdentity();
+    const workspaceTitle = getCurrentWorkspaceTitle();
+    const updatedText = formatWorkspaceTime(currentWorkspaceIdentity.updatedAt);
     const isHistory = workspaceViewState.mode === 'history';
+    const statusText = isHistory ? '历史查看' : (currentWorkspaceIdentity.status === 'saved' ? '已保存' : '当前');
 
     card.className = 'current-workbench-card' + (isHistory ? ' history-viewing' : '');
     card.innerHTML = `
         <div class="cwc-head">
             <div>
                 <div class="cwc-kicker">${isHistory ? '正在查看历史方案' : '当前工作台方案'}</div>
-                <div class="cwc-title">${isHistory ? (workspaceViewState.historyTitle || title) : title}</div>
+                <div class="cwc-title">${isHistory ? (workspaceViewState.historyTitle || '历史方案') : workspaceTitle}</div>
+                <div class="cwc-subtitle">${isHistory ? ('原当前方案：' + workspaceTitle) : (currentWorkspaceIdentity.id + (updatedText ? ' · ' + updatedText : ''))}</div>
             </div>
-            <span class="cwc-status">${isHistory ? '历史查看' : '当前'}</span>
+            <span class="cwc-status">${statusText}</span>
         </div>
         <div class="cwc-metrics">
             <span><b>${totalFurnaces}</b> 工装</span>
@@ -1021,7 +1207,7 @@ function renderCurrentWorkbenchPlanCard() {
         </div>
         ${isHistory ? `
             <button class="cwc-restore-btn" id="btn-restore-current-workspace" type="button">恢复当前方案</button>
-            <div class="cwc-history-note">当前左侧工装/工件为历史快照；点击恢复可回到加载历史前的工作台。</div>
+            <div class="cwc-history-note">当前左侧工装/工件为历史快照，只读查看；点击恢复可回到加载历史前的工作台。</div>
         ` : `<div class="cwc-history-note">保存后进入历史方案，可用于后续对比。</div>`}
     `;
 
@@ -1093,14 +1279,225 @@ function observePlanLibraryForCompareButtons() {
     refreshPlanLibraryWorkbench();
 }
 
-function getCompareSeparation(currentFurnace, historyFurnace) {
-    const currentMax = Math.max(currentFurnace?.w || 0, currentFurnace?.d || 0, currentFurnace?.h || 0);
-    const historyMax = Math.max(historyFurnace?.w || 0, historyFurnace?.d || 0, historyFurnace?.h || 0);
-    return Math.max(900, currentMax + historyMax + 500);
-}
-
 function clearCompareDomLabels() {
     document.querySelectorAll('.compare-side-label').forEach(el => el.remove());
+}
+
+let compare3D = {
+    current: null,
+    history: null,
+    animationId: null,
+    activeDriver: 'current',
+    syncing: false
+};
+
+function disposeObject3D(obj) {
+    if (!obj) return;
+    obj.traverse(child => {
+        if (child.geometry && typeof child.geometry.dispose === 'function') {
+            child.geometry.dispose();
+        }
+        if (child.material) {
+            const mats = Array.isArray(child.material) ? child.material : [child.material];
+            mats.forEach(mat => {
+                if (mat && typeof mat.dispose === 'function') mat.dispose();
+            });
+        }
+    });
+}
+
+function destroyCompareViews() {
+    if (compare3D.animationId) {
+        cancelAnimationFrame(compare3D.animationId);
+    }
+
+    [compare3D.current, compare3D.history].forEach(view => {
+        if (!view) return;
+        disposeObject3D(view.scene);
+        if (view.controls && typeof view.controls.dispose === 'function') view.controls.dispose();
+        if (view.renderer) {
+            view.renderer.dispose();
+            if (typeof view.renderer.forceContextLoss === 'function') {
+                try { view.renderer.forceContextLoss(); } catch (_) {}
+            }
+        }
+        if (view.container) view.container.innerHTML = '';
+    });
+
+    compare3D = {
+        current: null,
+        history: null,
+        animationId: null,
+        activeDriver: 'current',
+        syncing: false
+    };
+}
+
+function buildMiniGrid(size = 2600) {
+    const grid = new THREE.GridHelper(size, 52, 0xcbd5e1, 0xe2e8f0);
+    grid.position.y = -120;
+    return grid;
+}
+
+function fitMiniCamera(view, furnace) {
+    if (!view || !view.camera || !view.controls) return;
+
+    const box = new THREE.Box3().setFromObject(view.group);
+    const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
+    box.getSize(size);
+    box.getCenter(center);
+
+    const maxDim = Math.max(size.x, size.y, size.z, furnace?.w || 900, furnace?.h || 900, furnace?.d || 900, 1);
+    const distance = maxDim * 1.85;
+    const target = center.clone();
+    if (!Number.isFinite(target.x) || !Number.isFinite(target.y) || !Number.isFinite(target.z)) {
+        target.set(0, (furnace?.h || 900) / 2 - 120, 0);
+    }
+
+    view.controls.target.copy(target);
+    view.camera.position.set(target.x + distance * 0.9, target.y + distance * 0.72, target.z + distance * 1.28);
+    view.camera.near = Math.max(1, distance / 80);
+    view.camera.far = Math.max(10000, distance * 8);
+    view.camera.updateProjectionMatrix();
+    view.controls.update();
+
+    view.baseTarget = target.clone();
+    view.baseDistance = view.camera.position.distanceTo(view.controls.target) || distance;
+}
+
+function createCompareMiniView(containerId, furnace, role) {
+    const container = document.getElementById(containerId);
+    if (!container || !furnace) return null;
+
+    container.innerHTML = '';
+
+    const scene3d = new THREE.Scene();
+    scene3d.background = new THREE.Color(0xf8fafc);
+
+    const width = Math.max(280, container.clientWidth || 420);
+    const height = Math.max(220, container.clientHeight || 320);
+    const cam = new THREE.PerspectiveCamera(45, width / height, 1, 10000);
+
+    const rend = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    rend.setSize(width, height);
+    rend.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    rend.shadowMap.enabled = false;
+    container.appendChild(rend.domElement);
+
+    const ctrl = new OrbitControls(cam, rend.domElement);
+    ctrl.enableDamping = true;
+    ctrl.dampingFactor = 0.06;
+    ctrl.enablePan = true;
+
+    scene3d.add(new THREE.AmbientLight(0xffffff, 0.72));
+    const key = new THREE.DirectionalLight(0xffffff, 0.74);
+    key.position.set(500, 900, 650);
+    scene3d.add(key);
+    const fill = new THREE.DirectionalLight(0xffffff, 0.28);
+    fill.position.set(-500, 300, -650);
+    scene3d.add(fill);
+    scene3d.add(buildMiniGrid(Math.max(2200, Math.max(furnace.w || 0, furnace.d || 0) * 2.8)));
+
+    const group = buildFurnaceGroup(furnace, role === 'current' ? 0 : 1, getSelectedMaterialName());
+    group.visible = true;
+    scene3d.add(group);
+
+    const view = {
+        role,
+        container,
+        scene: scene3d,
+        camera: cam,
+        renderer: rend,
+        controls: ctrl,
+        group,
+        baseTarget: new THREE.Vector3(),
+        baseDistance: 1
+    };
+
+    fitMiniCamera(view, furnace);
+
+    ctrl.addEventListener('start', () => {
+        compare3D.activeDriver = role;
+    });
+    ctrl.addEventListener('change', () => {
+        if (!compare3D.syncing) compare3D.activeDriver = role;
+    });
+
+    return view;
+}
+
+function resizeCompareView(view) {
+    if (!view || !view.container || !view.renderer || !view.camera) return;
+    const width = Math.max(280, view.container.clientWidth || 420);
+    const height = Math.max(220, view.container.clientHeight || 320);
+    view.camera.aspect = width / height;
+    view.camera.updateProjectionMatrix();
+    view.renderer.setSize(width, height);
+}
+
+function resizeCompareViews() {
+    resizeCompareView(compare3D.current);
+    resizeCompareView(compare3D.history);
+}
+
+function syncMiniCamera(source, target) {
+    if (!source || !target || !source.controls || !target.controls) return;
+
+    const direction = new THREE.Vector3().subVectors(source.camera.position, source.controls.target);
+    const sourceDistance = Math.max(1, direction.length());
+    direction.normalize();
+
+    const ratio = source.baseDistance > 0 ? sourceDistance / source.baseDistance : 1;
+    const targetDistance = Math.max(1, target.baseDistance * ratio);
+
+    compare3D.syncing = true;
+    target.controls.target.copy(target.baseTarget || target.controls.target);
+    target.camera.position.copy(target.controls.target).add(direction.multiplyScalar(targetDistance));
+    target.camera.quaternion.copy(source.camera.quaternion);
+    target.controls.update();
+    compare3D.syncing = false;
+}
+
+function animateCompareViews() {
+    compare3D.animationId = requestAnimationFrame(animateCompareViews);
+
+    const currentView = compare3D.current;
+    const historyView = compare3D.history;
+    if (!currentView || !historyView) return;
+
+    currentView.controls.update();
+    historyView.controls.update();
+
+    if (compare3D.activeDriver === 'history') {
+        syncMiniCamera(historyView, currentView);
+    } else {
+        syncMiniCamera(currentView, historyView);
+    }
+
+    currentView.renderer.render(currentView.scene, currentView.camera);
+    historyView.renderer.render(historyView.scene, historyView.camera);
+}
+
+function renderCompare3DViews(currentFurnace, historyFurnace) {
+    destroyCompareViews();
+
+    compare3D.current = createCompareMiniView('compare-current-canvas', currentFurnace, 'current');
+    compare3D.history = createCompareMiniView('compare-history-canvas', historyFurnace, 'history');
+
+    if (!compare3D.current || !compare3D.history) return;
+
+    compare3D.activeDriver = 'current';
+    syncMiniCamera(compare3D.current, compare3D.history);
+    animateCompareViews();
+}
+
+function setCompareLayout(mode) {
+    const viewports = document.getElementById('compare-viewports');
+    if (!viewports) return;
+    viewports.classList.toggle('horizontal', mode !== 'vertical');
+    viewports.classList.toggle('vertical', mode === 'vertical');
+    setTimeout(resizeCompareViews, 80);
 }
 
 function numFromPercentText(text) {
@@ -1179,7 +1576,6 @@ function addCompareSideLabels(mode) {
 
 function renderCompareMode() {
     if (!compareState.active) return;
-    if (!itemsGroup) return;
 
     const currentFurnaces = globalFurnacesResult || [];
     const historyFurnaces = compareState.historicalFurnaces || [];
@@ -1190,29 +1586,6 @@ function renderCompareMode() {
 
     const currentFurnace = currentFurnaces[compareState.currentIndex];
     const historyFurnace = historyFurnaces[compareState.historyIndex];
-    const sep = getCompareSeparation(currentFurnace, historyFurnace);
-
-    clearFurnaceGroups();
-    while (itemsGroup.children.length > 0) {
-        itemsGroup.remove(itemsGroup.children[0]);
-    }
-
-    const currentGroup = buildFurnaceGroup(currentFurnace, 0, getSelectedMaterialName());
-    const historyGroup = buildFurnaceGroup(historyFurnace, 1, getSelectedMaterialName());
-
-    currentGroup.visible = true;
-    historyGroup.visible = true;
-
-    if (compareState.mode === 'vertical') {
-        currentGroup.position.set(0, 0, -sep / 2);
-        historyGroup.position.set(0, 0, sep / 2);
-    } else {
-        currentGroup.position.set(-sep / 2, 0, 0);
-        historyGroup.position.set(sep / 2, 0, 0);
-    }
-
-    itemsGroup.add(currentGroup);
-    itemsGroup.add(historyGroup);
 
     const emptyState = document.getElementById('empty-state');
     if (emptyState) emptyState.style.display = 'none';
@@ -1221,7 +1594,7 @@ function renderCompareMode() {
     if (currentHud) currentHud.style.display = 'none';
 
     const modal = document.getElementById('compare-modal');
-    if (modal) modal.style.display = 'block';
+    if (modal) modal.style.display = 'flex';
 
     const title = document.getElementById('compare-title');
     if (title) title.textContent = `当前方案 vs ${compareState.title || '历史方案'}`;
@@ -1229,6 +1602,7 @@ function renderCompareMode() {
     document.querySelectorAll('[data-compare-mode]').forEach(btn => {
         btn.classList.toggle('active', btn.getAttribute('data-compare-mode') === compareState.mode);
     });
+    setCompareLayout(compareState.mode);
 
     const currentUnpacked = globalUnpackedItems ? globalUnpackedItems.length : 0;
     const historyUnpacked = compareState.historicalRecord?.loadingPlan?.unpackedItems?.length || compareState.historicalRecord?.unpackedItems?.length || 0;
@@ -1236,20 +1610,8 @@ function renderCompareMode() {
     renderCompareHud('compare-current-hud', 'current', currentFurnace, compareState.currentIndex, currentFurnaces.length, currentUnpacked);
     renderCompareHud('compare-history-hud', 'history', historyFurnace, compareState.historyIndex, historyFurnaces.length, historyUnpacked);
     updateCompareDiffSummary(currentFurnace, historyFurnace, currentUnpacked, historyUnpacked);
-    addCompareSideLabels(compareState.mode);
 
-    const maxH = Math.max(currentFurnace?.h || 900, historyFurnace?.h || 900);
-    const maxD = Math.max(currentFurnace?.d || 900, historyFurnace?.d || 900);
-    const baseY = -120;
-    if (controls && camera) {
-        controls.target.set(0, maxH / 2 + baseY, 0);
-        if (compareState.mode === 'vertical') {
-            camera.position.set(sep * 0.65, maxH * 1.7 + baseY, sep * 1.3 + maxD);
-        } else {
-            camera.position.set(sep * 0.35, maxH * 1.7 + baseY, sep * 1.25 + maxD);
-        }
-        controls.update();
-    }
+    renderCompare3DViews(currentFurnace, historyFurnace);
 }
 
 function enterCompareMode(record, title) {
@@ -1283,6 +1645,8 @@ function exitCompareMode(restoreScene = true) {
 
     compareState.active = false;
     document.body.classList.remove('compare-mode');
+
+    destroyCompareViews();
 
     const modal = document.getElementById('compare-modal');
     if (modal) modal.style.display = 'none';
@@ -1356,6 +1720,8 @@ function bindCompareModeEvents() {
 
     const exit = document.getElementById('compare-exit');
     if (exit) exit.addEventListener('click', () => exitCompareMode(true));
+
+    window.addEventListener('resize', resizeCompareViews);
 }
 
 /**
@@ -1888,6 +2254,7 @@ function init() {
     updateWorkbenchUiMode();
     bindLoadingSimulationStepClicks();
     bindCompareModeEvents();
+    bindCurrentToolingHudControls();
     observePlanLibraryForCompareButtons();
     syncPanelCollapsedBodyClasses();
 
@@ -2003,6 +2370,7 @@ function init() {
                 updateFurnaceNav();
                 updateLeftPanelActiveForIndex(idx);
                 renderAISummaryBar(onCenterFurnaceClick);
+                updateCurrentToolingHud();
             }
         } else {
             // 无装炉结果时（仅空工装），切换 furnaceGroups 可见性

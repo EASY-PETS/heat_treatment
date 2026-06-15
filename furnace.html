@@ -184,11 +184,16 @@
                 </div>
                 <div id="current-tooling-hud" class="current-tooling-hud" style="display:none;">
                     <div class="cth-head">
-                        <div>
+                        <button class="cth-nav-btn cth-prev" id="cth-prev" type="button" title="查看上一个工装" aria-label="查看上一个工装">‹</button>
+                        <div class="cth-main">
                             <div class="cth-kicker">当前工装</div>
                             <div class="cth-title" id="cth-title">-</div>
                         </div>
-                        <div class="cth-index" id="cth-index">-/-</div>
+                        <div class="cth-side">
+                            <div class="cth-index" id="cth-index">-/-</div>
+                            <button class="cth-toggle-btn" id="cth-toggle" type="button" title="收起/展开当前工装指标" aria-expanded="true">收起</button>
+                        </div>
+                        <button class="cth-nav-btn cth-next" id="cth-next" type="button" title="查看下一个工装" aria-label="查看下一个工装">›</button>
                     </div>
                     <div class="cth-grid">
                         <div class="cth-item"><span>已装工件</span><strong id="cth-packed-count">-</strong></div>
@@ -200,15 +205,15 @@
                     </div>
                     <div class="cth-unpacked" id="cth-unpacked" style="display:none;"></div>
                 </div>
-                <div id="compare-modal" class="compare-modal compare-modal-compact" style="display:none;">
+                <div id="compare-modal" class="compare-modal compare-modal-dual" style="display:none;">
                     <div class="compare-modal-mainrow">
                         <div class="compare-modal-title-wrap">
                             <div class="compare-modal-kicker">方案对比</div>
                             <div class="compare-modal-title" id="compare-title">当前方案 vs 历史方案</div>
                         </div>
                         <div class="compare-modal-controls" aria-label="对比视图切换">
-                            <button class="compare-mode-btn active" data-compare-mode="horizontal" type="button">左右</button>
-                            <button class="compare-mode-btn" data-compare-mode="vertical" type="button">上下</button>
+                            <button class="compare-mode-btn active" data-compare-mode="horizontal" type="button">左右视窗</button>
+                            <button class="compare-mode-btn" data-compare-mode="vertical" type="button">上下视窗</button>
                         </div>
                         <div class="compare-modal-nav">
                             <button class="compare-nav-btn" id="compare-prev" type="button">上一组</button>
@@ -216,13 +221,20 @@
                             <button class="compare-exit-btn" id="compare-exit" type="button">退出</button>
                         </div>
                     </div>
+                    <div id="compare-viewports" class="compare-viewports horizontal">
+                        <section class="compare-viewport compare-viewport-current">
+                            <div class="compare-viewport-badge current">当前方案</div>
+                            <div id="compare-current-canvas" class="compare-canvas-host"></div>
+                            <div id="compare-current-hud" class="compare-window-metrics current"></div>
+                        </section>
+                        <section class="compare-viewport compare-viewport-history">
+                            <div class="compare-viewport-badge history">历史方案</div>
+                            <div id="compare-history-canvas" class="compare-canvas-host"></div>
+                            <div id="compare-history-hud" class="compare-window-metrics history"></div>
+                        </section>
+                    </div>
                     <div class="compare-diff-summary" id="compare-diff-summary">
                         <span>选择历史方案后显示差异摘要</span>
-                    </div>
-                    <div class="compare-modal-body">
-                        <div id="compare-current-hud" class="compare-side-card current"></div>
-                        <div class="compare-vs-core">VS</div>
-                        <div id="compare-history-hud" class="compare-side-card history"></div>
                     </div>
                 </div>
             </div>
