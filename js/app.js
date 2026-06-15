@@ -216,6 +216,7 @@ function generateCandidatePlans(furnacePoolInput, itemsInput, spacing) {
 }
 
 function applyCandidatePlan(index) {
+    exitCompareMode(false);
     if (!candidatePlans || !candidatePlans[index]) return;
 
     currentCandidatePlanIndex = index;
@@ -265,6 +266,7 @@ function applyCandidatePlan(index) {
 
     renderAISummaryBar(onCenterFurnaceClick);
     updateCurrentToolingHud();
+    refreshPlanLibraryWorkbench();
     updateTopSummary();
     updateWorkbenchUiMode();
 }
@@ -280,6 +282,8 @@ function applyCandidatePlan(index) {
  * @returns {void}
  */
 function executeAndRender() {
+    exitCompareMode(false);
+    clearHistoryViewState();
     if (isAnimating) return;
 
     let furnacePoolInput = [];
@@ -430,6 +434,7 @@ function executeAndRender() {
     }
     renderAISummaryBar(onCenterFurnaceClick);
     updateCurrentToolingHud();
+    refreshPlanLibraryWorkbench();
     updateTopSummary();
     updateWorkbenchUiMode();
 
@@ -553,13 +558,18 @@ const planLibrary = createPlanLibraryController({
     },
 
     onLoadRecord: (record, item) => {
+        const title = item?.title || record.meta?.title || getPlanRecordTitle(record) || '历史方案';
+        markHistoryView(record, title);
+
         workbenchRecord.applyDigitalTwinRecordToWorkbench(record, {
-            sourceTitle: item?.title || record.meta?.title || '',
-            closeLibrary: true,
+            sourceTitle: title,
+            closeLibrary: false,
             showSuccess: true
         });
 
         updateWorkbenchUiMode();
+        refreshPlanLibraryWorkbench();
+        updateCurrentToolingHud();
     }
 });
 
@@ -567,6 +577,8 @@ const planLibrary = createPlanLibraryController({
  * 清空所有装炉结果，重置3D场景和UI
  */
 export function clearFurnaceResults() {
+    exitCompareMode(false);
+    clearHistoryViewState();
     window._currentPlanAnalysis = null;
 
     setGlobalFurnacesResult(null);
@@ -659,7 +671,10 @@ function updateCurrentToolingHud() {
     const spaceRate = totalVolume > 0 ? (packedVolume / totalVolume) * 100 : NaN;
     const layerCount = getCurrentToolingLayerCount(furnace);
 
-    setHudText('cth-title', furnace.instanceId || furnace.typeName || `工装 #${idx + 1}`);
+    const hudKicker = hud.querySelector('.cth-kicker');
+    if (hudKicker) hudKicker.textContent = workspaceViewState.mode === 'history' ? '历史方案 · 当前工装' : '当前工装';
+    const toolingTitle = furnace.instanceId || furnace.typeName || `工装 #${idx + 1}`;
+    setHudText('cth-title', workspaceViewState.mode === 'history' ? `${workspaceViewState.historyTitle || '历史方案'} / ${toolingTitle}` : toolingTitle);
     setHudText('cth-index', `${idx + 1}/${globalFurnacesResult.length}`);
     setHudText('cth-packed-count', `${packedCount} 件`);
     setHudText('cth-weight', `${totalWeight.toFixed(1)} kg`);
@@ -681,6 +696,666 @@ function updateCurrentToolingHud() {
     }
 
     hud.style.display = 'block';
+}
+
+// ==================== V8.2: 3D 方案对比模式 ====================
+let compareState = {
+    active: false,
+    mode: 'horizontal',
+    title: '',
+    historicalRecord: null,
+    historicalFurnaces: [],
+    currentIndex: 0,
+    historyIndex: 0
+};
+
+function clampIndex(index, length) {
+    if (!length) return 0;
+    return Math.max(0, Math.min(index || 0, length - 1));
+}
+
+function getFurnaceVolume(furnace) {
+    return Number((furnace?.w || 0) * (furnace?.h || 0) * (furnace?.d || 0));
+}
+
+function getPackedVolume(furnace) {
+    return (furnace?.packedItems || []).reduce((sum, item) => {
+        return sum + Number((item.w || 0) * (item.h || 0) * (item.d || 0));
+    }, 0);
+}
+
+function getFurnaceMetricSummary(furnace, index, total, unpackedCount) {
+    if (!furnace) {
+        return {
+            title: '暂无工装', indexText: '-/-', packedCount: '-', weight: '-', weightRate: '-',
+            spaceRate: '-', layers: '-', maxWeight: '-', note: '当前方案没有对应序号的工装。'
+        };
+    }
+
+    const packedItems = furnace.packedItems || [];
+    const totalWeight = Number(furnace.totalWeight || 0);
+    const maxWeight = Number(furnace.max_weight || furnace.maxWeight || 0);
+    const weightRate = maxWeight > 0 ? (totalWeight / maxWeight) * 100 : NaN;
+    const volume = getFurnaceVolume(furnace);
+    const packedVolume = getPackedVolume(furnace);
+    const spaceRate = volume > 0 ? (packedVolume / volume) * 100 : NaN;
+    const layers = getCurrentToolingLayerCount(furnace);
+
+    return {
+        title: furnace.instanceId || furnace.typeName || `工装 #${index + 1}`,
+        indexText: `${index + 1}/${total || 1}`,
+        packedCount: `${packedItems.length} 件`,
+        weight: `${totalWeight.toFixed(1)} kg`,
+        weightRate: formatPercent(weightRate),
+        spaceRate: formatPercent(spaceRate),
+        layers: layers > 0 ? `${layers} 层` : '-',
+        maxWeight: maxWeight > 0 ? `${maxWeight.toFixed(0)} kg` : '-',
+        note: unpackedCount > 0 ? `仍有 ${unpackedCount} 件工件未装入，可对照历史方案判断是否需要增加工装。` : ''
+    };
+}
+
+function renderCompareHud(elId, role, furnace, index, total, unpackedCount) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+
+    const m = getFurnaceMetricSummary(furnace, index, total, unpackedCount);
+    const roleLabel = role === 'current' ? '当前方案' : '历史方案';
+
+    el.innerHTML = `
+        <div class="compare-card-head">
+            <div>
+                <div class="compare-card-kicker">${roleLabel}</div>
+                <div class="compare-card-title">${m.title}</div>
+            </div>
+            <div class="compare-card-index">${m.indexText}</div>
+        </div>
+        <div class="compare-chip-row">
+            <span><b>${m.packedCount}</b> 已装</span>
+            <span><b>${m.weight}</b></span>
+            <span><b>${m.layers}</b></span>
+            <span>空间 <b>${m.spaceRate}</b></span>
+        </div>
+    `;
+    el.style.display = 'block';
+}
+
+function normalizeRuntimeItemFromRecord(item, idx) {
+    const position = item.position || item.pos || item;
+    const dim = item.dimensions || item.dimension || item;
+    const length = Number(dim.length ?? dim.l ?? dim.w ?? item.w ?? item.width ?? 0);
+    const width = Number(dim.width ?? dim.depth ?? dim.d ?? item.d ?? item.depth ?? length);
+    const height = Number(dim.height ?? dim.h ?? item.h ?? item.height ?? 0);
+
+    return {
+        id: item.id || item.itemId || `history-item-${idx}`,
+        name: item.name || item.showName || item.materialBatchName || '历史工件',
+        shape: item.shape || 'cuboid',
+        w: length,
+        d: width,
+        h: height,
+        weight: Number(item.weight || item.weightKg || item.unitWeightKg || 0),
+        color: item.color || '#7c3aed',
+        x: Number(position.x || 0),
+        y: Number(position.y || 0),
+        z: Number(position.z || 0),
+        material: item.material || item.materialName || '',
+        process: item.process || item.processName || '',
+        originalDims: item.originalDims || { l: length, w: width, h: height }
+    };
+}
+
+function normalizeRuntimeFurnacesFromRecord(record) {
+    try {
+        const runtime = getRuntimeFurnacesFromRecord(record);
+        if (Array.isArray(runtime) && runtime.length > 0) return runtime;
+    } catch (e) {
+        console.warn('[compare] getRuntimeFurnacesFromRecord failed, fallback normalize:', e);
+    }
+
+    const source = record?.loadingPlan?.furnaces || record?.furnaces || record?.completedFurnaces || [];
+    if (!Array.isArray(source)) return [];
+
+    return source.map((f, idx) => {
+        const dim = f.dimensions || f.dimension || f;
+        const packedItems = Array.isArray(f.packedItems) ? f.packedItems : (Array.isArray(f.items) ? f.items : []);
+        return {
+            instanceId: f.instanceId || f.name || f.toolingName || `历史工装 #${idx + 1}`,
+            typeName: f.typeName || f.toolingName || f.name || `历史工装 #${idx + 1}`,
+            w: Number(dim.width ?? f.w ?? f.width ?? 0),
+            h: Number(dim.height ?? f.h ?? f.height ?? 0),
+            d: Number(dim.depth ?? f.d ?? f.depth ?? 0),
+            max_weight: Number(f.maxWeightKg ?? f.maxLoadKg ?? f.max_weight ?? f.maxWeight ?? 0),
+            basketType: f.basketType || 'grid',
+            toolingType: f.toolingType || 'standard-basket',
+            params: f.params || {},
+            shelvesUsed: f.shelvesUsed || f.shelves || [],
+            shelfCount: f.shelfCount,
+            packedItems: packedItems.map(normalizeRuntimeItemFromRecord),
+            totalWeight: Number(f.totalWeightKg ?? f.totalWeight ?? 0)
+        };
+    }).filter(f => f.w > 0 && f.h > 0 && f.d > 0);
+}
+
+function collectRecordsFromAnyValue(value, out, depth = 0) {
+    if (depth > 5 || !value) return;
+
+    if (typeof value === 'string') {
+        try {
+            collectRecordsFromAnyValue(JSON.parse(value), out, depth + 1);
+        } catch (_) {}
+        return;
+    }
+
+    if (Array.isArray(value)) {
+        value.forEach(v => collectRecordsFromAnyValue(v, out, depth + 1));
+        return;
+    }
+
+    if (typeof value !== 'object') return;
+
+    if (
+        value.schemaVersion === 'heat-treatment-digital-twin-v1' ||
+        (value.loadingPlan && Array.isArray(value.loadingPlan.furnaces)) ||
+        (typeof isDigitalTwinRecord === 'function' && isDigitalTwinRecord(value))
+    ) {
+        out.push(value);
+        return;
+    }
+
+    if (value.record) collectRecordsFromAnyValue(value.record, out, depth + 1);
+    if (value.records) collectRecordsFromAnyValue(value.records, out, depth + 1);
+    if (value.items) collectRecordsFromAnyValue(value.items, out, depth + 1);
+    if (value.plans) collectRecordsFromAnyValue(value.plans, out, depth + 1);
+}
+
+function getPlanRecordTitle(record) {
+    return record?.meta?.title || record?.title || record?.name || '历史方案';
+}
+
+function getPlanRecordCreatedAt(record) {
+    return record?.meta?.createdAt || record?.createdAt || record?.date || record?.timestamp || '';
+}
+
+function findPlanLibraryRecords() {
+    const records = [];
+    try {
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            const value = localStorage.getItem(key);
+            collectRecordsFromAnyValue(value, records);
+        }
+    } catch (e) {
+        console.warn('[compare] scan localStorage failed:', e);
+    }
+
+    const seen = new Set();
+    return records
+        .filter(r => {
+            const sig = `${getPlanRecordTitle(r)}|${getPlanRecordCreatedAt(r)}|${JSON.stringify(r.loadingPlan?.furnaces?.[0]?.instanceId || '')}`;
+            if (seen.has(sig)) return false;
+            seen.add(sig);
+            return true;
+        })
+        .sort((a, b) => String(getPlanRecordCreatedAt(b)).localeCompare(String(getPlanRecordCreatedAt(a))));
+}
+
+function findRecordForPlanCard(card) {
+    const records = findPlanLibraryRecords();
+    if (!records.length) return null;
+
+    const cardTitle = card?.querySelector('.mpc-title')?.textContent?.trim() || '';
+    if (cardTitle) {
+        const exact = records.find(r => getPlanRecordTitle(r) === cardTitle);
+        if (exact) return exact;
+
+        const fuzzy = records.find(r => {
+            const t = getPlanRecordTitle(r);
+            return t && (cardTitle.includes(t) || t.includes(cardTitle));
+        });
+        if (fuzzy) return fuzzy;
+    }
+
+    const cards = [...document.querySelectorAll('#master-list .master-plan-card')];
+    const idx = Math.max(0, cards.indexOf(card));
+    return records[idx] || records[0] || null;
+}
+
+let workspaceViewState = {
+    mode: 'current',
+    historyTitle: '',
+    backupRecord: null
+};
+
+function captureCurrentWorkspaceSnapshot(title = '当前工作台自动快照') {
+    try {
+        return buildCurrentDigitalTwinRecord({
+            title,
+            materials: collectMaterialBatchesForRecord(),
+            tooling: collectToolingForRecord()
+        });
+    } catch (e) {
+        console.warn('[workspace] capture snapshot failed:', e);
+        return null;
+    }
+}
+
+function markHistoryView(record, title) {
+    if (workspaceViewState.mode !== 'history') {
+        workspaceViewState.backupRecord = captureCurrentWorkspaceSnapshot('加载历史前的当前方案');
+    }
+    workspaceViewState.mode = 'history';
+    workspaceViewState.historyTitle = title || getPlanRecordTitle(record) || '历史方案';
+    document.body.classList.add('history-view-mode');
+}
+
+function clearHistoryViewState() {
+    workspaceViewState.mode = 'current';
+    workspaceViewState.historyTitle = '';
+    workspaceViewState.backupRecord = null;
+    document.body.classList.remove('history-view-mode');
+}
+
+function restoreCurrentWorkspaceFromHistory() {
+    const record = workspaceViewState.backupRecord;
+    if (!record) {
+        alert('没有找到可恢复的当前方案快照');
+        return;
+    }
+
+    const snapshot = record;
+    clearHistoryViewState();
+
+    workbenchRecord.applyDigitalTwinRecordToWorkbench(snapshot, {
+        sourceTitle: '当前工作台方案',
+        closeLibrary: false,
+        showSuccess: true
+    });
+
+    updateWorkbenchUiMode();
+    refreshPlanLibraryWorkbench();
+    updateCurrentToolingHud();
+}
+
+function renderCurrentWorkbenchPlanCard() {
+    const card = document.getElementById('current-workbench-card');
+    if (!card) return;
+
+    if (!globalFurnacesResult || globalFurnacesResult.length === 0) {
+        card.className = 'current-workbench-card empty';
+        card.innerHTML = `
+            <div class="cwc-head">
+                <div>
+                    <div class="cwc-kicker">当前工作台方案</div>
+                    <div class="cwc-title">暂无当前方案</div>
+                </div>
+                <span class="cwc-status">未生成</span>
+            </div>
+            <div class="cwc-metrics cwc-muted-line">生成方案后可保存为历史快照，也可与历史方案对比。</div>
+        `;
+        return;
+    }
+
+    const totalFurnaces = globalFurnacesResult.length;
+    const totalItems = globalFurnacesResult.reduce((sum, f) => sum + ((f.packedItems || []).length), 0);
+    const totalWeight = globalFurnacesResult.reduce((sum, f) => sum + Number(f.totalWeight || 0), 0);
+    const unpacked = globalUnpackedItems ? globalUnpackedItems.length : 0;
+    const first = globalFurnacesResult[0];
+    const title = first?.instanceId || first?.typeName || '当前装炉方案';
+    const isHistory = workspaceViewState.mode === 'history';
+
+    card.className = 'current-workbench-card' + (isHistory ? ' history-viewing' : '');
+    card.innerHTML = `
+        <div class="cwc-head">
+            <div>
+                <div class="cwc-kicker">${isHistory ? '正在查看历史方案' : '当前工作台方案'}</div>
+                <div class="cwc-title">${isHistory ? (workspaceViewState.historyTitle || title) : title}</div>
+            </div>
+            <span class="cwc-status">${isHistory ? '历史查看' : '当前'}</span>
+        </div>
+        <div class="cwc-metrics">
+            <span><b>${totalFurnaces}</b> 工装</span>
+            <span><b>${totalItems}</b> 件</span>
+            <span><b>${totalWeight.toFixed(1)}</b> kg</span>
+            <span><b>${unpacked}</b> 未装</span>
+            <span><b>${placementRules.strategy || '-'}</b></span>
+        </div>
+        ${isHistory ? `
+            <button class="cwc-restore-btn" id="btn-restore-current-workspace" type="button">恢复当前方案</button>
+            <div class="cwc-history-note">当前左侧工装/工件为历史快照；点击恢复可回到加载历史前的工作台。</div>
+        ` : `<div class="cwc-history-note">保存后进入历史方案，可用于后续对比。</div>`}
+    `;
+
+    const restoreBtn = card.querySelector('#btn-restore-current-workspace');
+    if (restoreBtn) restoreBtn.addEventListener('click', restoreCurrentWorkspaceFromHistory);
+}
+
+function refreshPlanLibraryWorkbench() {
+    renderCurrentWorkbenchPlanCard();
+    setTimeout(enhancePlanLibraryCompareButtons, 0);
+}
+
+function enhancePlanLibraryCompareButtons() {
+    renderCurrentWorkbenchPlanCard();
+    const cards = document.querySelectorAll('#master-list .master-plan-card');
+    const empty = document.getElementById('master-empty-state');
+    if (empty) empty.style.display = cards.length ? 'none' : 'block';
+    cards.forEach(card => {
+        if (card.querySelector('[data-action="compare-plan"]')) return;
+
+        let actionRow = card.querySelector('.mpc-actions');
+        if (!actionRow) {
+            actionRow = document.createElement('div');
+            actionRow.className = 'mpc-actions';
+            card.appendChild(actionRow);
+        }
+
+        const existingLoad = [...card.querySelectorAll('button')].find(btn => /加载|查看历史|恢复/.test(btn.textContent || '') && !btn.closest('.mpc-actions'));
+        if (existingLoad) {
+            existingLoad.classList.add('plan-card-action', 'load');
+            existingLoad.textContent = '查看历史';
+            existingLoad.title = '载入该历史方案进行查看；可从当前方案卡恢复原工作台';
+            actionRow.appendChild(existingLoad);
+        }
+
+        const compareBtn = document.createElement('button');
+        compareBtn.type = 'button';
+        compareBtn.className = 'plan-card-action compare';
+        compareBtn.setAttribute('data-action', 'compare-plan');
+        compareBtn.textContent = '对比';
+        actionRow.appendChild(compareBtn);
+
+        const legacyDelete = card.querySelector('.mpc-delete');
+        if (legacyDelete && !actionRow.querySelector('[data-action="delete-plan-proxy"]')) {
+            const deleteBtn = document.createElement('button');
+            deleteBtn.type = 'button';
+            deleteBtn.className = 'plan-card-action danger';
+            deleteBtn.setAttribute('data-action', 'delete-plan-proxy');
+            deleteBtn.textContent = '删除';
+            deleteBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                legacyDelete.click();
+                setTimeout(enhancePlanLibraryCompareButtons, 0);
+            });
+            actionRow.appendChild(deleteBtn);
+        }
+    });
+}
+
+function observePlanLibraryForCompareButtons() {
+    const list = document.getElementById('master-list');
+    if (!list) return;
+
+    const observer = new MutationObserver(() => {
+        refreshPlanLibraryWorkbench();
+    });
+
+    observer.observe(list, { childList: true, subtree: true });
+    refreshPlanLibraryWorkbench();
+}
+
+function getCompareSeparation(currentFurnace, historyFurnace) {
+    const currentMax = Math.max(currentFurnace?.w || 0, currentFurnace?.d || 0, currentFurnace?.h || 0);
+    const historyMax = Math.max(historyFurnace?.w || 0, historyFurnace?.d || 0, historyFurnace?.h || 0);
+    return Math.max(900, currentMax + historyMax + 500);
+}
+
+function clearCompareDomLabels() {
+    document.querySelectorAll('.compare-side-label').forEach(el => el.remove());
+}
+
+function numFromPercentText(text) {
+    const n = parseFloat(String(text || '').replace('%', ''));
+    return Number.isFinite(n) ? n : NaN;
+}
+
+function signedDeltaText(delta, suffix = '') {
+    if (!Number.isFinite(delta) || Math.abs(delta) < 0.05) return { text: '持平', cls: 'equal' };
+    return { text: `${delta > 0 ? '+' : ''}${delta.toFixed(Math.abs(delta) >= 10 ? 0 : 1)}${suffix}`, cls: delta > 0 ? 'positive' : 'negative' };
+}
+
+function updateCompareDiffSummary(currentFurnace, historyFurnace, currentUnpacked, historyUnpacked) {
+    const el = document.getElementById('compare-diff-summary');
+    if (!el) return;
+
+    const c = getFurnaceMetricSummary(currentFurnace, compareState.currentIndex, globalFurnacesResult?.length || 0, currentUnpacked);
+    const h = getFurnaceMetricSummary(historyFurnace, compareState.historyIndex, compareState.historicalFurnaces?.length || 0, historyUnpacked);
+
+    const currentItems = (currentFurnace?.packedItems || []).length;
+    const historyItems = (historyFurnace?.packedItems || []).length;
+    const currentWeight = Number(currentFurnace?.totalWeight || 0);
+    const historyWeight = Number(historyFurnace?.totalWeight || 0);
+    const currentLayers = getCurrentToolingLayerCount(currentFurnace);
+    const historyLayers = getCurrentToolingLayerCount(historyFurnace);
+    const currentSpace = numFromPercentText(c.spaceRate);
+    const historySpace = numFromPercentText(h.spaceRate);
+
+    const itemsDelta = signedDeltaText(currentItems - historyItems, '件');
+    const weightDelta = signedDeltaText(currentWeight - historyWeight, 'kg');
+    const layerDelta = signedDeltaText(currentLayers - historyLayers, '层');
+    const spaceDelta = signedDeltaText(currentSpace - historySpace, '%');
+    const unpackedDelta = signedDeltaText((currentUnpacked || 0) - (historyUnpacked || 0), '件');
+
+    el.innerHTML = `
+        <span>差异</span>
+        <b class="${itemsDelta.cls}">已装 ${itemsDelta.text}</b>
+        <b class="${weightDelta.cls}">重量 ${weightDelta.text}</b>
+        <b class="${layerDelta.cls}">层数 ${layerDelta.text}</b>
+        <b class="${spaceDelta.cls}">空间 ${spaceDelta.text}</b>
+        <b class="${unpackedDelta.cls}">未装 ${unpackedDelta.text}</b>
+    `;
+}
+
+function addCompareSideLabels(mode) {
+    const container = document.getElementById('canvas-container');
+    if (!container) return;
+    clearCompareDomLabels();
+
+    const currentLabel = document.createElement('div');
+    currentLabel.className = 'compare-side-label compare-current-label';
+    currentLabel.textContent = '当前方案';
+
+    const historyLabel = document.createElement('div');
+    historyLabel.className = 'compare-side-label compare-history-label';
+    historyLabel.textContent = '历史方案';
+
+    if (mode === 'vertical') {
+        currentLabel.style.left = '50%';
+        currentLabel.style.transform = 'translateX(-50%)';
+        currentLabel.style.top = '92px';
+        historyLabel.style.left = '50%';
+        historyLabel.style.transform = 'translateX(-50%)';
+        historyLabel.style.bottom = '126px';
+        historyLabel.style.top = 'auto';
+    } else {
+        currentLabel.style.left = '28%';
+        currentLabel.style.transform = 'translateX(-50%)';
+        historyLabel.style.right = '28%';
+        historyLabel.style.transform = 'translateX(50%)';
+    }
+
+    container.appendChild(currentLabel);
+    container.appendChild(historyLabel);
+}
+
+function renderCompareMode() {
+    if (!compareState.active) return;
+    if (!itemsGroup) return;
+
+    const currentFurnaces = globalFurnacesResult || [];
+    const historyFurnaces = compareState.historicalFurnaces || [];
+    if (!currentFurnaces.length || !historyFurnaces.length) return;
+
+    compareState.currentIndex = clampIndex(compareState.currentIndex, currentFurnaces.length);
+    compareState.historyIndex = clampIndex(compareState.historyIndex, historyFurnaces.length);
+
+    const currentFurnace = currentFurnaces[compareState.currentIndex];
+    const historyFurnace = historyFurnaces[compareState.historyIndex];
+    const sep = getCompareSeparation(currentFurnace, historyFurnace);
+
+    clearFurnaceGroups();
+    while (itemsGroup.children.length > 0) {
+        itemsGroup.remove(itemsGroup.children[0]);
+    }
+
+    const currentGroup = buildFurnaceGroup(currentFurnace, 0, getSelectedMaterialName());
+    const historyGroup = buildFurnaceGroup(historyFurnace, 1, getSelectedMaterialName());
+
+    currentGroup.visible = true;
+    historyGroup.visible = true;
+
+    if (compareState.mode === 'vertical') {
+        currentGroup.position.set(0, 0, -sep / 2);
+        historyGroup.position.set(0, 0, sep / 2);
+    } else {
+        currentGroup.position.set(-sep / 2, 0, 0);
+        historyGroup.position.set(sep / 2, 0, 0);
+    }
+
+    itemsGroup.add(currentGroup);
+    itemsGroup.add(historyGroup);
+
+    const emptyState = document.getElementById('empty-state');
+    if (emptyState) emptyState.style.display = 'none';
+
+    const currentHud = document.getElementById('current-tooling-hud');
+    if (currentHud) currentHud.style.display = 'none';
+
+    const modal = document.getElementById('compare-modal');
+    if (modal) modal.style.display = 'block';
+
+    const title = document.getElementById('compare-title');
+    if (title) title.textContent = `当前方案 vs ${compareState.title || '历史方案'}`;
+
+    document.querySelectorAll('[data-compare-mode]').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-compare-mode') === compareState.mode);
+    });
+
+    const currentUnpacked = globalUnpackedItems ? globalUnpackedItems.length : 0;
+    const historyUnpacked = compareState.historicalRecord?.loadingPlan?.unpackedItems?.length || compareState.historicalRecord?.unpackedItems?.length || 0;
+
+    renderCompareHud('compare-current-hud', 'current', currentFurnace, compareState.currentIndex, currentFurnaces.length, currentUnpacked);
+    renderCompareHud('compare-history-hud', 'history', historyFurnace, compareState.historyIndex, historyFurnaces.length, historyUnpacked);
+    updateCompareDiffSummary(currentFurnace, historyFurnace, currentUnpacked, historyUnpacked);
+    addCompareSideLabels(compareState.mode);
+
+    const maxH = Math.max(currentFurnace?.h || 900, historyFurnace?.h || 900);
+    const maxD = Math.max(currentFurnace?.d || 900, historyFurnace?.d || 900);
+    const baseY = -120;
+    if (controls && camera) {
+        controls.target.set(0, maxH / 2 + baseY, 0);
+        if (compareState.mode === 'vertical') {
+            camera.position.set(sep * 0.65, maxH * 1.7 + baseY, sep * 1.3 + maxD);
+        } else {
+            camera.position.set(sep * 0.35, maxH * 1.7 + baseY, sep * 1.25 + maxD);
+        }
+        controls.update();
+    }
+}
+
+function enterCompareMode(record, title) {
+    if (!globalFurnacesResult || globalFurnacesResult.length === 0) {
+        alert('请先生成当前工作台方案，再与历史方案对比');
+        return;
+    }
+
+    const historyFurnaces = normalizeRuntimeFurnacesFromRecord(record);
+    if (!historyFurnaces || historyFurnaces.length === 0) {
+        alert('该历史方案没有可用于 3D 对比的装炉结果，请先加载或重新保存为数字孪生记录');
+        return;
+    }
+
+    compareState = {
+        active: true,
+        mode: compareState.mode || 'horizontal',
+        title: title || getPlanRecordTitle(record),
+        historicalRecord: record,
+        historicalFurnaces: historyFurnaces,
+        currentIndex: clampIndex(currentFurnaceIndex, globalFurnacesResult.length),
+        historyIndex: clampIndex(currentFurnaceIndex, historyFurnaces.length)
+    };
+
+    document.body.classList.add('compare-mode');
+    renderCompareMode();
+}
+
+function exitCompareMode(restoreScene = true) {
+    if (!compareState.active && restoreScene === false) return;
+
+    compareState.active = false;
+    document.body.classList.remove('compare-mode');
+
+    const modal = document.getElementById('compare-modal');
+    if (modal) modal.style.display = 'none';
+    const currentHud = document.getElementById('compare-current-hud');
+    const historyHud = document.getElementById('compare-history-hud');
+    if (currentHud) currentHud.style.display = 'none';
+    if (historyHud) historyHud.style.display = 'none';
+    clearCompareDomLabels();
+
+    if (!restoreScene) return;
+
+    if (globalFurnacesResult && globalFurnacesResult.length > 0) {
+        const idx = clampIndex(currentFurnaceIndex, globalFurnacesResult.length);
+        clearFurnaceGroups();
+        renderSingleFurnace(idx, getSelectedMaterialName());
+        updateFurnaceNav();
+        updateLeftPanelActiveForIndex(idx);
+        renderAISummaryBar(onCenterFurnaceClick);
+        updateCurrentToolingHud();
+        renderLoadingSimulationPanel();
+        updateSimulationModeButtons();
+        renderFurnaceThumbnails(globalFurnacesResult, idx, handleThumbFurnaceClick);
+    }
+}
+
+function stepCompare(delta) {
+    if (!compareState.active) return;
+    const currentLen = globalFurnacesResult?.length || 0;
+    const historyLen = compareState.historicalFurnaces?.length || 0;
+    const maxLen = Math.max(currentLen, historyLen);
+    if (!maxLen) return;
+
+    const next = (compareState.currentIndex + delta + maxLen) % maxLen;
+    compareState.currentIndex = clampIndex(next, currentLen);
+    compareState.historyIndex = clampIndex(next, historyLen);
+    setCurrentFurnaceIndex(compareState.currentIndex);
+    renderCompareMode();
+    renderFurnaceThumbnails(globalFurnacesResult, compareState.currentIndex, handleThumbFurnaceClick);
+}
+
+function bindCompareModeEvents() {
+    const masterList = document.getElementById('master-list');
+    if (masterList) {
+        masterList.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-action="compare-plan"]');
+            if (!btn) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const card = btn.closest('.master-plan-card');
+            const record = findRecordForPlanCard(card);
+            if (!record) {
+                alert('没有找到该历史方案的数字孪生记录，建议重新保存当前方案后再对比');
+                return;
+            }
+            enterCompareMode(record, card?.querySelector('.mpc-title')?.textContent?.trim() || getPlanRecordTitle(record));
+        });
+    }
+
+    document.querySelectorAll('[data-compare-mode]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            compareState.mode = btn.getAttribute('data-compare-mode') || 'horizontal';
+            renderCompareMode();
+        });
+    });
+
+    const prev = document.getElementById('compare-prev');
+    if (prev) prev.addEventListener('click', () => stepCompare(-1));
+
+    const next = document.getElementById('compare-next');
+    if (next) next.addEventListener('click', () => stepCompare(1));
+
+    const exit = document.getElementById('compare-exit');
+    if (exit) exit.addEventListener('click', () => exitCompareMode(true));
 }
 
 /**
@@ -768,6 +1443,7 @@ function updateWorkbenchUiMode() {
     document.body.classList.toggle('ui-plan-ready', hasPlan);
     document.body.classList.toggle('ui-has-selected-furnace', hasSelectedFurnace);
     document.body.classList.toggle('ui-has-selected-material', hasSelectedMaterial);
+    document.body.classList.toggle('history-view-mode', workspaceViewState.mode === 'history');
 
     updateEmptyStateCopy({
         hasFurnaces,
@@ -956,6 +1632,11 @@ function bindLoadingSimulationStepClicks() {
 function navigateFurnace(direction) {
     if (!globalFurnacesResult || globalFurnacesResult.length === 0) return;
 
+    if (compareState.active) {
+        stepCompare(direction);
+        return;
+    }
+
     const newIndex =
         (currentFurnaceIndex + direction + globalFurnacesResult.length) %
         globalFurnacesResult.length;
@@ -987,6 +1668,15 @@ function navigateFurnace(direction) {
 }
 
 function handleThumbFurnaceClick(clickedIdx) {
+    if (compareState.active) {
+        compareState.currentIndex = clampIndex(clickedIdx, globalFurnacesResult?.length || 0);
+        compareState.historyIndex = clampIndex(clickedIdx, compareState.historicalFurnaces?.length || 0);
+        setCurrentFurnaceIndex(compareState.currentIndex);
+        renderCompareMode();
+        renderFurnaceThumbnails(globalFurnacesResult, compareState.currentIndex, handleThumbFurnaceClick);
+        return;
+    }
+
     setCurrentFurnaceIndex(clickedIdx);
 
     const filterName = getSelectedMaterialName();
@@ -1011,6 +1701,14 @@ function handleThumbFurnaceClick(clickedIdx) {
  * 点击中心统计面板的炉膛项时触发，切换到对应炉膛
  */
 function onCenterFurnaceClick(idx) {
+    if (compareState.active) {
+        compareState.currentIndex = clampIndex(idx, globalFurnacesResult?.length || 0);
+        compareState.historyIndex = clampIndex(idx, compareState.historicalFurnaces?.length || 0);
+        setCurrentFurnaceIndex(compareState.currentIndex);
+        renderCompareMode();
+        return;
+    }
+
     setCurrentFurnaceIndex(idx);
 
     const filterName = getSelectedMaterialName();
@@ -1052,6 +1750,7 @@ function showMasterView() {
     hideExplodeBOMButtons();
 
     planLibrary.renderPlanLibraryList();
+    refreshPlanLibraryWorkbench();
 }
 
 function exportCurrentPlanJson() {
@@ -1188,6 +1887,8 @@ function init() {
     bindWorkbenchUiModeAutoRefresh();
     updateWorkbenchUiMode();
     bindLoadingSimulationStepClicks();
+    bindCompareModeEvents();
+    observePlanLibraryForCompareButtons();
     syncPanelCollapsedBodyClasses();
 
     // ==================== EVENT LISTENERS ====================
@@ -1237,6 +1938,7 @@ function init() {
                 if (planLibrary && typeof planLibrary.renderPlanLibraryList === 'function') {
                     planLibrary.renderPlanLibraryList();
                 }
+                refreshPlanLibraryWorkbench();
             }, 0);
         });
     }
@@ -1613,6 +2315,13 @@ function initRightPanelTabs() {
             const pane = document.getElementById('right-tab-' + tab);
             if (pane) {
                 pane.classList.add('active');
+            }
+
+            if (tab === 'library') {
+                if (planLibrary && typeof planLibrary.renderPlanLibraryList === 'function') {
+                    planLibrary.renderPlanLibraryList();
+                }
+                refreshPlanLibraryWorkbench();
             }
         });
     });

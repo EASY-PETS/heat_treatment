@@ -200,6 +200,31 @@
                     </div>
                     <div class="cth-unpacked" id="cth-unpacked" style="display:none;"></div>
                 </div>
+                <div id="compare-modal" class="compare-modal compare-modal-compact" style="display:none;">
+                    <div class="compare-modal-mainrow">
+                        <div class="compare-modal-title-wrap">
+                            <div class="compare-modal-kicker">方案对比</div>
+                            <div class="compare-modal-title" id="compare-title">当前方案 vs 历史方案</div>
+                        </div>
+                        <div class="compare-modal-controls" aria-label="对比视图切换">
+                            <button class="compare-mode-btn active" data-compare-mode="horizontal" type="button">左右</button>
+                            <button class="compare-mode-btn" data-compare-mode="vertical" type="button">上下</button>
+                        </div>
+                        <div class="compare-modal-nav">
+                            <button class="compare-nav-btn" id="compare-prev" type="button">上一组</button>
+                            <button class="compare-nav-btn" id="compare-next" type="button">下一组</button>
+                            <button class="compare-exit-btn" id="compare-exit" type="button">退出</button>
+                        </div>
+                    </div>
+                    <div class="compare-diff-summary" id="compare-diff-summary">
+                        <span>选择历史方案后显示差异摘要</span>
+                    </div>
+                    <div class="compare-modal-body">
+                        <div id="compare-current-hud" class="compare-side-card current"></div>
+                        <div class="compare-vs-core">VS</div>
+                        <div id="compare-history-hud" class="compare-side-card history"></div>
+                    </div>
+                </div>
             </div>
             <!-- 炉膛缩略图栏 -->
             <div id="furnace-thumb-bar" style="display: none;">
@@ -277,7 +302,28 @@
                     <button class="master-import-btn" id="btn-master-import-json">📥 导入JSON到工作台</button>
                 </div>
                 <div id="master-content">
+                    <section id="current-workbench-card" class="current-workbench-card empty">
+                        <div class="cwc-head">
+                            <div>
+                                <div class="cwc-kicker">当前工作台方案</div>
+                                <div class="cwc-title">暂无当前方案</div>
+                            </div>
+                            <span class="cwc-status">未生成</span>
+                        </div>
+                        <div class="cwc-metrics"><span>生成方案后，这里显示当前工作台快照；保存后才会进入历史方案。</span></div>
+                    </section>
+                    <div class="history-section-head">
+                        <div>
+                            <div class="history-title">历史方案</div>
+                            <div class="history-subtitle">保存后的方案快照会显示在这里</div>
+                        </div>
+                    </div>
                     <div id="master-list"></div>
+                    <div id="master-empty-state" class="master-empty-state" style="display:none;">
+                        <div class="master-empty-icon">📁</div>
+                        <div class="master-empty-title">暂无历史方案</div>
+                        <div class="master-empty-desc">生成方案后在「方案分析」中点击保存，即可在这里沉淀为历史方案。</div>
+                    </div>
                     <div id="master-3d">
                         <div id="master-canvas-container" style="width:100%;height:100%;position:relative;"></div>
                         <div id="master-detail-panel">

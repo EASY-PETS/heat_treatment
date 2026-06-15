@@ -1300,8 +1300,8 @@ export function renderFilterBars(onClearResults) {
             btn.textContent = '▼';
         }
 
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
+        const toggleFilterBar = (e) => {
+            if (e) e.stopPropagation();
 
             if (isCompactStrip) {
                 document.querySelectorAll('.material-filter-strip .filter-bar').forEach(bar => {
@@ -1317,7 +1317,19 @@ export function renderFilterBars(onClearResults) {
             const isCollapsed = filterBar.classList.contains('collapsed');
             btn.textContent = isCompactStrip ? (isCollapsed ? '▼' : '▲') : (isCollapsed ? '▶' : '▼');
             localStorage.setItem(storageKey, isCollapsed);
-        });
+        };
+
+        btn.addEventListener('click', toggleFilterBar);
+
+        // 紧凑筛选条：扩大命中区域，点击整条 header 都可以展开/收起。
+        const header = filterBar.querySelector('.filter-bar-header');
+        if (header && !header.dataset.filterHeaderBound) {
+            header.dataset.filterHeaderBound = 'true';
+            header.addEventListener('click', (e) => {
+                if (e.target.closest('.filter-collapse-btn')) return;
+                toggleFilterBar(e);
+            });
+        }
     });
 }
 
