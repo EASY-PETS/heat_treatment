@@ -5974,3 +5974,110 @@ body.compare-mode .compare-exit-btn {
 #right-tab-simulation #btn-animate {
     display: none !important;
 }
+
+/* ==================== 右侧工作台底部固定操作区 ==================== */
+.right-workbench-footer {
+    flex-shrink: 0;
+    padding: 10px 12px 12px;
+    border-top: 1px solid var(--border-color);
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.06);
+}
+
+body:not(.ui-plan-ready) .right-workbench-footer {
+    display: none;
+}
+
+.rwf-info {
+    margin-bottom: 8px;
+}
+
+.rwf-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-color);
+}
+
+.rwf-desc {
+    margin-top: 2px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--text-muted);
+}
+
+.save-plan-footer-btn {
+    width: 100%;
+    height: 38px;
+    border-radius: 12px !important;
+    background: var(--accent-color) !important;
+    color: #fff !important;
+    font-size: 13px !important;
+    font-weight: 700 !important;
+}
+
+/* ==================== 方案分析顶部打印按钮 ==================== */
+.plan-print-action-bar {
+    justify-content: flex-start;
+}
+
+.print-plan-btn {
+    min-width: 120px;
+    height: 36px;
+    border-radius: 12px !important;
+    background: #F8FAFC !important;
+    color: var(--accent-color) !important;
+    border: 1px solid #BFDBFE !important;
+    font-weight: 700 !important;
+}
+
+/* ==================== 3D HUD 内施工清单按钮 ==================== */
+.cth-actions {
+    margin-top: 10px;
+    display: flex;
+    gap: 8px;
+}
+
+.cth-action-btn {
+    width: 100%;
+    height: 34px;
+    border: 1px solid #BFDBFE;
+    border-radius: 12px;
+    background: #EFF6FF;
+    color: var(--accent-color);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.cth-action-btn:hover {
+    background: #DBEAFE;
+}
+
+/* ==================== 当前工作台方案保存区 ==================== */
+.current-workbench-save-slot {
+    margin: -4px 12px 12px;
+    padding: 10px 12px 12px;
+    border: 1px solid #DBEAFE;
+    border-top: none;
+    border-radius: 0 0 16px 16px;
+    background: rgba(239, 246, 255, 0.72);
+}
+
+.save-plan-library-main {
+    width: 100%;
+    height: 36px;
+    border-radius: 12px !important;
+    background: var(--accent-color) !important;
+    color: #fff !important;
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    border: none !important;
+}
+
+.current-workbench-save-hint {
+    margin-top: 6px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--text-muted);
+    text-align: center;
+}
