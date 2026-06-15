@@ -904,7 +904,7 @@ export function renderThermalSimulationPanel(metrics = null, mode = null) {
         panel.innerHTML = `
             <div class="thermal-sim-empty">
                 生成方案后显示工艺仿真。<br>
-                当前版本包含：升温热场 + 辐射暴露。后续可继续扩展气淬冷却、气流循环和气氛覆盖。
+                当前版本包含：升温热场 + 辐射暴露 + 介质场气流冷却。后续可继续扩展气氛覆盖。
             </div>
         `;
         return;
@@ -920,6 +920,116 @@ export function renderThermalSimulationPanel(metrics = null, mode = null) {
     const packedVolume = items.reduce((sum, item) => sum + Number((item.w || 0) * (item.h || 0) * (item.d || 0)), 0);
     const furnaceVolume = Math.max(1, Number((furnace.w || 1) * (furnace.h || 1) * (furnace.d || 1)));
     const densityRate = metrics?.densityRate ?? Math.round((packedVolume / furnaceVolume) * 1000) / 10;
+
+    if (activeMode === 'airflow') {
+        const coolingReachability = metrics?.coolingReachability ?? Math.max(50, Math.round(88 - densityRate * 0.55));
+        const minCoolingReachability = metrics?.minCoolingReachability ?? Math.max(28, coolingReachability - 26);
+        const leewardItemCount = metrics?.leewardItemCount ?? 0;
+        const severeLeewardItemCount = metrics?.severeLeewardItemCount ?? 0;
+        const blockedFlowPathCount = metrics?.blockedFlowPathCount ?? 0;
+        const worstItemName = metrics?.worstItemName || '-';
+        const coolingUniformityScore = metrics?.coolingUniformityScore ?? Math.max(45, Math.round(90 - densityRate * 0.5));
+        const airflowDirections = Array.isArray(metrics?.airflowDirections) && metrics.airflowDirections.length ? metrics.airflowDirections : [metrics?.airflowDirection || 'z+'];
+        const airflowDirectionLabel = metrics?.airflowDirectionLabel || '+Z → 后侧';
+        const inletLabel = metrics?.inletLabel || '前侧进风';
+        const outletLabel = metrics?.outletLabel || '后侧出风';
+        const airflowModeLabel = metrics?.airflowModeLabel || (airflowDirections.length > 1 ? `多入口环流 · ${airflowDirections.length} 个入口` : '单向进出');
+        const gasType = metrics?.gasType || 'n2';
+        const gasLabel = metrics?.gasLabel || '高压氮气 N₂';
+        const gasPressureLabel = metrics?.gasPressureLabel || '6–10 bar';
+        const gasDensityHint = metrics?.gasDensityHint || '标准气淬介质，综合成本低，适合大多数真空淬火。';
+        const animationPlaying = !!metrics?.animationPlaying;
+        const suggestion = metrics?.suggestion || '点击“气流冷却”后，系统会用解释型路径线评估高压气淬阶段的迎风/背风风险。';
+        const dirs = [
+            { key: 'x+', label: '+X', desc: '右侧' },
+            { key: 'x-', label: '-X', desc: '左侧' },
+            { key: 'y+', label: '+Y', desc: '上层' },
+            { key: 'y-', label: '-Y', desc: '下层' },
+            { key: 'z+', label: '+Z', desc: '后侧' },
+            { key: 'z-', label: '-Z', desc: '前侧' }
+        ];
+        const dirButtons = dirs.map(d => {
+            const active = airflowDirections.includes(d.key);
+            return `
+                <button class="airflow-dir-btn ${active ? 'active' : ''}" type="button" data-action="airflow-toggle-direction" data-airflow-dir="${d.key}" title="点击切换该入口；可多选">
+                    <strong>${d.label}</strong><span>${escapeSimHtml(d.desc)}</span>
+                </button>
+            `;
+        }).join('');
+        const presetButtons = `
+            <button class="plan-action-btn airflow-preset-btn" type="button" data-action="airflow-preset" data-airflow-preset="z+">单向</button>
+            <button class="plan-action-btn airflow-preset-btn" type="button" data-action="airflow-preset" data-airflow-preset="z+,z-">前后双向</button>
+            <button class="plan-action-btn airflow-preset-btn" type="button" data-action="airflow-preset" data-airflow-preset="y-,y+">上下循环</button>
+            <button class="plan-action-btn airflow-preset-btn" type="button" data-action="airflow-preset" data-airflow-preset="x+,x-,z+,z-">四侧环流</button>
+        `;
+
+        panel.innerHTML = `
+            <div class="thermal-header-card compact airflow-card">
+                <div class="thermal-title">💨 ${escapeSimHtml(furnace.instanceId || '当前炉次')} · 介质场 · 气流冷却 V2.1</div>
+                <div class="thermal-subtitle">
+                    V2.1 增强曲线绕流与碰撞减速：蓝色粒子表示高速通畅气流，遇到工件后会沿障碍物侧向曲线绕行，红橙粒子表示减速弱流 / 背风区域。
+                </div>
+                <div class="thermal-metric-grid">
+                    <div class="thermal-metric"><span>平均冷却可达</span><strong>${coolingReachability}%</strong></div>
+                    <div class="thermal-metric"><span>最低冷却件</span><strong>${minCoolingReachability}%</strong></div>
+                    <div class="thermal-metric"><span>背风风险件</span><strong>${leewardItemCount} 件</strong></div>
+                    <div class="thermal-metric"><span>严重背风</span><strong>${severeLeewardItemCount} 件</strong></div>
+                </div>
+                <div class="thermal-legend airflow-legend">
+                    <span>背风</span><div class="airflow-gradient"></div><span>通畅</span>
+                </div>
+                <div class="thermal-mini-note">蓝色半透明面 = 进/出风边界；蓝色粒子 = 高速流；橙红粒子 = 碰撞减速流；曲线表示绕障路径。</div>
+            </div>
+
+            <div class="thermal-risk-card airflow-card">
+                <div class="thermal-stage-title">冷却介质</div>
+                <div class="thermal-risk-row"><span>当前气体</span><strong>${escapeSimHtml(gasLabel)}</strong></div>
+                <div class="thermal-risk-row"><span>参考压力</span><strong>${escapeSimHtml(gasPressureLabel)}</strong></div>
+                <select class="thermal-speed-select" data-action="airflow-gas-type" style="width:100%;margin-top:8px;">
+                    <option value="n2" ${gasType === 'n2' ? 'selected' : ''}>高压氮气 N₂ · 常规气淬</option>
+                    <option value="ar" ${gasType === 'ar' ? 'selected' : ''}>氩气 Ar · 惰性保护</option>
+                    <option value="he" ${gasType === 'he' ? 'selected' : ''}>氦气 He · 高冷却强度</option>
+                </select>
+                <div class="thermal-mini-note">${escapeSimHtml(gasDensityHint)} 当前为解释型参数：不同气体会影响粒子速度、颜色和冷却评分微调。</div>
+            </div>
+
+            <div class="thermal-risk-card airflow-card">
+                <div class="thermal-stage-title">气流入口配置</div>
+                <div class="thermal-risk-row"><span>当前模式</span><strong>${escapeSimHtml(airflowModeLabel)}</strong></div>
+                <div class="thermal-risk-row"><span>入口方向</span><strong>${escapeSimHtml(airflowDirectionLabel)}</strong></div>
+                <div class="thermal-risk-row"><span>入口 / 出口</span><strong>${escapeSimHtml(inletLabel)} → ${escapeSimHtml(outletLabel)}</strong></div>
+                <div class="airflow-dir-grid">${dirButtons}</div>
+                <div class="airflow-preset-row">${presetButtons}</div>
+                <div class="thermal-mini-note">按钮支持多选。单向适合基础验证；前后双向 / 四侧环流更接近多风机或环向气淬的解释型表达。</div>
+            </div>
+
+            <div class="thermal-risk-card airflow-card">
+                <div class="thermal-stage-title">气流流线动画</div>
+                <div class="thermal-risk-row"><span>动画状态</span><strong>${animationPlaying ? '播放中' : '已暂停'}</strong></div>
+                <div class="airflow-animation-row">
+                    <button class="plan-action-btn" type="button" data-action="airflow-animation-play">${animationPlaying ? '继续播放' : '播放气流动画'}</button>
+                    <button class="plan-action-btn" type="button" data-action="airflow-animation-pause">暂停</button>
+                    <button class="plan-action-btn" type="button" data-action="airflow-animation-reset">重置</button>
+                </div>
+                <div class="thermal-mini-note">这是解释型流线动画，不是 CFD：用于展示气流进入、遇到工件后曲线绕流、速度衰减、弱流区和背风风险。</div>
+            </div>
+
+            <div class="thermal-risk-card airflow-card">
+                <div class="thermal-stage-title">背风冷却诊断</div>
+                <div class="thermal-risk-row"><span>冷却均匀性</span><strong>${coolingUniformityScore} 分</strong></div>
+                <div class="thermal-risk-row"><span>被遮挡气流路径</span><strong>${blockedFlowPathCount}</strong></div>
+                <div class="thermal-risk-row"><span>最低冷却工件</span><strong>${escapeSimHtml(worstItemName)}</strong></div>
+                <div class="thermal-risk-row"><span>装载密度</span><strong>${densityRate}%</strong></div>
+                <div class="thermal-risk-row"><span>当前模式</span><strong>介质场 · 气流冷却 V2.1</strong></div>
+            </div>
+
+            <div class="thermal-stage-card airflow-card">
+                <div class="thermal-stage-title">调整建议</div>
+                <div class="thermal-mini-note strong-note">${escapeSimHtml(suggestion)}</div>
+            </div>
+        `;
+        return;
+    }
 
     if (activeMode === 'radiation') {
         const radiationExposure = metrics?.radiationExposure ?? Math.max(55, Math.round(92 - densityRate * 0.45));
@@ -1111,7 +1221,7 @@ export function renderThermalSimulationPanel(metrics = null, mode = null) {
             <div class="thermal-legend">
                 <span>低温</span><div class="thermal-gradient"></div><span>高温</span>
             </div>
-            <div class="thermal-mini-note">升温热场 = 看温度结果；辐射暴露 = 解释热源路径和遮挡原因。建议先看热场，再切换到辐射暴露。</div>
+            <div class="thermal-mini-note">升温热场 = 看温度结果；辐射暴露 = 解释加热遮挡；气流冷却 = 解释高压气淬阶段的迎风/背风风险。</div>
         </div>
 
         <div class="thermal-stage-card">

@@ -118,6 +118,12 @@ let thermalSimRuntime = {
     sourceGroup: null,
     metrics: null,
     radiationScores: null,
+    airflowScores: null,
+    selectedAirflowDirection: 'z+',
+    selectedAirflowDirections: ['z+'],
+    selectedAirflowGasType: 'n2',
+    airflowParticles: null,
+    airflowStreamGroup: null,
     selectedRadiationItemId: null,
     selectedRadiationEntry: null,
     selectedRadiationBatch: null,
@@ -129,6 +135,7 @@ let thermalSimRuntime = {
 let radiationSectionDragState = null;
 
 let thermalSceneThemeActive = false;
+let thermalSceneThemeMode = null;
 let thermalSavedSceneBackground = null;
 let thermalSavedGridState = null;
 
@@ -182,18 +189,32 @@ function setThermalGridTheme(active) {
     }
 }
 
-function setThermalSceneTheme(active) {
+function getProcessSceneBackgroundColor(mode = 'thermal') {
+    // 热场/辐射适合黑底突出发光；气流/气氛改为深蓝灰底，避免蓝色流线淹没在纯黑背景里。
+    if (mode === 'airflow') return 0x071827;
+    if (mode === 'atmosphere') return 0x0b1f1c;
+    return 0x030712;
+}
+
+function setThermalSceneTheme(active, mode = 'thermal') {
     if (!scene) return;
-    if (active && !thermalSceneThemeActive) {
-        thermalSavedSceneBackground = scene.background ? scene.background.clone() : null;
-        scene.background = new THREE.Color(0x030712);
-        setThermalGridTheme(true);
-        thermalSceneThemeActive = true;
-    } else if (!active && thermalSceneThemeActive) {
+    if (active) {
+        if (!thermalSceneThemeActive) {
+            thermalSavedSceneBackground = scene.background ? scene.background.clone() : null;
+            setThermalGridTheme(true);
+            thermalSceneThemeActive = true;
+        }
+        // 模式切换时允许更新背景色：thermal/radiation 仍黑底，airflow 使用深蓝灰。
+        if (thermalSceneThemeMode !== mode) {
+            scene.background = new THREE.Color(getProcessSceneBackgroundColor(mode));
+            thermalSceneThemeMode = mode;
+        }
+    } else if (thermalSceneThemeActive) {
         scene.background = thermalSavedSceneBackground || new THREE.Color(0xf5f5f5);
         thermalSavedSceneBackground = null;
         setThermalGridTheme(false);
         thermalSceneThemeActive = false;
+        thermalSceneThemeMode = null;
     }
 }
 
@@ -250,6 +271,12 @@ export function clearThermalSimulationLayer() {
     thermalSimRuntime.progress = 0;
     thermalSimRuntime.metrics = null;
     thermalSimRuntime.radiationScores = null;
+    thermalSimRuntime.airflowScores = null;
+    thermalSimRuntime.selectedAirflowDirection = 'z+';
+    thermalSimRuntime.selectedAirflowDirections = ['z+'];
+    thermalSimRuntime.selectedAirflowGasType = 'n2';
+    thermalSimRuntime.airflowParticles = null;
+    thermalSimRuntime.airflowStreamGroup = null;
     thermalSimRuntime.selectedRadiationItemId = null;
     thermalSimRuntime.selectedRadiationEntry = null;
     thermalSimRuntime.selectedRadiationBatch = null;
@@ -1524,6 +1551,783 @@ function applySectionFocusTintToItems(furnace, scoreMap, entry, sectionInfo) {
     applyRadiationClipPlaneToCurrentFurnace(sectionInfo);
 }
 
+
+// ---------- 介质场：气流冷却 v2 ----------
+const AIRFLOW_DIRECTION_KEYS = ['x+', 'x-', 'y+', 'y-', 'z+', 'z-'];
+
+function normalizeAirflowDirections(value) {
+    const raw = Array.isArray(value) ? value : [value || 'z+'];
+    const result = [];
+    raw.forEach(v => {
+        const meta = getAirflowDirectionMeta(v);
+        if (meta && !result.includes(meta.key)) result.push(meta.key);
+    });
+    return result.length ? result : ['z+'];
+}
+
+const AIRFLOW_GAS_TYPES = {
+    n2: {
+        key: 'n2',
+        label: '高压氮气 N₂',
+        shortLabel: 'N₂',
+        pressureLabel: '6–10 bar',
+        densityHint: '标准气淬介质，综合成本低，适合大多数真空淬火。',
+        speedScale: 1.00,
+        coolingBias: 0.00,
+        fastColor: 0x7dd3fc,
+        slowColor: 0xfb923c
+    },
+    ar: {
+        key: 'ar',
+        label: '氩气 Ar',
+        shortLabel: 'Ar',
+        pressureLabel: '4–8 bar',
+        densityHint: '惰性更强，冷却能力相对较弱，适合更保守的保护气氛。',
+        speedScale: 0.82,
+        coolingBias: -0.04,
+        fastColor: 0x93c5fd,
+        slowColor: 0xf59e0b
+    },
+    he: {
+        key: 'he',
+        label: '氦气 He',
+        shortLabel: 'He',
+        pressureLabel: '8–15 bar',
+        densityHint: '导热能力强、成本高，适合高冷却强度或高附加值工件。',
+        speedScale: 1.22,
+        coolingBias: 0.05,
+        fastColor: 0xa5f3fc,
+        slowColor: 0xfbbf24
+    }
+};
+
+function getAirflowGasMeta(gasType = 'n2') {
+    const key = String(gasType || 'n2').toLowerCase();
+    return AIRFLOW_GAS_TYPES[key] || AIRFLOW_GAS_TYPES.n2;
+}
+
+function getAirflowSpeedColor(speedFactor = 1, gasType = thermalSimRuntime.selectedAirflowGasType || 'n2') {
+    const gas = getAirflowGasMeta(gasType);
+    const slow = new THREE.Color(gas.slowColor);
+    const fast = new THREE.Color(gas.fastColor);
+    return new THREE.Color().lerpColors(slow, fast, clamp01(speedFactor));
+}
+
+function getAirflowScoreColor(score) {
+    const low = new THREE.Color(0x7f1d1d);
+    const bad = new THREE.Color(0xef4444);
+    const mid = new THREE.Color(0xf97316);
+    const good = new THREE.Color(0x38bdf8);
+    const high = new THREE.Color(0x7dd3fc);
+    const c = new THREE.Color();
+    const s = clamp01(score);
+    if (s < 0.34) c.lerpColors(low, bad, s / 0.34);
+    else if (s < 0.62) c.lerpColors(bad, mid, (s - 0.34) / 0.28);
+    else if (s < 0.84) c.lerpColors(mid, good, (s - 0.62) / 0.22);
+    else c.lerpColors(good, high, (s - 0.84) / 0.16);
+    return c;
+}
+
+function getAirflowDirectionMeta(directionKey = 'z+') {
+    const key = String(directionKey || 'z+').toLowerCase();
+    const table = {
+        'x+': { key: 'x+', axis: 'x', sign: 1, label: '+X → 右侧', shortLabel: '+X', sideLabel: '右侧', inletLabel: '左侧进风', outletLabel: '右侧出风' },
+        'x-': { key: 'x-', axis: 'x', sign: -1, label: '-X → 左侧', shortLabel: '-X', sideLabel: '左侧', inletLabel: '右侧进风', outletLabel: '左侧出风' },
+        'y+': { key: 'y+', axis: 'y', sign: 1, label: '+Y → 上层', shortLabel: '+Y', sideLabel: '上层', inletLabel: '底部进风', outletLabel: '顶部出风' },
+        'y-': { key: 'y-', axis: 'y', sign: -1, label: '-Y → 下层', shortLabel: '-Y', sideLabel: '下层', inletLabel: '顶部进风', outletLabel: '底部出风' },
+        'z+': { key: 'z+', axis: 'z', sign: 1, label: '+Z → 后侧', shortLabel: '+Z', sideLabel: '后侧', inletLabel: '前侧进风', outletLabel: '后侧出风' },
+        'z-': { key: 'z-', axis: 'z', sign: -1, label: '-Z → 前侧', shortLabel: '-Z', sideLabel: '前侧', inletLabel: '后侧进风', outletLabel: '前侧出风' }
+    };
+    return table[key] || table['z+'];
+}
+
+function getAirflowAxisBounds(furnace, axis) {
+    const fw = Number(furnace.w || 600);
+    const fh = Number(furnace.h || 600);
+    const fd = Number(furnace.d || 600);
+    if (axis === 'x') return { min: -fw / 2, max: fw / 2, span: fw };
+    if (axis === 'y') return { min: THERMAL_BASE_Y, max: THERMAL_BASE_Y + fh, span: fh };
+    return { min: -fd / 2, max: fd / 2, span: fd };
+}
+
+function getAirflowNormal(meta) {
+    if (meta.axis === 'x') return new THREE.Vector3(meta.sign, 0, 0);
+    if (meta.axis === 'y') return new THREE.Vector3(0, meta.sign, 0);
+    return new THREE.Vector3(0, 0, meta.sign);
+}
+
+function makeAirflowInletPoint(targetPoint, furnace, meta) {
+    const p = targetPoint.clone();
+    const b = getAirflowAxisBounds(furnace, meta.axis);
+    p[meta.axis] = meta.sign > 0 ? b.min : b.max;
+    return p;
+}
+
+function makeAirflowOutletPoint(targetPoint, furnace, meta) {
+    const p = targetPoint.clone();
+    const b = getAirflowAxisBounds(furnace, meta.axis);
+    p[meta.axis] = meta.sign > 0 ? b.max : b.min;
+    return p;
+}
+
+function getItemAirflowSamplePoints(item, furnace, meta) {
+    const b = getItemWorldBox(item, furnace);
+    const center = getItemCenterWorld(item, furnace);
+    const axis = meta.axis;
+    const upstreamCoord = meta.sign > 0
+        ? (axis === 'x' ? b.minX : axis === 'y' ? b.minY : b.minZ)
+        : (axis === 'x' ? b.maxX : axis === 'y' ? b.maxY : b.maxZ);
+
+    const pts = [center.clone()];
+    const face = center.clone();
+    face[axis] = upstreamCoord;
+    pts.push(face);
+
+    if (axis !== 'x') {
+        pts.push(new THREE.Vector3(b.minX, center.y, center.z));
+        pts.push(new THREE.Vector3(b.maxX, center.y, center.z));
+    }
+    if (axis !== 'y') {
+        pts.push(new THREE.Vector3(center.x, b.minY, center.z));
+        pts.push(new THREE.Vector3(center.x, b.maxY, center.z));
+    }
+    if (axis !== 'z') {
+        pts.push(new THREE.Vector3(center.x, center.y, b.minZ));
+        pts.push(new THREE.Vector3(center.x, center.y, b.maxZ));
+    }
+    return pts.slice(0, 6);
+}
+
+function getAirflowBlockers(sourcePoint, targetPoint, targetItem, allItems, furnace) {
+    const blockers = [];
+    for (const other of allItems) {
+        if (!other || other.id === targetItem.id) continue;
+        const box = getItemWorldBox(other, furnace);
+        if (segmentIntersectsBox(sourcePoint, targetPoint, box)) blockers.push(other);
+    }
+    return blockers;
+}
+
+function calculateSingleAirflowCoolingScores(furnace, directionKey = 'z+') {
+    const items = furnace.packedItems || [];
+    const result = new Map();
+    const meta = getAirflowDirectionMeta(directionKey);
+    if (!items.length) return { scores: result, directionMeta: meta };
+
+    items.forEach(item => {
+        const samples = getItemAirflowSamplePoints(item, furnace, meta);
+        let total = 0;
+        let reached = 0;
+        let blocked = 0;
+        const openPaths = [];
+        const blockedPaths = [];
+        const blockerMap = new Map();
+
+        samples.forEach(target => {
+            const source = makeAirflowInletPoint(target, furnace, meta);
+            total += 1;
+            const blockers = getAirflowBlockers(source, target, item, items, furnace);
+            if (blockers.length > 0) {
+                blocked += 1;
+                blockers.forEach(blocker => {
+                    const existed = blockerMap.get(blocker.id) || { item: blocker, count: 0 };
+                    existed.count += 1;
+                    blockerMap.set(blocker.id, existed);
+                });
+                if (blockedPaths.length < 8) {
+                    const rawPoints = buildAirflowDetourPoints(source, target, blockers[0], furnace, meta);
+                    const speedFactor = Math.max(0.25, 1 - Math.min(0.65, blockers.length * 0.18) - (blockers[0] ? Math.cbrt(Math.max(1, (blockers[0].w || 1) * (blockers[0].h || 1) * (blockers[0].d || 1))) / 2200 : 0));
+                    blockedPaths.push({
+                        source: source.clone(),
+                        target: target.clone(),
+                        points: buildSmoothAirflowPath(rawPoints, 22, furnace),
+                        blocked: true,
+                        blockers: blockers.map(b => ({ id: b.id, name: b.name || '背风遮挡件' })),
+                        directionKey: meta.key,
+                        speedFactor
+                    });
+                }
+            } else {
+                const itemVolume = Math.max(1, Number((item.w || 1) * (item.h || 1) * (item.d || 1)));
+                const massPenalty = Math.min(0.18, Math.cbrt(itemVolume) / 1800);
+                reached += Math.max(0.72, 1 - massPenalty);
+                if (openPaths.length < 8) {
+                    openPaths.push({
+                        source: source.clone(),
+                        target: target.clone(),
+                        points: buildSmoothAirflowPath([source.clone(), target.clone()], 10, furnace),
+                        blocked: false,
+                        blockers: [],
+                        directionKey: meta.key,
+                        speedFactor: 1
+                    });
+                }
+            }
+        });
+
+        const raw = total > 0 ? reached / total : 0;
+        const thermalRisk = estimateItemThermalRisk(item, furnace);
+        const score = clamp01(raw * (1 - thermalRisk * 0.22));
+        const blockers = [...blockerMap.values()].sort((a, b) => b.count - a.count);
+        result.set(item.id, {
+            item,
+            score,
+            visibleFlowCount: Math.round(reached),
+            blockedFlowCount: Math.round(blocked),
+            totalFlowWeight: Math.round(total),
+            rays: [...openPaths.slice(0, 4), ...blockedPaths.slice(0, 4)],
+            openPaths,
+            blockedPaths,
+            blockers,
+            directionKey: meta.key
+        });
+    });
+
+    return { scores: result, directionMeta: meta };
+}
+
+function calculateAirflowCoolingScores(furnace, directionKeys = ['z+']) {
+    const directions = normalizeAirflowDirections(directionKeys);
+    const metas = directions.map(getAirflowDirectionMeta);
+    const perDirection = metas.map(meta => calculateSingleAirflowCoolingScores(furnace, meta.key));
+    const items = furnace.packedItems || [];
+    const result = new Map();
+
+    items.forEach(item => {
+        let productMiss = 1;
+        let visibleFlowCount = 0;
+        let blockedFlowCount = 0;
+        let totalFlowWeight = 0;
+        const openPaths = [];
+        const blockedPaths = [];
+        const blockerMap = new Map();
+        const directionScores = [];
+
+        perDirection.forEach(({ scores, directionMeta }) => {
+            const entry = scores.get(item.id);
+            if (!entry) return;
+            productMiss *= (1 - clamp01(entry.score) * 0.96);
+            visibleFlowCount += entry.visibleFlowCount || 0;
+            blockedFlowCount += entry.blockedFlowCount || 0;
+            totalFlowWeight += entry.totalFlowWeight || 0;
+            directionScores.push({ key: directionMeta.key, score: entry.score });
+            (entry.openPaths || []).slice(0, 3).forEach(p => openPaths.push(p));
+            (entry.blockedPaths || []).slice(0, 3).forEach(p => blockedPaths.push(p));
+            (entry.blockers || []).forEach(({ item: blockerItem, count }) => {
+                if (!blockerItem) return;
+                const existed = blockerMap.get(blockerItem.id) || { item: blockerItem, count: 0 };
+                existed.count += count || 1;
+                blockerMap.set(blockerItem.id, existed);
+            });
+        });
+
+        const gasMeta = getAirflowGasMeta(thermalSimRuntime.selectedAirflowGasType || 'n2');
+        const score = clamp01((1 - productMiss) + gasMeta.coolingBias);
+        const blockers = [...blockerMap.values()].sort((a, b) => b.count - a.count);
+        result.set(item.id, {
+            item,
+            score,
+            visibleFlowCount: Math.round(visibleFlowCount),
+            blockedFlowCount: Math.round(blockedFlowCount),
+            totalFlowWeight: Math.round(totalFlowWeight),
+            rays: [...openPaths.slice(0, 5), ...blockedPaths.slice(0, 5)],
+            openPaths,
+            blockedPaths,
+            blockers,
+            directionKey: directions.join(','),
+            directionScores
+        });
+
+        item.simulation = {
+            ...(item.simulation || {}),
+            airflowCoolingScore: Math.round(score * 100),
+            visibleFlowCount: Math.round(visibleFlowCount),
+            blockedFlowCount: Math.round(blockedFlowCount),
+            airflowBlockerCount: blockers.length,
+            airflowDirections: directions
+        };
+    });
+
+    return { scores: result, directionMetas: metas, directionMeta: metas[0] };
+}
+
+function calculateAirflowCoolingMetrics(furnace, scoreMap, directionMetas) {
+    const metas = Array.isArray(directionMetas) ? directionMetas : [directionMetas].filter(Boolean);
+    const scores = [...scoreMap.values()];
+    const avgScore = scores.length ? scores.reduce((s, v) => s + v.score, 0) / scores.length : 0;
+    const minScore = scores.length ? Math.min(...scores.map(v => v.score)) : 0;
+    const leewardItems = scores.filter(v => v.score < 0.60).length;
+    const severeLeewardItems = scores.filter(v => v.score < 0.42).length;
+    const blockedFlowPathCount = scores.reduce((s, v) => s + (v.blockedFlowCount || 0), 0);
+    const sorted = [...scores].sort((a, b) => a.score - b.score);
+    const worst = sorted[0];
+    const denseItems = (furnace.packedItems || []).length;
+    const furnaceVolume = Math.max(1, (furnace.w || 1) * (furnace.h || 1) * (furnace.d || 1));
+    const packedVolume = (furnace.packedItems || []).reduce((sum, item) => sum + (item.w || 0) * (item.h || 0) * (item.d || 0), 0);
+    const densityRate = Math.round((packedVolume / furnaceVolume) * 1000) / 10;
+    const directions = metas.map(m => m.key);
+    const directionLabel = metas.map(m => m.label).join(' + ') || '+Z → 后侧';
+    const inletLabel = metas.map(m => m.inletLabel).join(' / ') || '前侧进风';
+    const outletLabel = metas.map(m => m.outletLabel).join(' / ') || '后侧出风';
+    const gasMeta = getAirflowGasMeta(thermalSimRuntime.selectedAirflowGasType || 'n2');
+    return {
+        mode: 'airflow',
+        processName: VACUUM_QUENCH_PROFILE.processName,
+        gasType: gasMeta.key,
+        gasLabel: gasMeta.label,
+        gasShortLabel: gasMeta.shortLabel,
+        gasPressureLabel: gasMeta.pressureLabel,
+        gasDensityHint: gasMeta.densityHint,
+        airflowDirection: directions[0] || 'z+',
+        airflowDirections: directions,
+        airflowDirectionLabel: directionLabel,
+        inletLabel,
+        outletLabel,
+        airflowModeLabel: directions.length > 1 ? `多入口环流 · ${directions.length} 个入口` : '单向进出',
+        coolingReachability: Math.round(avgScore * 100),
+        minCoolingReachability: Math.round(minScore * 100),
+        leewardItemCount: leewardItems,
+        severeLeewardItemCount: severeLeewardItems,
+        blockedFlowPathCount,
+        worstItemName: worst?.item?.name || '-',
+        coolingUniformityScore: Math.max(45, Math.round(94 - (avgScore ? (1 - avgScore) * 42 : 18) - densityRate * 0.18 - severeLeewardItems * 2.5)),
+        densityRate,
+        packedItemCount: denseItems,
+        animationPlaying: thermalSimRuntime.activeMode === 'airflow' && !!thermalSimRuntime.isPlaying && !thermalSimRuntime.paused,
+        suggestion: severeLeewardItems > 0
+            ? '存在明显背风冷却区域，建议增加中心通道，或将厚大件/遮挡件向外侧分散；可开启多入口气流复核是否仍有死区。'
+            : (leewardItems > 0 ? '存在局部背风件，可优先复核中部密集区、上层遮挡和气流入口方向；多方向进气可缓解单侧遮挡。' : '当前装炉的气流可达性较好，未发现明显背风高风险。')
+    };
+}
+
+function buildAirflowSourceVisual(furnace, directionMetas) {
+    const metas = Array.isArray(directionMetas) ? directionMetas : [directionMetas].filter(Boolean);
+    const group = new THREE.Group();
+    group.name = 'airflowCoolingSourceVisual';
+    const fw = Number(furnace.w || 600);
+    const fh = Number(furnace.h || 600);
+    const fd = Number(furnace.d || 600);
+
+    metas.forEach(directionMeta => {
+        const axis = directionMeta.axis;
+        const bounds = getAirflowAxisBounds(furnace, axis);
+        const inletCoord = directionMeta.sign > 0 ? bounds.min : bounds.max;
+        const outletCoord = directionMeta.sign > 0 ? bounds.max : bounds.min;
+        const normal = getAirflowNormal(directionMeta);
+        const inletMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: metas.length > 1 ? 0.08 : 0.12, side: THREE.DoubleSide, depthWrite: false });
+        const outletMat = new THREE.MeshBasicMaterial({ color: 0x60a5fa, transparent: true, opacity: metas.length > 1 ? 0.035 : 0.06, side: THREE.DoubleSide, depthWrite: false });
+        let inletPlane, outletPlane;
+        if (axis === 'x') {
+            inletPlane = new THREE.Mesh(new THREE.PlaneGeometry(fd, fh), inletMat);
+            outletPlane = new THREE.Mesh(new THREE.PlaneGeometry(fd, fh), outletMat);
+            inletPlane.rotation.y = Math.PI / 2;
+            outletPlane.rotation.y = Math.PI / 2;
+            inletPlane.position.set(inletCoord, THERMAL_BASE_Y + fh / 2, 0);
+            outletPlane.position.set(outletCoord, THERMAL_BASE_Y + fh / 2, 0);
+        } else if (axis === 'y') {
+            inletPlane = new THREE.Mesh(new THREE.PlaneGeometry(fw, fd), inletMat);
+            outletPlane = new THREE.Mesh(new THREE.PlaneGeometry(fw, fd), outletMat);
+            inletPlane.rotation.x = -Math.PI / 2;
+            outletPlane.rotation.x = -Math.PI / 2;
+            inletPlane.position.set(0, inletCoord, 0);
+            outletPlane.position.set(0, outletCoord, 0);
+        } else {
+            inletPlane = new THREE.Mesh(new THREE.PlaneGeometry(fw, fh), inletMat);
+            outletPlane = new THREE.Mesh(new THREE.PlaneGeometry(fw, fh), outletMat);
+            inletPlane.position.set(0, THERMAL_BASE_Y + fh / 2, inletCoord);
+            outletPlane.position.set(0, THERMAL_BASE_Y + fh / 2, outletCoord);
+        }
+        inletPlane.renderOrder = 8;
+        outletPlane.renderOrder = 7;
+        group.add(inletPlane, outletPlane);
+
+        const arrowCountA = metas.length > 2 ? 3 : 4;
+        const arrowCountB = 3;
+        const arrowLen = Math.max(90, Math.min(180, Math.max(fw, fh, fd) / 6));
+        for (let a = 0; a < arrowCountA; a++) {
+            for (let b = 0; b < arrowCountB; b++) {
+                const u = arrowCountA === 1 ? 0.5 : a / (arrowCountA - 1);
+                const v = arrowCountB === 1 ? 0.5 : b / (arrowCountB - 1);
+                let pos;
+                if (axis === 'x') pos = new THREE.Vector3(inletCoord, THERMAL_BASE_Y + fh * (0.22 + v * 0.58), -fd * 0.35 + u * fd * 0.7);
+                else if (axis === 'y') pos = new THREE.Vector3(-fw * 0.35 + u * fw * 0.7, inletCoord, -fd * 0.30 + v * fd * 0.6);
+                else pos = new THREE.Vector3(-fw * 0.35 + u * fw * 0.7, THERMAL_BASE_Y + fh * (0.22 + v * 0.58), inletCoord);
+                const arrow = new THREE.ArrowHelper(normal, pos, arrowLen, 0x38bdf8, arrowLen * 0.26, arrowLen * 0.13);
+                arrow.userData = { isThermalRays: true, isAirflowArrow: true };
+                group.add(arrow);
+            }
+        }
+    });
+
+    group.userData = { isAirflowSourceVisual: true, directions: metas.map(m => m.key) };
+    return group;
+}
+
+function buildAirflowCoolingRays(scoreMap) {
+    const entries = [...scoreMap.values()].sort((a, b) => a.score - b.score);
+    const selected = [...entries.slice(0, 16), ...entries.slice(-6)];
+    const positions = [];
+    const colors = [];
+    const cyan = new THREE.Color(0x67e8f9);
+    const blue = new THREE.Color(0x38bdf8);
+    const red = new THREE.Color(0xef4444);
+    const orange = new THREE.Color(0xfb923c);
+    selected.forEach(entry => {
+        (entry.rays || []).slice(0, 6).forEach(path => {
+            const pts = (path.points && path.points.length >= 2)
+                ? path.points
+                : buildSmoothAirflowPath([path.source, path.target], path.blocked ? 22 : 10, null);
+            const speedFactor = path.speedFactor != null ? path.speedFactor : (path.blocked ? 0.42 : 1);
+            const c = path.blocked ? getAirflowSpeedColor(speedFactor) : (entry.score > 0.74 ? cyan : blue);
+            const c2 = path.blocked ? orange : c;
+            for (let i = 0; i < pts.length - 1; i++) {
+                const a = pts[i];
+                const b = pts[i + 1];
+                positions.push(a.x, a.y, a.z, b.x, b.y, b.z);
+                colors.push(c.r, c.g, c.b, c2.r, c2.g, c2.b);
+            }
+        });
+    });
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    const material = new THREE.LineBasicMaterial({
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.72,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+    });
+    const rays = new THREE.LineSegments(geometry, material);
+    rays.name = 'airflowCoolingPaths';
+    rays.userData = { isThermalRays: true, isAirflowCoolingRays: true };
+    return rays;
+}
+
+function getAirflowCrossAxes(axis) {
+    return ['x', 'y', 'z'].filter(a => a !== axis);
+}
+
+function makeInflatedBox(item, furnace, pad = 16) {
+    const b = getItemWorldBox(item, furnace);
+    return {
+        minX: b.minX - pad,
+        maxX: b.maxX + pad,
+        minY: b.minY - pad,
+        maxY: b.maxY + pad,
+        minZ: b.minZ - pad,
+        maxZ: b.maxZ + pad
+    };
+}
+
+function getBoxCenter(box) {
+    return new THREE.Vector3((box.minX + box.maxX) / 2, (box.minY + box.maxY) / 2, (box.minZ + box.maxZ) / 2);
+}
+
+function getBoxAxis(box, axis, side) {
+    if (axis === 'x') return side < 0 ? box.minX : box.maxX;
+    if (axis === 'y') return side < 0 ? box.minY : box.maxY;
+    return side < 0 ? box.minZ : box.maxZ;
+}
+
+function clampPointToFurnaceVolume(p, furnace, margin = 20) {
+    const fw = Number(furnace.w || 600);
+    const fh = Number(furnace.h || 600);
+    const fd = Number(furnace.d || 600);
+    p.x = Math.max(-fw / 2 + margin, Math.min(fw / 2 - margin, p.x));
+    p.y = Math.max(THERMAL_BASE_Y + margin, Math.min(THERMAL_BASE_Y + fh - margin, p.y));
+    p.z = Math.max(-fd / 2 + margin, Math.min(fd / 2 - margin, p.z));
+    return p;
+}
+
+function findFirstAirflowCollision(source, outlet, furnace, meta) {
+    const axis = meta.axis;
+    const items = furnace.packedItems || [];
+    let best = null;
+    items.forEach(item => {
+        const box = makeInflatedBox(item, furnace, 18);
+        if (!segmentIntersectsBox(source, outlet, box)) return;
+        const c = getBoxCenter(box);
+        const distanceAlong = meta.sign > 0 ? (c[axis] - source[axis]) : (source[axis] - c[axis]);
+        if (distanceAlong < 0) return;
+        if (!best || distanceAlong < best.distanceAlong) best = { item, box, distanceAlong };
+    });
+    return best;
+}
+
+function buildDeflectedAirflowPath(source, outlet, furnace, meta) {
+    const hit = findFirstAirflowCollision(source, outlet, furnace, meta);
+    if (!hit) return { points: buildSmoothAirflowPath([source.clone(), outlet.clone()], 10, furnace), blocked: false, speedFactor: 1 };
+
+    const axis = meta.axis;
+    const crossAxes = getAirflowCrossAxes(axis);
+    const box = hit.box;
+    const center = getBoxCenter(box);
+    const lineSpan = Math.max(1, Math.abs(outlet[axis] - source[axis]));
+    const before = source.clone().lerp(outlet, clamp01((hit.distanceAlong - 50) / lineSpan));
+    const after = source.clone().lerp(outlet, clamp01((hit.distanceAlong + 90) / lineSpan));
+
+    const primarySideAxis = crossAxes.sort((a, b) => Math.abs(source[b] - center[b]) - Math.abs(source[a] - center[a]))[0];
+    const sideSign = source[primarySideAxis] < center[primarySideAxis] ? -1 : 1;
+    const detourCoord = getBoxAxis(box, primarySideAxis, sideSign) + sideSign * 58;
+
+    const p1 = before.clone();
+    const p2 = before.clone();
+    const p3 = after.clone();
+    const p4 = after.clone();
+    p2[primarySideAxis] = detourCoord;
+    p3[primarySideAxis] = detourCoord;
+    clampPointToFurnaceVolume(p1, furnace);
+    clampPointToFurnaceVolume(p2, furnace);
+    clampPointToFurnaceVolume(p3, furnace);
+    clampPointToFurnaceVolume(p4, furnace);
+
+    const rawPoints = [source.clone(), p1, p2, p3, p4, outlet.clone()];
+    return {
+        points: buildSmoothAirflowPath(rawPoints, 28, furnace),
+        blocked: true,
+        blocker: hit.item,
+        deflectAxis: primarySideAxis,
+        speedFactor: estimateAirflowPathSpeedFactor(hit.item, furnace, 1)
+    };
+}
+
+
+function buildAirflowDetourPoints(source, target, blockerItem, furnace, meta) {
+    if (!blockerItem) return [source.clone(), target.clone()];
+    const blockerCenter = getItemCenterWorld(blockerItem, furnace);
+    const mainDir = target.clone().sub(source);
+    if (mainDir.lengthSq() < 1e-6) return [source.clone(), target.clone()];
+    mainDir.normalize();
+
+    const crossAxes = getAirflowCrossAxes(meta.axis);
+    const primaryAxis = crossAxes.sort((a, b) => Math.abs(source[b] - blockerCenter[b]) - Math.abs(source[a] - blockerCenter[a]))[0];
+    const sideSign = source[primaryAxis] < blockerCenter[primaryAxis] ? -1 : 1;
+    const detourDistance = Math.max(
+        70,
+        Math.min(220, Math.max(blockerItem.w || 0, blockerItem.h || 0, blockerItem.d || 0) * 0.72 + 40)
+    );
+
+    const before = blockerCenter.clone().sub(mainDir.clone().multiplyScalar(detourDistance * 0.82));
+    const around = blockerCenter.clone();
+    around[primaryAxis] += sideSign * detourDistance;
+    const after = blockerCenter.clone().add(mainDir.clone().multiplyScalar(detourDistance * 0.92));
+    [before, around, after].forEach(p => clampPointToFurnaceVolume(p, furnace));
+    return [source.clone(), before, around, after, target.clone()];
+}
+
+function buildSmoothAirflowPath(points, segments = 20, furnace = null) {
+    if (!points || points.length < 2) return points || [];
+    const raw = points.map(p => p.clone ? p.clone() : new THREE.Vector3(p.x, p.y, p.z));
+    if (raw.length === 2) return raw;
+    const curve = new THREE.CatmullRomCurve3(raw);
+    curve.curveType = 'catmullrom';
+    curve.tension = 0.32;
+    const smooth = curve.getPoints(Math.max(8, segments));
+    if (furnace) smooth.forEach(p => clampPointToFurnaceVolume(p, furnace, 12));
+    return smooth;
+}
+
+function estimateAirflowPathSpeedFactor(blockerItem, furnace, base = 1) {
+    if (!blockerItem) return base;
+    const volume = Math.max(1, (blockerItem.w || 1) * (blockerItem.h || 1) * (blockerItem.d || 1));
+    const sizePenalty = Math.min(0.34, Math.cbrt(volume) / 1400);
+    return Math.max(0.28, Math.min(1, base - 0.28 - sizePenalty));
+}
+
+function createAirflowSeedPointsForDirection(furnace, meta) {
+    const fw = Number(furnace.w || 600);
+    const fh = Number(furnace.h || 600);
+    const fd = Number(furnace.d || 600);
+    const axis = meta.axis;
+    const bounds = getAirflowAxisBounds(furnace, axis);
+    const inletCoord = meta.sign > 0 ? bounds.min : bounds.max;
+    const seeds = [];
+    const countA = 5;
+    const countB = 4;
+    for (let a = 0; a < countA; a++) {
+        for (let b = 0; b < countB; b++) {
+            const u = countA === 1 ? 0.5 : a / (countA - 1);
+            const v = countB === 1 ? 0.5 : b / (countB - 1);
+            let p;
+            if (axis === 'x') p = new THREE.Vector3(inletCoord, THERMAL_BASE_Y + fh * (0.16 + v * 0.68), -fd * 0.40 + u * fd * 0.80);
+            else if (axis === 'y') p = new THREE.Vector3(-fw * 0.40 + u * fw * 0.80, inletCoord, -fd * 0.38 + v * fd * 0.76);
+            else p = new THREE.Vector3(-fw * 0.40 + u * fw * 0.80, THERMAL_BASE_Y + fh * (0.16 + v * 0.68), inletCoord);
+            seeds.push(p);
+        }
+    }
+    return seeds;
+}
+
+function buildAirflowStreamlineField(furnace, directionMetas) {
+    const metas = Array.isArray(directionMetas) ? directionMetas : [directionMetas].filter(Boolean);
+    const group = new THREE.Group();
+    group.name = 'airflowStreamlineField';
+    const linePositions = [];
+    const lineColors = [];
+    const paths = [];
+    const clearColor = new THREE.Color(0x7dd3fc);
+    const weakColor = new THREE.Color(0xfb923c);
+
+    metas.forEach((meta, mi) => {
+        const seeds = createAirflowSeedPointsForDirection(furnace, meta);
+        seeds.forEach((source, si) => {
+            const outlet = makeAirflowOutletPoint(source, furnace, meta);
+            const path = buildDeflectedAirflowPath(source, outlet, furnace, meta);
+            const speedFactor = path.speedFactor != null ? path.speedFactor : (path.blocked ? 0.55 : 1);
+            const colorA = path.blocked ? getAirflowSpeedColor(speedFactor) : clearColor;
+            const colorB = path.blocked ? new THREE.Color(0xef4444) : new THREE.Color(0x38bdf8);
+            for (let i = 0; i < path.points.length - 1; i++) {
+                const a = path.points[i];
+                const b = path.points[i + 1];
+                linePositions.push(a.x, a.y, a.z, b.x, b.y, b.z);
+                lineColors.push(colorA.r, colorA.g, colorA.b, colorB.r, colorB.g, colorB.b);
+            }
+            paths.push({
+                points: path.points.map(p => p.clone()),
+                blocked: path.blocked,
+                directionKey: meta.key,
+                speed: (path.speedFactor != null ? path.speedFactor : (path.blocked ? 0.55 : 1)) * getAirflowGasMeta(thermalSimRuntime.selectedAirflowGasType || 'n2').speedScale,
+                speedFactor: path.speedFactor != null ? path.speedFactor : (path.blocked ? 0.55 : 1),
+                phase: ((si * 0.137) + (mi * 0.211)) % 1
+            });
+        });
+    });
+
+    const lineGeo = new THREE.BufferGeometry();
+    lineGeo.setAttribute('position', new THREE.Float32BufferAttribute(linePositions, 3));
+    lineGeo.setAttribute('color', new THREE.Float32BufferAttribute(lineColors, 3));
+    const lineMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.46, depthWrite: false, blending: THREE.AdditiveBlending });
+    const lineSegments = new THREE.LineSegments(lineGeo, lineMat);
+    lineSegments.name = 'airflowDeflectedStreamlines';
+    lineSegments.userData = { isAirflowStreamline: true, isThermalRays: true };
+    group.add(lineSegments);
+
+    const particleCount = Math.min(180, Math.max(48, paths.length * 3));
+    const positions = new Float32Array(particleCount * 3);
+    const colors = new Float32Array(particleCount * 3);
+    for (let i = 0; i < particleCount; i++) {
+        const path = paths[i % paths.length];
+        const color = getAirflowSpeedColor(path?.speedFactor != null ? path.speedFactor : (path?.blocked ? 0.48 : 1));
+        colors[i * 3] = color.r;
+        colors[i * 3 + 1] = color.g;
+        colors[i * 3 + 2] = color.b;
+    }
+    const pGeo = new THREE.BufferGeometry();
+    pGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    pGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const pMat = new THREE.PointsMaterial({
+        size: Math.max(18, Math.min(34, Math.min(Number(furnace.w || 600), Number(furnace.d || 600)) / 24)),
+        transparent: true,
+        opacity: 0.96,
+        vertexColors: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        map: createThermalParticleTexture()
+    });
+    const particles = new THREE.Points(pGeo, pMat);
+    particles.name = 'airflowMovingParticles';
+    particles.renderOrder = 42;
+    particles.userData = { isAirflowParticles: true, paths, particleCount };
+    group.add(particles);
+    thermalSimRuntime.airflowParticles = particles;
+    thermalSimRuntime.pointCloud = particles;
+    updateAirflowParticles(performance.now(), true);
+
+    group.userData = { isAirflowStreamGroup: true, paths };
+    return group;
+}
+
+function sampleAirflowPath(points, t) {
+    if (!points || points.length === 0) return new THREE.Vector3();
+    if (points.length === 1) return points[0].clone();
+    const lens = [];
+    let total = 0;
+    for (let i = 0; i < points.length - 1; i++) {
+        const len = points[i].distanceTo(points[i + 1]);
+        lens.push(len);
+        total += len;
+    }
+    if (total <= 1e-6) return points[0].clone();
+    let target = ((t % 1) + 1) % 1 * total;
+    for (let i = 0; i < lens.length; i++) {
+        if (target <= lens[i]) {
+            const local = lens[i] <= 1e-6 ? 0 : target / lens[i];
+            return points[i].clone().lerp(points[i + 1], local);
+        }
+        target -= lens[i];
+    }
+    return points[points.length - 1].clone();
+}
+
+function updateAirflowParticles(now, force = false) {
+    const particles = thermalSimRuntime.airflowParticles;
+    if (!particles || !particles.geometry || !particles.userData?.isAirflowParticles) return;
+    const paths = particles.userData.paths || [];
+    if (!paths.length) return;
+    if (!force && (!thermalSimRuntime.isPlaying || thermalSimRuntime.paused || thermalSimRuntime.activeMode !== 'airflow')) return;
+
+    if (!thermalSimRuntime.startedAt || force) thermalSimRuntime.startedAt = now;
+    const elapsed = now - thermalSimRuntime.startedAt;
+    const base = ((elapsed / 3600) % 1 + 1) % 1;
+    thermalSimRuntime.progress = base;
+
+    const pos = particles.geometry.getAttribute('position');
+    for (let i = 0; i < particles.userData.particleCount; i++) {
+        const path = paths[i % paths.length];
+        const laneOffset = ((i / Math.max(1, particles.userData.particleCount)) * 0.93) % 1;
+        const t = (base * (path.speed || 1) + (path.phase || 0) + laneOffset) % 1;
+        const p = sampleAirflowPath(path.points, t);
+        pos.setXYZ(i, p.x, p.y, p.z);
+    }
+    pos.needsUpdate = true;
+    if (particles.material) {
+        particles.material.opacity = thermalSimRuntime.isPlaying ? 0.96 : 0.58;
+        particles.material.needsUpdate = true;
+    }
+}
+
+function buildAirflowRiskMarkers(furnace, scoreMap) {
+    const group = new THREE.Group();
+    group.name = 'airflowCoolingRiskMarkers';
+    const sorted = [...scoreMap.values()].map(entry => ({ item: entry.item, risk: 1 - (entry.score || 0.5) })).sort((a, b) => b.risk - a.risk).slice(0, 10);
+    sorted.forEach(({ item, risk }) => {
+        if (risk < 0.32) return;
+        const geometry = new THREE.BoxGeometry((item.w || 1) + 18, (item.h || 1) + 18, (item.d || 1) + 18);
+        const edges = new THREE.EdgesGeometry(geometry);
+        const mat = new THREE.LineBasicMaterial({ color: risk > 0.58 ? 0xef4444 : 0xfb923c, transparent: true, opacity: 0.72 });
+        const marker = new THREE.LineSegments(edges, mat);
+        marker.position.copy(getItemCenterWorld(item, furnace));
+        marker.userData = { isAirflowRiskMarker: true, isThermalRiskMarker: true, risk };
+        group.add(marker);
+    });
+    return group;
+}
+
+function applyAirflowTintToItems(furnace, scoreMap) {
+    const group = furnaceGroups.get(currentFurnaceIndex);
+    if (!group || !furnace) return;
+    group.traverse(child => {
+        if (!child.isMesh || !child.userData || !child.userData.itemId) return;
+        const entry = scoreMap.get(child.userData.itemId);
+        const score = entry ? entry.score : 0.55;
+        const tint = getAirflowScoreColor(score);
+        getMeshMaterials(child).forEach(mat => {
+            if (!mat.color) return;
+            saveOriginalMaterialIfNeeded(mat);
+            mat.color.copy(tint);
+            if (mat.emissive) {
+                mat.emissive.copy(tint);
+                mat.emissive.multiplyScalar(score >= 0.70 ? 0.55 : 0.38);
+                mat.emissiveIntensity = 0.12 + score * 0.36;
+            }
+            mat.transparent = true;
+            mat.opacity = 0.58 + score * 0.36;
+            mat.needsUpdate = true;
+        });
+    });
+}
+
 function buildSelectedRadiationMetric(furnace, scoreMap, entry) {
     const metrics = calculateRadiationMetrics(furnace, scoreMap);
     if (!entry) return metrics;
@@ -1600,6 +2404,137 @@ export function renderRadiationExposureSimulation() {
     thermalSimRuntime.selectedRadiationSection = null;
     thermalSimRuntime.metrics = calculateRadiationMetrics(furnace, scores);
     return thermalSimRuntime.metrics;
+}
+
+
+export function renderAirflowCoolingSimulation(options = {}) {
+    const furnace = getCurrentThermalFurnace();
+    if (!furnace) return null;
+
+    const keepPlaying = !!options.keepPlaying && thermalSimRuntime.activeMode === 'airflow' && thermalSimRuntime.isPlaying && !thermalSimRuntime.paused;
+    clearThermalGroupChildren();
+    restoreThermalItemMaterials();
+    setThermalSceneTheme(true, 'airflow');
+
+    if (options.gasType) thermalSimRuntime.selectedAirflowGasType = getAirflowGasMeta(options.gasType).key;
+    const directionKeys = normalizeAirflowDirections(options.directionKeys || options.directions || options.directionKey || thermalSimRuntime.selectedAirflowDirections || thermalSimRuntime.selectedAirflowDirection || 'z+');
+    const group = ensureThermalSimulationGroup();
+    const { scores, directionMetas } = calculateAirflowCoolingScores(furnace, directionKeys);
+    const sourceVisual = buildAirflowSourceVisual(furnace, directionMetas);
+    const rays = buildAirflowCoolingRays(scores);
+    const streamGroup = buildAirflowStreamlineField(furnace, directionMetas);
+    const riskMarkers = buildAirflowRiskMarkers(furnace, scores);
+    const ringBoundary = buildRingThermalBoundary(furnace);
+
+    group.add(sourceVisual);
+    group.add(rays);
+    group.add(streamGroup);
+    group.add(riskMarkers);
+    if (ringBoundary) group.add(ringBoundary);
+    group.visible = true;
+
+    applyAirflowTintToItems(furnace, scores);
+
+    thermalSimRuntime.visible = true;
+    thermalSimRuntime.activeMode = 'airflow';
+    thermalSimRuntime.isPlaying = keepPlaying;
+    thermalSimRuntime.paused = false;
+    thermalSimRuntime.progress = 0;
+    thermalSimRuntime.startedAt = performance.now();
+    thermalSimRuntime.sourceGroup = sourceVisual;
+    thermalSimRuntime.rayGroup = rays;
+    thermalSimRuntime.riskGroup = riskMarkers;
+    thermalSimRuntime.airflowStreamGroup = streamGroup;
+    thermalSimRuntime.airflowScores = scores;
+    thermalSimRuntime.selectedAirflowDirection = directionKeys[0];
+    thermalSimRuntime.selectedAirflowDirections = directionKeys;
+    thermalSimRuntime.selectedAirflowGasType = getAirflowGasMeta(options.gasType || thermalSimRuntime.selectedAirflowGasType || 'n2').key;
+    thermalSimRuntime.selectedRadiationItemId = null;
+    thermalSimRuntime.selectedRadiationEntry = null;
+    thermalSimRuntime.selectedRadiationBatch = null;
+    thermalSimRuntime.selectedRadiationSection = null;
+    thermalSimRuntime.metrics = calculateAirflowCoolingMetrics(furnace, scores, directionMetas);
+    thermalSimRuntime.metrics.animationPlaying = thermalSimRuntime.isPlaying && !thermalSimRuntime.paused;
+    updateAirflowParticles(performance.now(), true);
+    return thermalSimRuntime.metrics;
+}
+
+export function setAirflowCoolingDirection(directionKey = 'z+') {
+    const meta = getAirflowDirectionMeta(directionKey);
+    thermalSimRuntime.selectedAirflowDirection = meta.key;
+    thermalSimRuntime.selectedAirflowDirections = [meta.key];
+    return renderAirflowCoolingSimulation({ directionKeys: [meta.key] });
+}
+
+export function setAirflowCoolingDirections(directionKeys = ['z+']) {
+    const directions = normalizeAirflowDirections(directionKeys);
+    thermalSimRuntime.selectedAirflowDirection = directions[0];
+    thermalSimRuntime.selectedAirflowDirections = directions;
+    return renderAirflowCoolingSimulation({ directionKeys: directions, keepPlaying: thermalSimRuntime.isPlaying && !thermalSimRuntime.paused });
+}
+
+export function setAirflowCoolingGasType(gasType = 'n2') {
+    const gasMeta = getAirflowGasMeta(gasType);
+    thermalSimRuntime.selectedAirflowGasType = gasMeta.key;
+    return renderAirflowCoolingSimulation({
+        directionKeys: thermalSimRuntime.selectedAirflowDirections || [thermalSimRuntime.selectedAirflowDirection || 'z+'],
+        gasType: gasMeta.key,
+        keepPlaying: thermalSimRuntime.isPlaying && !thermalSimRuntime.paused
+    });
+}
+
+export function toggleAirflowCoolingDirection(directionKey = 'z+') {
+    const key = getAirflowDirectionMeta(directionKey).key;
+    const current = normalizeAirflowDirections(thermalSimRuntime.selectedAirflowDirections || thermalSimRuntime.selectedAirflowDirection || 'z+');
+    const next = current.includes(key) ? current.filter(v => v !== key) : [...current, key];
+    return setAirflowCoolingDirections(next.length ? next : [key]);
+}
+
+export function playAirflowCoolingAnimation() {
+    if (thermalSimRuntime.activeMode !== 'airflow' || !thermalSimRuntime.visible) {
+        renderAirflowCoolingSimulation({ directionKeys: thermalSimRuntime.selectedAirflowDirections || ['z+'] });
+    }
+    thermalSimRuntime.isPlaying = true;
+    thermalSimRuntime.paused = false;
+    thermalSimRuntime.startedAt = performance.now() - (thermalSimRuntime.progress || 0) * 3600;
+    if (thermalSimRuntime.metrics) thermalSimRuntime.metrics.animationPlaying = true;
+    return thermalSimRuntime.metrics;
+}
+
+export function pauseAirflowCoolingAnimation() {
+    if (thermalSimRuntime.activeMode === 'airflow') {
+        thermalSimRuntime.paused = true;
+        thermalSimRuntime.isPlaying = false;
+        if (thermalSimRuntime.metrics) thermalSimRuntime.metrics.animationPlaying = false;
+    }
+    return thermalSimRuntime.metrics;
+}
+
+export function resetAirflowCoolingAnimation() {
+    if (thermalSimRuntime.activeMode === 'airflow') {
+        thermalSimRuntime.progress = 0;
+        thermalSimRuntime.isPlaying = false;
+        thermalSimRuntime.paused = false;
+        thermalSimRuntime.startedAt = performance.now();
+        updateAirflowParticles(performance.now(), true);
+        if (thermalSimRuntime.metrics) thermalSimRuntime.metrics.animationPlaying = false;
+    }
+    return thermalSimRuntime.metrics;
+}
+
+export function getAirflowCoolingRuntime() {
+    return {
+        visible: thermalSimRuntime.visible && thermalSimRuntime.activeMode === 'airflow',
+        metrics: thermalSimRuntime.activeMode === 'airflow' ? thermalSimRuntime.metrics : null,
+        scores: thermalSimRuntime.airflowScores,
+        directionKey: thermalSimRuntime.selectedAirflowDirection || 'z+',
+        directionKeys: normalizeAirflowDirections(thermalSimRuntime.selectedAirflowDirections || thermalSimRuntime.selectedAirflowDirection || 'z+'),
+        gasType: thermalSimRuntime.selectedAirflowGasType || 'n2',
+        gasMeta: getAirflowGasMeta(thermalSimRuntime.selectedAirflowGasType || 'n2'),
+        isPlaying: thermalSimRuntime.activeMode === 'airflow' && thermalSimRuntime.isPlaying,
+        paused: thermalSimRuntime.activeMode === 'airflow' && thermalSimRuntime.paused,
+        progress: thermalSimRuntime.activeMode === 'airflow' ? thermalSimRuntime.progress : 0
+    };
 }
 
 function normalizeRadiationText(value) {
@@ -2217,6 +3152,14 @@ function updateThermalSimulationFrame(now) {
             thermalSimRuntime.isPlaying = false;
             thermalSimRuntime.paused = false;
             if (thermalSimRuntime.onFinish && thermalSimRuntime.metrics) thermalSimRuntime.onFinish(thermalSimRuntime.metrics);
+        }
+    }
+
+    if (thermalSimRuntime.activeMode === 'airflow') {
+        updateAirflowParticles(now);
+        if (thermalSimRuntime.metrics) {
+            thermalSimRuntime.metrics.animationPlaying = !!thermalSimRuntime.isPlaying && !thermalSimRuntime.paused;
+            thermalSimRuntime.metrics.progress = Math.round((thermalSimRuntime.progress || 0) * 100);
         }
     }
 
@@ -3610,6 +4553,8 @@ export function renderSingleFurnace(index, filterMaterialName) {
     if (thermalSimRuntime.visible) {
         if (thermalSimRuntime.activeMode === 'radiation') {
             renderRadiationExposureSimulation();
+        } else if (thermalSimRuntime.activeMode === 'airflow') {
+            renderAirflowCoolingSimulation({ directionKeys: thermalSimRuntime.selectedAirflowDirections || thermalSimRuntime.selectedAirflowDirection || 'z+', keepPlaying: thermalSimRuntime.isPlaying && !thermalSimRuntime.paused });
         } else {
             renderVacuumQuenchThermalSimulation(thermalSimRuntime.progress || 0.12);
         }

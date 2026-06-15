@@ -125,6 +125,15 @@ import {
     setVacuumQuenchThermalProgress,
     getVacuumQuenchThermalRuntime,
     renderRadiationExposureSimulation,
+    renderAirflowCoolingSimulation,
+    getAirflowCoolingRuntime,
+    setAirflowCoolingDirection,
+    setAirflowCoolingDirections,
+    setAirflowCoolingGasType,
+    toggleAirflowCoolingDirection,
+    playAirflowCoolingAnimation,
+    pauseAirflowCoolingAnimation,
+    resetAirflowCoolingAnimation,
     getRadiationExposureRuntime,
     selectRadiationExposureItem,
     selectRadiationExposureBatch,
@@ -1783,6 +1792,7 @@ function showPlanActionButtons() {
         'thermal-mode-row',
         'btn-mode-thermal',
         'btn-mode-radiation',
+        'btn-mode-airflow',
         'btn-play-thermal',
         'btn-pause-thermal',
         'btn-render-thermal',
@@ -1809,6 +1819,7 @@ function hidePlanActionButtons() {
         'thermal-mode-row',
         'btn-mode-thermal',
         'btn-mode-radiation',
+        'btn-mode-airflow',
         'btn-play-thermal',
         'btn-pause-thermal',
         'btn-render-thermal',
@@ -1984,7 +1995,9 @@ function syncThermalControlState(metrics = null) {
     }
 
     if (renderBtn) {
-        renderBtn.textContent = processSimulationMode === 'radiation' ? '显示辐射暴露' : '显示升温热场';
+        renderBtn.textContent = processSimulationMode === 'radiation'
+            ? '显示辐射暴露'
+            : (processSimulationMode === 'airflow' ? '显示气流冷却' : '显示升温热场');
     }
 
     const progress = metrics?.progress != null
@@ -1995,13 +2008,14 @@ function syncThermalControlState(metrics = null) {
         range.disabled = processSimulationMode !== 'thermal';
         range.value = String(Math.max(0, Math.min(100, progress)));
     }
-    if (value) value.textContent = processSimulationMode === 'radiation' ? '—' : `${Math.max(0, Math.min(100, progress))}%`;
+    if (value) value.textContent = processSimulationMode === 'thermal' ? `${Math.max(0, Math.min(100, progress))}%` : '—';
     updateProcessSimulationModeButtons();
 }
 
 function renderCurrentThermalSimulation(progress = 0.18, switchTab = true) {
     processSimulationMode = 'thermal';
     document.body.classList.remove('radiation-pick-mode');
+    document.body.classList.remove('airflow-cooling-mode');
     const metrics = renderVacuumQuenchThermalSimulation(progress);
     renderThermalSimulationPanel(metrics, 'thermal');
     syncThermalControlState(metrics);
@@ -2012,9 +2026,24 @@ function renderCurrentThermalSimulation(progress = 0.18, switchTab = true) {
 function renderCurrentRadiationSimulation(switchTab = true) {
     processSimulationMode = 'radiation';
     document.body.classList.add('radiation-pick-mode');
+    document.body.classList.remove('airflow-cooling-mode');
     stopVacuumQuenchThermalSimulation();
     const metrics = renderRadiationExposureSimulation();
     renderThermalSimulationPanel(metrics, 'radiation');
+    syncThermalControlState(metrics);
+    if (switchTab) activateRightPanelTab('thermal');
+    return metrics;
+}
+
+function renderCurrentAirflowSimulation(switchTab = true, directionKey = null) {
+    processSimulationMode = 'airflow';
+    document.body.classList.remove('radiation-pick-mode');
+    document.body.classList.add('airflow-cooling-mode');
+    stopVacuumQuenchThermalSimulation();
+    const runtime = typeof getAirflowCoolingRuntime === 'function' ? getAirflowCoolingRuntime() : null;
+    const directionKeys = directionKey ? [directionKey] : (runtime?.directionKeys || [runtime?.directionKey || 'z+']);
+    const metrics = renderAirflowCoolingSimulation({ directionKeys });
+    renderThermalSimulationPanel(metrics, 'airflow');
     syncThermalControlState(metrics);
     if (switchTab) activateRightPanelTab('thermal');
     return metrics;
@@ -2024,15 +2053,20 @@ function renderCurrentProcessSimulation() {
     if (processSimulationMode === 'radiation') {
         return renderCurrentRadiationSimulation(true);
     }
+    if (processSimulationMode === 'airflow') {
+        return renderCurrentAirflowSimulation(true);
+    }
     const runtime = getVacuumQuenchThermalRuntime();
     const p = runtime?.activeMode === 'thermal' ? (runtime.progress || 0.18) : 0.18;
     return renderCurrentThermalSimulation(p, true);
 }
 
 function switchProcessSimulationMode(mode) {
-    processSimulationMode = mode === 'radiation' ? 'radiation' : 'thermal';
+    processSimulationMode = mode === 'radiation' ? 'radiation' : (mode === 'airflow' ? 'airflow' : 'thermal');
     if (processSimulationMode === 'radiation') {
         renderCurrentRadiationSimulation(true);
+    } else if (processSimulationMode === 'airflow') {
+        renderCurrentAirflowSimulation(true);
     } else {
         const runtime = getVacuumQuenchThermalRuntime();
         renderCurrentThermalSimulation(runtime?.progress || 0.18, true);
@@ -2042,6 +2076,7 @@ function switchProcessSimulationMode(mode) {
 function playCurrentThermalSimulation() {
     processSimulationMode = 'thermal';
     document.body.classList.remove('radiation-pick-mode');
+    document.body.classList.remove('airflow-cooling-mode');
     activateRightPanelTab('thermal');
     const runtime = getVacuumQuenchThermalRuntime();
     const startProgress = runtime.paused && runtime.activeMode === 'thermal' ? (runtime.progress || 0) : 0.03;
@@ -2066,6 +2101,7 @@ function playCurrentThermalSimulation() {
 function pauseResumeCurrentThermalSimulation() {
     processSimulationMode = 'thermal';
     document.body.classList.remove('radiation-pick-mode');
+    document.body.classList.remove('airflow-cooling-mode');
     activateRightPanelTab('thermal');
     const runtime = getVacuumQuenchThermalRuntime();
 
@@ -2094,6 +2130,7 @@ function pauseResumeCurrentThermalSimulation() {
 
 function resetCurrentThermalSimulation() {
     document.body.classList.remove('radiation-pick-mode');
+    document.body.classList.remove('airflow-cooling-mode');
     stopVacuumQuenchThermalSimulation();
     clearThermalSimulationLayer();
     renderThermalSimulationPanel(null, processSimulationMode);
@@ -2103,6 +2140,7 @@ function resetCurrentThermalSimulation() {
 function scrubCurrentThermalSimulation(progressPercent) {
     processSimulationMode = 'thermal';
     document.body.classList.remove('radiation-pick-mode');
+    document.body.classList.remove('airflow-cooling-mode');
     const p = Math.max(0, Math.min(100, progressPercent || 0)) / 100;
     const metrics = setVacuumQuenchThermalProgress(p);
     renderThermalSimulationPanel(metrics, 'thermal');
@@ -2352,6 +2390,69 @@ function bindRadiationItemSelection() {
         radiationSectionPlaneDragging = false;
         const metrics = endRadiationSectionDrag();
         renderSelectedRadiationMetrics(metrics || getRadiationExposureRuntime()?.metrics || null);
+    }, true);
+}
+
+
+function bindAirflowCoolingActions() {
+    if (document.body.dataset.airflowCoolingBound === '1') return;
+    document.body.dataset.airflowCoolingBound = '1';
+
+    function activateAirflowMode() {
+        processSimulationMode = 'airflow';
+        document.body.classList.remove('radiation-pick-mode');
+        document.body.classList.add('airflow-cooling-mode');
+        activateRightPanelTab('thermal');
+    }
+
+    document.addEventListener('click', (event) => {
+        const toggleBtn = event.target.closest('[data-action="airflow-toggle-direction"]');
+        const singleDirBtn = event.target.closest('[data-action="airflow-direction"]');
+        const playBtn = event.target.closest('[data-action="airflow-animation-play"]');
+        const pauseBtn = event.target.closest('[data-action="airflow-animation-pause"]');
+        const resetBtn = event.target.closest('[data-action="airflow-animation-reset"]');
+        const presetBtn = event.target.closest('[data-action="airflow-preset"]');
+
+        if (!toggleBtn && !singleDirBtn && !playBtn && !pauseBtn && !resetBtn && !presetBtn) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+        activateAirflowMode();
+
+        let metrics = null;
+        if (toggleBtn) {
+            const directionKey = toggleBtn.getAttribute('data-airflow-dir') || 'z+';
+            metrics = toggleAirflowCoolingDirection(directionKey);
+        } else if (singleDirBtn) {
+            const directionKey = singleDirBtn.getAttribute('data-airflow-dir') || 'z+';
+            metrics = setAirflowCoolingDirection(directionKey);
+        } else if (presetBtn) {
+            const preset = presetBtn.getAttribute('data-airflow-preset') || 'z+';
+            const directionKeys = preset.split(',').map(v => v.trim()).filter(Boolean);
+            metrics = setAirflowCoolingDirections(directionKeys.length ? directionKeys : ['z+']);
+        } else if (playBtn) {
+            metrics = playAirflowCoolingAnimation();
+        } else if (pauseBtn) {
+            metrics = pauseAirflowCoolingAnimation();
+        } else if (resetBtn) {
+            metrics = resetAirflowCoolingAnimation();
+        }
+
+        renderThermalSimulationPanel(metrics || getAirflowCoolingRuntime()?.metrics || null, 'airflow');
+        syncThermalControlState(metrics || null);
+    }, true);
+
+    document.addEventListener('change', (event) => {
+        const gasSelect = event.target.closest('[data-action="airflow-gas-type"]');
+        if (!gasSelect) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+        activateAirflowMode();
+
+        const metrics = setAirflowCoolingGasType(gasSelect.value || 'n2');
+        renderThermalSimulationPanel(metrics || getAirflowCoolingRuntime()?.metrics || null, 'airflow');
+        syncThermalControlState(metrics || null);
     }, true);
 }
 
@@ -2711,6 +2812,7 @@ function init() {
     bindRadiationItemSelection();
     bindRadiationMaterialCardSelection();
     bindRadiationDiagnosisActions();
+    bindAirflowCoolingActions();
     updateTopSummary();
     hideExplodeBOMButtons();
     initLeftPanelTabs();
@@ -2759,6 +2861,8 @@ function init() {
     if (btnModeThermal) btnModeThermal.addEventListener('click', () => switchProcessSimulationMode('thermal'));
     const btnModeRadiation = document.getElementById('btn-mode-radiation');
     if (btnModeRadiation) btnModeRadiation.addEventListener('click', () => switchProcessSimulationMode('radiation'));
+    const btnModeAirflow = document.getElementById('btn-mode-airflow');
+    if (btnModeAirflow) btnModeAirflow.addEventListener('click', () => switchProcessSimulationMode('airflow'));
     const btnResetThermal = document.getElementById("btn-reset-thermal");
     if (btnResetThermal) btnResetThermal.addEventListener("click", resetCurrentThermalSimulation);
     const thermalSpeedSelect = document.getElementById('thermal-speed-select');

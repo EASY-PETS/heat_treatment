@@ -6160,3 +6160,55 @@ body:not(.ui-plan-ready) .right-workbench-footer {
 body.radiation-pick-mode #canvas-container canvas {
     cursor: crosshair;
 }
+
+/* ==================== AIRFLOW COOLING SIMULATION V1 ==================== */
+.airflow-card {
+    border: 1px solid rgba(14, 165, 233, 0.16);
+}
+.airflow-gradient {
+    flex: 1;
+    height: 8px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #7f1d1d, #ef4444, #f97316, #38bdf8, #7dd3fc);
+}
+.airflow-dir-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    margin-top: 10px;
+}
+.airflow-dir-btn {
+    border: 1px solid rgba(14, 165, 233, 0.24);
+    border-radius: 10px;
+    padding: 7px 5px;
+    background: rgba(240, 249, 255, 0.82);
+    color: #0369a1;
+    cursor: pointer;
+    font-size: 10px;
+    line-height: 1.2;
+}
+.airflow-dir-btn strong {
+    display: block;
+    font-size: 11px;
+    color: #0f172a;
+}
+.airflow-dir-btn span {
+    display: block;
+    margin-top: 2px;
+    color: #64748b;
+}
+.airflow-dir-btn:hover,
+.airflow-dir-btn.active {
+    background: linear-gradient(135deg, rgba(14,165,233,0.92), rgba(34,211,238,0.72));
+    border-color: rgba(14, 165, 233, 0.7);
+    color: #ffffff;
+}
+.airflow-dir-btn:hover strong,
+.airflow-dir-btn.active strong,
+.airflow-dir-btn:hover span,
+.airflow-dir-btn.active span {
+    color: #ffffff;
+}
+body.airflow-cooling-mode #canvas-container canvas {
+    cursor: default;
+}
