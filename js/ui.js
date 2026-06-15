@@ -892,6 +892,100 @@ export function renderLoadingSimulationPanel() {
     `;
 }
 
+
+export function renderThermalSimulationPanel(metrics = null) {
+    const panel = document.getElementById('thermal-simulation-panel');
+    if (!panel) return;
+
+    if (!globalFurnacesResult || globalFurnacesResult.length === 0) {
+        panel.innerHTML = `
+            <div class="thermal-sim-empty">
+                生成方案后显示真空淬火热场仿真。<br>
+                当前版本为近似可视化：炉壁辐射升温 + 工件热容量滞后 + 局部遮挡冷区。
+            </div>
+        `;
+        return;
+    }
+
+    const furnace = globalFurnacesResult[currentFurnaceIndex];
+    if (!furnace) {
+        panel.innerHTML = `
+            <div class="thermal-sim-empty">
+                当前炉次不存在，请重新生成方案。
+            </div>
+        `;
+        return;
+    }
+
+    const items = furnace.packedItems || [];
+    const packedVolume = items.reduce((sum, item) => sum + Number((item.w || 0) * (item.h || 0) * (item.d || 0)), 0);
+    const furnaceVolume = Math.max(1, Number((furnace.w || 1) * (furnace.h || 1) * (furnace.d || 1)));
+    const densityRate = metrics?.densityRate ?? Math.round((packedVolume / furnaceVolume) * 1000) / 10;
+    const progress = metrics?.progress ?? 0;
+    const currentTemp = metrics?.currentTemp ?? 120;
+    const targetTemp = metrics?.targetTemp ?? 1040;
+    const uniformityScore = metrics?.uniformityScore ?? Math.max(50, Math.round(92 - densityRate * 0.55));
+    const coldSpotCount = metrics?.coldSpotCount ?? 0;
+    const radiationExposure = metrics?.radiationExposure ?? Math.max(55, Math.round(92 - densityRate * 0.45));
+    const coreLagRisk = metrics?.coreLagRisk ?? (densityRate > 35 ? '中' : '低');
+
+    const stage = progress < 22
+        ? '预热升温'
+        : progress < 65
+            ? '奥氏体化升温'
+            : progress < 90
+                ? '保温均热'
+                : '气淬前热态复核';
+
+    const stageRows = [
+        { p: 20, name: '预热升温', desc: '炉壁与工装先升温，厚大件中心仍偏冷' },
+        { p: 60, name: '奥氏体化升温', desc: '真空环境以辐射加热为主，遮挡面升温滞后' },
+        { p: 85, name: '保温均热', desc: '温差逐渐收敛，冷区风险开始下降' },
+        { p: 100, name: '高压气淬前复核', desc: '检查中心大件、密集堆叠区和背辐射区域' }
+    ].map(row => `
+        <div class="thermal-stage ${progress >= row.p - 8 ? 'active' : ''}">
+            <div class="thermal-stage-progress">${row.p}%</div>
+            <div>
+                <div class="thermal-stage-name">${escapeSimHtml(row.name)}</div>
+                <div class="thermal-stage-desc">${escapeSimHtml(row.desc)}</div>
+            </div>
+            <div>${progress >= row.p ? '✓' : '·'}</div>
+        </div>
+    `).join('');
+
+    panel.innerHTML = `
+        <div class="thermal-header-card compact">
+            <div class="thermal-title">🔥 ${escapeSimHtml(furnace.instanceId || '当前炉次')} · 真空淬火热场</div>
+            <div class="thermal-subtitle">
+                一期为解释型近似动画：蓝色表示低温/滞后区，橙红表示炉壁辐射升温区；红色线框提示可能的厚大件中心滞后或遮挡冷区。
+            </div>
+            <div class="thermal-metric-grid">
+                <div class="thermal-metric"><span>当前阶段</span><strong>${escapeSimHtml(stage)}</strong></div>
+                <div class="thermal-metric"><span>温度进度</span><strong>${currentTemp} / ${targetTemp} ℃</strong></div>
+                <div class="thermal-metric"><span>热场均匀性</span><strong>${uniformityScore} 分</strong></div>
+                <div class="thermal-metric"><span>装载密度</span><strong>${densityRate}%</strong></div>
+            </div>
+            <div class="thermal-legend">
+                <span>低温</span><div class="thermal-gradient"></div><span>高温</span>
+            </div>
+            <div class="thermal-mini-note">真空淬火升温段默认按“辐射为主、气流弱、中心大件滞后”的模板模拟；3D 中工件颜色也会随估算表面温度同步变化。</div>
+        </div>
+
+        <div class="thermal-stage-card">
+            <div class="thermal-stage-title">工艺动画阶段</div>
+            <div class="thermal-stage-list">${stageRows}</div>
+        </div>
+
+        <div class="thermal-risk-card">
+            <div class="thermal-stage-title">当前风险读数</div>
+            <div class="thermal-risk-row"><span>冷区风险点</span><strong>${coldSpotCount} 处</strong></div>
+            <div class="thermal-risk-row"><span>辐射覆盖率</span><strong>${radiationExposure}%</strong></div>
+            <div class="thermal-risk-row"><span>厚大件中心滞后</span><strong>${escapeSimHtml(coreLagRisk)}</strong></div>
+            <div class="thermal-risk-row"><span>仿真进度</span><strong>${progress}%</strong></div>
+        </div>
+    `;
+}
+
 export function updateLeftPanelActiveForIndex(index) { document.querySelectorAll('.furnace-card').forEach(c => c.classList.remove('active')); if (!globalFurnacesResult || index >= globalFurnacesResult.length) return; const furnace = globalFurnacesResult[index]; document.querySelectorAll('.furnace-card').forEach(card => { if (card.querySelector('.f-card-name').textContent === furnace.typeName) card.classList.add('active'); }); }
 
 export function updateCenterStats(onFurnaceClick) {

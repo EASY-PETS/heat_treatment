@@ -82,7 +82,7 @@ const workbenchRecord = createWorkbenchRecordController({
 });
 import { createPlanLibraryController } from './plan-library.js';
 import { analyzeFurnaces } from './plan-analysis.js';
-import { renderPlanAnalysisPanel, renderCandidatePlanCards, renderLoadingSimulationPanel } from './ui.js';
+import { renderPlanAnalysisPanel, renderCandidatePlanCards, renderLoadingSimulationPanel, renderThermalSimulationPanel } from './ui.js';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
@@ -117,6 +117,14 @@ import {
     focusLayer,
     focusLayersUpTo,
     setTightFitCamera,
+    renderVacuumQuenchThermalSimulation,
+    playVacuumQuenchThermalSimulation,
+    stopVacuumQuenchThermalSimulation,
+    pauseVacuumQuenchThermalSimulation,
+    resumeVacuumQuenchThermalSimulation,
+    setVacuumQuenchThermalProgress,
+    getVacuumQuenchThermalRuntime,
+    clearThermalSimulationLayer,
     showAILoadingLoading, hideAILoadingLoading
 } from './three-scene.js';
 import {
@@ -324,6 +332,7 @@ function applyCandidatePlan(index) {
     }
 
     clearFurnaceGroups();
+    clearThermalSimulationLayer();
     setCurrentFurnaceIndex(0);
 
     window._currentPlanAnalysis = plan.analysis;
@@ -332,6 +341,7 @@ function applyCandidatePlan(index) {
     renderPlanAnalysisPanel(plan.analysis);
     renderCandidatePlanCards(candidatePlans, index, applyCandidatePlan);
     renderLoadingSimulationPanel();
+    renderThermalSimulationPanel();
     updateSimulationModeButtons();
     activateRightPanelTab('analysis');
 
@@ -489,6 +499,7 @@ function executeAndRender() {
     renderPlanAnalysisPanel(analysis);
     renderCandidatePlanCards(candidatePlans, currentCandidatePlanIndex, applyCandidatePlan);
     renderLoadingSimulationPanel();
+    renderThermalSimulationPanel();
     updateSimulationModeButtons();
     activateRightPanelTab('analysis');
 
@@ -505,6 +516,7 @@ function executeAndRender() {
 
     // V2.7: 清理旧 furnaceGroups，确保重新构建
     clearFurnaceGroups();
+    clearThermalSimulationLayer();
 
     if (result.completedFurnaces.length > 0) {
         showPlanActionButtons();
@@ -681,6 +693,7 @@ export function clearFurnaceResults() {
     setGlobalFurnacesResult(null);
     setGlobalUnpackedItems([]);
     clearFurnaceGroups();
+    clearThermalSimulationLayer();
 
     if (itemsGroup) {
         while (itemsGroup.children.length > 0) {
@@ -704,6 +717,7 @@ export function clearFurnaceResults() {
     renderAISummaryBar(null);
     updateCurrentToolingHud();
     renderLoadingSimulationPanel();
+    renderThermalSimulationPanel();
     updateSimulationModeButtons();
     showCapacityFeedback('success', '筛选条件已变更，请重新生成方案');
     updateWorkbenchUiMode();
@@ -1661,6 +1675,7 @@ function exitCompareMode(restoreScene = true) {
     if (globalFurnacesResult && globalFurnacesResult.length > 0) {
         const idx = clampIndex(currentFurnaceIndex, globalFurnacesResult.length);
         clearFurnaceGroups();
+    clearThermalSimulationLayer();
         renderSingleFurnace(idx, getSelectedMaterialName());
         updateFurnaceNav();
         updateLeftPanelActiveForIndex(idx);
@@ -1750,13 +1765,19 @@ function showPlanActionButtons() {
     const ids = [
         'btn-export-pdf',
         'btn-animate',
+        'btn-play-thermal',
+        'btn-pause-thermal',
+        'btn-render-thermal',
+        'btn-reset-thermal',
+        'thermal-speed-select',
+        'thermal-scrub-row',
         'btn-save-plan-library'
     ];
 
     ids.forEach(id => {
         const el = document.getElementById(id);
         if (el) {
-            el.style.display = 'inline-block';
+            el.style.display = id === 'thermal-scrub-row' ? 'flex' : 'inline-block';
             el.disabled = false;
             el.style.opacity = '1';
         }
@@ -1767,6 +1788,12 @@ function hidePlanActionButtons() {
     const ids = [
         'btn-export-pdf',
         'btn-animate',
+        'btn-play-thermal',
+        'btn-pause-thermal',
+        'btn-render-thermal',
+        'btn-reset-thermal',
+        'thermal-speed-select',
+        'thermal-scrub-row',
         'btn-save-plan-library'
     ];
 
@@ -1896,6 +1923,138 @@ function markSimulationStepPlaying(layerIndex, stepIndex, totalSteps) {
     }
 }
 
+
+function getThermalDurationFromUi() {
+    const select = document.getElementById('thermal-speed-select');
+    const v = select ? parseInt(select.value, 10) : 9000;
+    return Number.isFinite(v) && v > 0 ? v : 9000;
+}
+
+function syncThermalControlState(metrics = null) {
+    const runtime = typeof getVacuumQuenchThermalRuntime === 'function'
+        ? getVacuumQuenchThermalRuntime()
+        : { isPlaying: false, paused: false, progress: 0 };
+
+    const playBtn = document.getElementById('btn-play-thermal');
+    const pauseBtn = document.getElementById('btn-pause-thermal');
+    const range = document.getElementById('thermal-progress-range');
+    const value = document.getElementById('thermal-progress-value');
+
+    if (playBtn) {
+        playBtn.disabled = false;
+        playBtn.style.opacity = '1';
+        playBtn.textContent = runtime.isPlaying ? '重新播放' : (runtime.paused ? '继续播放' : '播放热场仿真');
+    }
+
+    if (pauseBtn) {
+        pauseBtn.disabled = !runtime.visible;
+        pauseBtn.style.opacity = runtime.visible ? '1' : '0.45';
+        pauseBtn.textContent = runtime.isPlaying ? '暂停' : '继续';
+    }
+
+    const progress = metrics?.progress != null
+        ? metrics.progress
+        : Math.round((runtime.progress || 0) * 100);
+
+    if (range && document.activeElement !== range) {
+        range.value = String(Math.max(0, Math.min(100, progress)));
+    }
+    if (value) value.textContent = `${Math.max(0, Math.min(100, progress))}%`;
+}
+
+function renderCurrentThermalSimulation(progress = 0.18, switchTab = true) {
+    const metrics = renderVacuumQuenchThermalSimulation(progress);
+    renderThermalSimulationPanel(metrics);
+    syncThermalControlState(metrics);
+    if (switchTab) activateRightPanelTab('thermal');
+    return metrics;
+}
+
+function playCurrentThermalSimulation() {
+    activateRightPanelTab('thermal');
+    const runtime = getVacuumQuenchThermalRuntime();
+    const startProgress = runtime.paused ? (runtime.progress || 0) : 0.03;
+
+    const metrics = playVacuumQuenchThermalSimulation({
+        durationMs: getThermalDurationFromUi(),
+        startProgress,
+        onUpdate: (nextMetrics) => {
+            renderThermalSimulationPanel(nextMetrics);
+            syncThermalControlState(nextMetrics);
+        },
+        onFinish: (finalMetrics) => {
+            renderThermalSimulationPanel(finalMetrics);
+            syncThermalControlState(finalMetrics);
+        }
+    });
+
+    if (!metrics) {
+        renderThermalSimulationPanel();
+    }
+    syncThermalControlState(metrics);
+}
+
+function pauseResumeCurrentThermalSimulation() {
+    activateRightPanelTab('thermal');
+    const runtime = getVacuumQuenchThermalRuntime();
+
+    if (runtime.isPlaying) {
+        const metrics = pauseVacuumQuenchThermalSimulation();
+        if (metrics) renderThermalSimulationPanel(metrics);
+        syncThermalControlState(metrics);
+        return;
+    }
+
+    const metrics = resumeVacuumQuenchThermalSimulation({
+        durationMs: getThermalDurationFromUi(),
+        onUpdate: (nextMetrics) => {
+            renderThermalSimulationPanel(nextMetrics);
+            syncThermalControlState(nextMetrics);
+        },
+        onFinish: (finalMetrics) => {
+            renderThermalSimulationPanel(finalMetrics);
+            syncThermalControlState(finalMetrics);
+        }
+    });
+
+    if (metrics) renderThermalSimulationPanel(metrics);
+    syncThermalControlState(metrics);
+}
+
+function resetCurrentThermalSimulation() {
+    stopVacuumQuenchThermalSimulation();
+    clearThermalSimulationLayer();
+    renderThermalSimulationPanel();
+    syncThermalControlState(null);
+}
+
+function scrubCurrentThermalSimulation(progressPercent) {
+    const p = Math.max(0, Math.min(100, progressPercent || 0)) / 100;
+    const metrics = setVacuumQuenchThermalProgress(p);
+    renderThermalSimulationPanel(metrics);
+    syncThermalControlState(metrics);
+    activateRightPanelTab('thermal');
+}
+
+function restartThermalWithCurrentSpeedIfPlaying() {
+    const runtime = getVacuumQuenchThermalRuntime();
+    if (!runtime.visible) return;
+    if (runtime.isPlaying) {
+        playVacuumQuenchThermalSimulation({
+            durationMs: getThermalDurationFromUi(),
+            startProgress: runtime.progress || 0,
+            onUpdate: (nextMetrics) => {
+                renderThermalSimulationPanel(nextMetrics);
+                syncThermalControlState(nextMetrics);
+            },
+            onFinish: (finalMetrics) => {
+                renderThermalSimulationPanel(finalMetrics);
+                syncThermalControlState(finalMetrics);
+            }
+        });
+    }
+}
+
 function clearSimulationPlayingState() {
     const panel = document.getElementById('loading-simulation-panel');
     if (!panel) return;
@@ -1907,6 +2066,7 @@ function clearSimulationPlayingState() {
 
 function playCurrentSimulation() {
     renderLoadingSimulationPanel();
+    renderThermalSimulationPanel();
     updateSimulationModeButtons();
     activateRightPanelTab('simulation');
 
@@ -2024,6 +2184,7 @@ function navigateFurnace(direction) {
     renderAISummaryBar(onCenterFurnaceClick);
     updateCurrentToolingHud();
     renderLoadingSimulationPanel();
+    renderThermalSimulationPanel();
     updateSimulationModeButtons();
 
     renderFurnaceThumbnails(
@@ -2054,6 +2215,7 @@ function handleThumbFurnaceClick(clickedIdx) {
     renderAISummaryBar(onCenterFurnaceClick);
     updateCurrentToolingHud();
     renderLoadingSimulationPanel();
+    renderThermalSimulationPanel();
     updateSimulationModeButtons();
 
     renderFurnaceThumbnails(
@@ -2092,6 +2254,7 @@ function onCenterFurnaceClick(idx) {
         handleThumbFurnaceClick
     );
     renderLoadingSimulationPanel();
+    renderThermalSimulationPanel();
     updateSimulationModeButtons();
 }
 
@@ -2283,6 +2446,18 @@ function init() {
     if (btnGeneratePlan) btnGeneratePlan.addEventListener("click", showGenerationOptions);
     const btnAnimate = document.getElementById("btn-animate");
     if (btnAnimate) btnAnimate.addEventListener("click", playCurrentSimulation);
+    const btnPlayThermal = document.getElementById("btn-play-thermal");
+    if (btnPlayThermal) btnPlayThermal.addEventListener("click", playCurrentThermalSimulation);
+    const btnPauseThermal = document.getElementById("btn-pause-thermal");
+    if (btnPauseThermal) btnPauseThermal.addEventListener("click", pauseResumeCurrentThermalSimulation);
+    const btnRenderThermal = document.getElementById("btn-render-thermal");
+    if (btnRenderThermal) btnRenderThermal.addEventListener("click", () => renderCurrentThermalSimulation(0.18, true));
+    const btnResetThermal = document.getElementById("btn-reset-thermal");
+    if (btnResetThermal) btnResetThermal.addEventListener("click", resetCurrentThermalSimulation);
+    const thermalSpeedSelect = document.getElementById('thermal-speed-select');
+    if (thermalSpeedSelect) thermalSpeedSelect.addEventListener('change', restartThermalWithCurrentSpeedIfPlaying);
+    const thermalProgressRange = document.getElementById('thermal-progress-range');
+    if (thermalProgressRange) thermalProgressRange.addEventListener('input', (event) => scrubCurrentThermalSimulation(parseInt(event.target.value, 10) || 0));
     const btnExportPdf = document.getElementById("btn-export-pdf");
     if (btnExportPdf) btnExportPdf.addEventListener("click", showPdfSelectModal);
     // JSON 导出并入 PDF 导出弹窗，顶部不再单独提供入口
@@ -2417,6 +2592,7 @@ function init() {
             setGlobalUnpackedItems([]);
             setCurrentFurnaceIndex(0);
             clearFurnaceGroups();
+    clearThermalSimulationLayer();
             hidePlanActionButtons();
             document.getElementById("furnace-nav").style.display = "none";
             document.getElementById("empty-state").style.display = "block";
@@ -2691,6 +2867,10 @@ function initRightPanelTabs() {
                 }
                 refreshPlanLibraryWorkbench();
             }
+
+            if (tab === 'thermal') {
+                renderThermalSimulationPanel();
+            }
         });
     });
 }
@@ -2830,6 +3010,7 @@ function clearAllMaterials() {
     setGlobalFurnacesResult(null);
     setGlobalUnpackedItems([]);
     clearFurnaceGroups();
+    clearThermalSimulationLayer();
 
     // 4. 清空 3D 场景
     if (itemsGroup) {
@@ -2895,6 +3076,7 @@ function clearAllFurnaces() {
     setGlobalFurnacesResult(null);
     setGlobalUnpackedItems([]);
     clearFurnaceGroups();
+    clearThermalSimulationLayer();
 
     // 5. 清空 3D 场景所有内容
     if (itemsGroup) {
@@ -3041,7 +3223,7 @@ init();
     const dockRotate90 = document.getElementById('dock-rotate-90');
     const dockExplode = document.getElementById('dock-explode');
     // const dockGravity = document.getElementById('dock-gravity');
-    // const dockThermal = document.getElementById('dock-thermal');
+    const dockThermal = document.getElementById('dock-thermal');
 
     if (dockTopView) {
         dockTopView.addEventListener('click', () => {
@@ -3075,6 +3257,13 @@ init();
 
         // 复用第一步的完整场景适配逻辑
         setTightFitCamera(dir, 0.18);
+    }
+
+    if (dockThermal) {
+        dockThermal.addEventListener('click', () => {
+            renderCurrentThermalSimulation(0.18, true);
+            dockThermal.classList.add('active');
+        });
     }
 
     if (dockRotate90) {
@@ -3155,7 +3344,8 @@ init();
             dockTopView,
             dockFrontView,
             dockSideView,
-            dockRotate90
+            dockRotate90,
+            dockThermal
         ].forEach(btn => {
             if (btn) btn.classList.remove('active');
         });

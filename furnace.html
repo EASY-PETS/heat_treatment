@@ -10,6 +10,186 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+
+    <style id="thermal-simulation-inline-styles">
+        .thermal-simulation-panel {
+            padding: 12px;
+            color: #1f2937;
+            font-size: 12px;
+        }
+        .thermal-sim-empty {
+            padding: 18px 14px;
+            border-radius: 14px;
+            background: rgba(15, 23, 42, 0.04);
+            color: #64748b;
+            line-height: 1.7;
+        }
+        .thermal-header-card, .thermal-stage-card, .thermal-risk-card {
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.92);
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+            padding: 12px;
+            margin-bottom: 10px;
+        }
+        .thermal-title {
+            font-weight: 800;
+            font-size: 14px;
+            color: #0f172a;
+            margin-bottom: 4px;
+        }
+        .thermal-subtitle {
+            color: #64748b;
+            line-height: 1.55;
+        }
+        .thermal-metric-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .thermal-metric {
+            border-radius: 12px;
+            background: rgba(248, 250, 252, 0.92);
+            padding: 9px;
+        }
+        .thermal-metric span {
+            display: block;
+            color: #64748b;
+            font-size: 10px;
+            margin-bottom: 3px;
+        }
+        .thermal-metric strong {
+            color: #0f172a;
+            font-size: 13px;
+        }
+        .thermal-stage-title {
+            font-weight: 700;
+            color: #0f172a;
+            margin-bottom: 8px;
+        }
+        .thermal-stage-list {
+            display: grid;
+            gap: 7px;
+        }
+        .thermal-stage {
+            display: grid;
+            grid-template-columns: 52px 1fr auto;
+            align-items: center;
+            gap: 8px;
+            border-radius: 10px;
+            background: rgba(248, 250, 252, 0.9);
+            padding: 8px;
+        }
+        .thermal-stage.active {
+            background: rgba(249, 115, 22, 0.12);
+        }
+        .thermal-stage-progress {
+            color: #f97316;
+            font-weight: 800;
+        }
+        .thermal-stage-name {
+            font-weight: 700;
+            color: #334155;
+        }
+        .thermal-stage-desc {
+            color: #64748b;
+            font-size: 10px;
+            margin-top: 2px;
+        }
+        .thermal-risk-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 7px 0;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+        }
+        .thermal-risk-row:last-child { border-bottom: none; }
+        .thermal-risk-row span { color: #64748b; }
+        .thermal-risk-row strong { color: #0f172a; }
+        .thermal-legend {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 10px;
+            color: #64748b;
+            font-size: 10px;
+        }
+        .thermal-gradient {
+            flex: 1;
+            height: 8px;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #2563eb, #22d3ee, #facc15, #f97316, #dc2626);
+        }
+        .thermal-mini-note {
+            margin-top: 8px;
+            color: #94a3b8;
+            font-size: 10px;
+            line-height: 1.5;
+        }
+        #right-tab-thermal.active {
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            height: 100%;
+        }
+        .thermal-action-bar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 10px 6px;
+            flex: 0 0 auto;
+        }
+        .thermal-action-bar .plan-action-btn {
+            padding: 6px 9px;
+            font-size: 11px;
+            white-space: nowrap;
+        }
+        .thermal-speed-select {
+            height: 30px;
+            border: 1px solid rgba(59, 130, 246, 0.25);
+            border-radius: 10px;
+            background: rgba(248, 250, 252, 0.96);
+            color: #334155;
+            font-size: 11px;
+            padding: 0 8px;
+            outline: none;
+        }
+        .thermal-scrub-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 0 12px 8px;
+            color: #64748b;
+            font-size: 10px;
+            flex: 0 0 auto;
+        }
+        .thermal-scrub-row input[type=range] {
+            flex: 1;
+            accent-color: #f97316;
+        }
+        .thermal-scrub-value {
+            width: 38px;
+            text-align: right;
+            font-weight: 700;
+            color: #f97316;
+        }
+        .thermal-simulation-panel {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-y: auto;
+            padding-bottom: 22px;
+            scrollbar-width: thin;
+        }
+        .thermal-simulation-panel::-webkit-scrollbar { width: 6px; }
+        .thermal-simulation-panel::-webkit-scrollbar-thumb {
+            background: rgba(148, 163, 184, 0.45);
+            border-radius: 999px;
+        }
+        .thermal-header-card.compact .thermal-subtitle {
+            font-size: 11px;
+        }
+    </style>
     <script type="importmap">
       {
         "imports": {
@@ -309,6 +489,7 @@
                 <button class="right-tab-btn active" data-tab="library">方案库</button>
                 <button class="right-tab-btn" data-tab="analysis">方案分析</button>
                 <button class="right-tab-btn" data-tab="simulation">装炉仿真</button>
+                <button class="right-tab-btn" data-tab="thermal">热场仿真</button>
             </div>
 
             <div class="right-tab-pane active" id="right-tab-library">
@@ -378,6 +559,31 @@
                 <div id="loading-simulation-panel" class="loading-simulation-panel">
                     <div class="simulation-empty">
                         生成方案后显示装炉步骤仿真
+                    </div>
+                </div>
+            </div>
+
+            <div class="right-tab-pane" id="right-tab-thermal">
+                <div class="plan-action-bar thermal-action-bar">
+                    <button class="btn plan-action-btn primary" id="btn-play-thermal" style="display:none;">播放热场仿真</button>
+                    <button class="btn plan-action-btn" id="btn-pause-thermal" style="display:none;">暂停</button>
+                    <button class="btn plan-action-btn" id="btn-render-thermal" style="display:none;">显示热场</button>
+                    <button class="btn plan-action-btn" id="btn-reset-thermal" style="display:none;">停止查看</button>
+                    <select class="thermal-speed-select" id="thermal-speed-select" style="display:none;" title="热场动画速度">
+                        <option value="16000">慢速</option>
+                        <option value="9000" selected>正常</option>
+                        <option value="4500">快速</option>
+                        <option value="2200">极速</option>
+                    </select>
+                </div>
+                <div class="thermal-scrub-row" id="thermal-scrub-row" style="display:none;">
+                    <span>进度</span>
+                    <input type="range" id="thermal-progress-range" min="0" max="100" value="0" step="1">
+                    <span class="thermal-scrub-value" id="thermal-progress-value">0%</span>
+                </div>
+                <div id="thermal-simulation-panel" class="thermal-simulation-panel">
+                    <div class="thermal-sim-empty">
+                        生成方案后显示真空淬火热场仿真
                     </div>
                 </div>
             </div>
