@@ -124,6 +124,8 @@ import {
     resumeVacuumQuenchThermalSimulation,
     setVacuumQuenchThermalProgress,
     getVacuumQuenchThermalRuntime,
+    renderRadiationExposureSimulation,
+    getRadiationExposureRuntime,
     clearThermalSimulationLayer,
     showAILoadingLoading, hideAILoadingLoading
 } from './three-scene.js';
@@ -153,6 +155,7 @@ import {
 let candidatePlans = [];
 let currentCandidatePlanIndex = 0;
 let simulationViewMode = 'cumulative';
+let processSimulationMode = 'thermal';
 
 
 let currentWorkspaceIdentity = {
@@ -341,7 +344,7 @@ function applyCandidatePlan(index) {
     renderPlanAnalysisPanel(plan.analysis);
     renderCandidatePlanCards(candidatePlans, index, applyCandidatePlan);
     renderLoadingSimulationPanel();
-    renderThermalSimulationPanel();
+    renderThermalSimulationPanel(null, processSimulationMode);
     updateSimulationModeButtons();
     activateRightPanelTab('analysis');
 
@@ -499,7 +502,7 @@ function executeAndRender() {
     renderPlanAnalysisPanel(analysis);
     renderCandidatePlanCards(candidatePlans, currentCandidatePlanIndex, applyCandidatePlan);
     renderLoadingSimulationPanel();
-    renderThermalSimulationPanel();
+    renderThermalSimulationPanel(null, processSimulationMode);
     updateSimulationModeButtons();
     activateRightPanelTab('analysis');
 
@@ -717,7 +720,7 @@ export function clearFurnaceResults() {
     renderAISummaryBar(null);
     updateCurrentToolingHud();
     renderLoadingSimulationPanel();
-    renderThermalSimulationPanel();
+    renderThermalSimulationPanel(null, processSimulationMode);
     updateSimulationModeButtons();
     showCapacityFeedback('success', '筛选条件已变更，请重新生成方案');
     updateWorkbenchUiMode();
@@ -1765,6 +1768,9 @@ function showPlanActionButtons() {
     const ids = [
         'btn-export-pdf',
         'btn-animate',
+        'thermal-mode-row',
+        'btn-mode-thermal',
+        'btn-mode-radiation',
         'btn-play-thermal',
         'btn-pause-thermal',
         'btn-render-thermal',
@@ -1777,7 +1783,7 @@ function showPlanActionButtons() {
     ids.forEach(id => {
         const el = document.getElementById(id);
         if (el) {
-            el.style.display = id === 'thermal-scrub-row' ? 'flex' : 'inline-block';
+            el.style.display = (id === 'thermal-scrub-row' || id === 'thermal-mode-row') ? 'flex' : 'inline-block';
             el.disabled = false;
             el.style.opacity = '1';
         }
@@ -1788,6 +1794,9 @@ function hidePlanActionButtons() {
     const ids = [
         'btn-export-pdf',
         'btn-animate',
+        'thermal-mode-row',
+        'btn-mode-thermal',
+        'btn-mode-radiation',
         'btn-play-thermal',
         'btn-pause-thermal',
         'btn-render-thermal',
@@ -1924,32 +1933,46 @@ function markSimulationStepPlaying(layerIndex, stepIndex, totalSteps) {
 }
 
 
+
 function getThermalDurationFromUi() {
     const select = document.getElementById('thermal-speed-select');
     const v = select ? parseInt(select.value, 10) : 9000;
     return Number.isFinite(v) && v > 0 ? v : 9000;
 }
 
+function updateProcessSimulationModeButtons() {
+    document.querySelectorAll('.process-sim-mode-btn').forEach(btn => {
+        const mode = btn.getAttribute('data-process-sim-mode');
+        btn.classList.toggle('active', mode === processSimulationMode);
+    });
+}
+
 function syncThermalControlState(metrics = null) {
     const runtime = typeof getVacuumQuenchThermalRuntime === 'function'
         ? getVacuumQuenchThermalRuntime()
-        : { isPlaying: false, paused: false, progress: 0 };
+        : { isPlaying: false, paused: false, progress: 0, activeMode: processSimulationMode };
 
     const playBtn = document.getElementById('btn-play-thermal');
     const pauseBtn = document.getElementById('btn-pause-thermal');
+    const renderBtn = document.getElementById('btn-render-thermal');
     const range = document.getElementById('thermal-progress-range');
     const value = document.getElementById('thermal-progress-value');
 
     if (playBtn) {
-        playBtn.disabled = false;
-        playBtn.style.opacity = '1';
-        playBtn.textContent = runtime.isPlaying ? '重新播放' : (runtime.paused ? '继续播放' : '播放热场仿真');
+        playBtn.disabled = processSimulationMode !== 'thermal';
+        playBtn.style.opacity = processSimulationMode === 'thermal' ? '1' : '0.42';
+        playBtn.textContent = runtime.isPlaying ? '重新播放' : (runtime.paused ? '继续播放' : '播放升温热场');
     }
 
     if (pauseBtn) {
-        pauseBtn.disabled = !runtime.visible;
-        pauseBtn.style.opacity = runtime.visible ? '1' : '0.45';
+        const canPause = processSimulationMode === 'thermal' && runtime.visible;
+        pauseBtn.disabled = !canPause;
+        pauseBtn.style.opacity = canPause ? '1' : '0.42';
         pauseBtn.textContent = runtime.isPlaying ? '暂停' : '继续';
+    }
+
+    if (renderBtn) {
+        renderBtn.textContent = processSimulationMode === 'radiation' ? '显示辐射暴露' : '显示升温热场';
     }
 
     const progress = metrics?.progress != null
@@ -1957,50 +1980,82 @@ function syncThermalControlState(metrics = null) {
         : Math.round((runtime.progress || 0) * 100);
 
     if (range && document.activeElement !== range) {
+        range.disabled = processSimulationMode !== 'thermal';
         range.value = String(Math.max(0, Math.min(100, progress)));
     }
-    if (value) value.textContent = `${Math.max(0, Math.min(100, progress))}%`;
+    if (value) value.textContent = processSimulationMode === 'radiation' ? '—' : `${Math.max(0, Math.min(100, progress))}%`;
+    updateProcessSimulationModeButtons();
 }
 
 function renderCurrentThermalSimulation(progress = 0.18, switchTab = true) {
+    processSimulationMode = 'thermal';
     const metrics = renderVacuumQuenchThermalSimulation(progress);
-    renderThermalSimulationPanel(metrics);
+    renderThermalSimulationPanel(metrics, 'thermal');
     syncThermalControlState(metrics);
     if (switchTab) activateRightPanelTab('thermal');
     return metrics;
 }
 
+function renderCurrentRadiationSimulation(switchTab = true) {
+    processSimulationMode = 'radiation';
+    stopVacuumQuenchThermalSimulation();
+    const metrics = renderRadiationExposureSimulation();
+    renderThermalSimulationPanel(metrics, 'radiation');
+    syncThermalControlState(metrics);
+    if (switchTab) activateRightPanelTab('thermal');
+    return metrics;
+}
+
+function renderCurrentProcessSimulation() {
+    if (processSimulationMode === 'radiation') {
+        return renderCurrentRadiationSimulation(true);
+    }
+    const runtime = getVacuumQuenchThermalRuntime();
+    const p = runtime?.activeMode === 'thermal' ? (runtime.progress || 0.18) : 0.18;
+    return renderCurrentThermalSimulation(p, true);
+}
+
+function switchProcessSimulationMode(mode) {
+    processSimulationMode = mode === 'radiation' ? 'radiation' : 'thermal';
+    if (processSimulationMode === 'radiation') {
+        renderCurrentRadiationSimulation(true);
+    } else {
+        const runtime = getVacuumQuenchThermalRuntime();
+        renderCurrentThermalSimulation(runtime?.progress || 0.18, true);
+    }
+}
+
 function playCurrentThermalSimulation() {
+    processSimulationMode = 'thermal';
     activateRightPanelTab('thermal');
     const runtime = getVacuumQuenchThermalRuntime();
-    const startProgress = runtime.paused ? (runtime.progress || 0) : 0.03;
+    const startProgress = runtime.paused && runtime.activeMode === 'thermal' ? (runtime.progress || 0) : 0.03;
 
     const metrics = playVacuumQuenchThermalSimulation({
         durationMs: getThermalDurationFromUi(),
         startProgress,
         onUpdate: (nextMetrics) => {
-            renderThermalSimulationPanel(nextMetrics);
+            renderThermalSimulationPanel(nextMetrics, 'thermal');
             syncThermalControlState(nextMetrics);
         },
         onFinish: (finalMetrics) => {
-            renderThermalSimulationPanel(finalMetrics);
+            renderThermalSimulationPanel(finalMetrics, 'thermal');
             syncThermalControlState(finalMetrics);
         }
     });
 
-    if (!metrics) {
-        renderThermalSimulationPanel();
-    }
+    if (!metrics) renderThermalSimulationPanel(null, 'thermal');
     syncThermalControlState(metrics);
 }
 
 function pauseResumeCurrentThermalSimulation() {
+    processSimulationMode = 'thermal';
     activateRightPanelTab('thermal');
     const runtime = getVacuumQuenchThermalRuntime();
 
     if (runtime.isPlaying) {
         const metrics = pauseVacuumQuenchThermalSimulation();
-        if (metrics) renderThermalSimulationPanel(metrics);
+        if (metrics) renderThermalSimulationPanel(metrics, 'thermal');
         syncThermalControlState(metrics);
         return;
     }
@@ -2008,47 +2063,48 @@ function pauseResumeCurrentThermalSimulation() {
     const metrics = resumeVacuumQuenchThermalSimulation({
         durationMs: getThermalDurationFromUi(),
         onUpdate: (nextMetrics) => {
-            renderThermalSimulationPanel(nextMetrics);
+            renderThermalSimulationPanel(nextMetrics, 'thermal');
             syncThermalControlState(nextMetrics);
         },
         onFinish: (finalMetrics) => {
-            renderThermalSimulationPanel(finalMetrics);
+            renderThermalSimulationPanel(finalMetrics, 'thermal');
             syncThermalControlState(finalMetrics);
         }
     });
 
-    if (metrics) renderThermalSimulationPanel(metrics);
+    if (metrics) renderThermalSimulationPanel(metrics, 'thermal');
     syncThermalControlState(metrics);
 }
 
 function resetCurrentThermalSimulation() {
     stopVacuumQuenchThermalSimulation();
     clearThermalSimulationLayer();
-    renderThermalSimulationPanel();
+    renderThermalSimulationPanel(null, processSimulationMode);
     syncThermalControlState(null);
 }
 
 function scrubCurrentThermalSimulation(progressPercent) {
+    processSimulationMode = 'thermal';
     const p = Math.max(0, Math.min(100, progressPercent || 0)) / 100;
     const metrics = setVacuumQuenchThermalProgress(p);
-    renderThermalSimulationPanel(metrics);
+    renderThermalSimulationPanel(metrics, 'thermal');
     syncThermalControlState(metrics);
     activateRightPanelTab('thermal');
 }
 
 function restartThermalWithCurrentSpeedIfPlaying() {
     const runtime = getVacuumQuenchThermalRuntime();
-    if (!runtime.visible) return;
+    if (!runtime.visible || runtime.activeMode !== 'thermal') return;
     if (runtime.isPlaying) {
         playVacuumQuenchThermalSimulation({
             durationMs: getThermalDurationFromUi(),
             startProgress: runtime.progress || 0,
             onUpdate: (nextMetrics) => {
-                renderThermalSimulationPanel(nextMetrics);
+                renderThermalSimulationPanel(nextMetrics, 'thermal');
                 syncThermalControlState(nextMetrics);
             },
             onFinish: (finalMetrics) => {
-                renderThermalSimulationPanel(finalMetrics);
+                renderThermalSimulationPanel(finalMetrics, 'thermal');
                 syncThermalControlState(finalMetrics);
             }
         });
@@ -2066,7 +2122,7 @@ function clearSimulationPlayingState() {
 
 function playCurrentSimulation() {
     renderLoadingSimulationPanel();
-    renderThermalSimulationPanel();
+    renderThermalSimulationPanel(null, processSimulationMode);
     updateSimulationModeButtons();
     activateRightPanelTab('simulation');
 
@@ -2184,7 +2240,7 @@ function navigateFurnace(direction) {
     renderAISummaryBar(onCenterFurnaceClick);
     updateCurrentToolingHud();
     renderLoadingSimulationPanel();
-    renderThermalSimulationPanel();
+    renderThermalSimulationPanel(null, processSimulationMode);
     updateSimulationModeButtons();
 
     renderFurnaceThumbnails(
@@ -2215,7 +2271,7 @@ function handleThumbFurnaceClick(clickedIdx) {
     renderAISummaryBar(onCenterFurnaceClick);
     updateCurrentToolingHud();
     renderLoadingSimulationPanel();
-    renderThermalSimulationPanel();
+    renderThermalSimulationPanel(null, processSimulationMode);
     updateSimulationModeButtons();
 
     renderFurnaceThumbnails(
@@ -2254,7 +2310,7 @@ function onCenterFurnaceClick(idx) {
         handleThumbFurnaceClick
     );
     renderLoadingSimulationPanel();
-    renderThermalSimulationPanel();
+    renderThermalSimulationPanel(null, processSimulationMode);
     updateSimulationModeButtons();
 }
 
@@ -2451,7 +2507,11 @@ function init() {
     const btnPauseThermal = document.getElementById("btn-pause-thermal");
     if (btnPauseThermal) btnPauseThermal.addEventListener("click", pauseResumeCurrentThermalSimulation);
     const btnRenderThermal = document.getElementById("btn-render-thermal");
-    if (btnRenderThermal) btnRenderThermal.addEventListener("click", () => renderCurrentThermalSimulation(0.18, true));
+    if (btnRenderThermal) btnRenderThermal.addEventListener("click", renderCurrentProcessSimulation);
+    const btnModeThermal = document.getElementById('btn-mode-thermal');
+    if (btnModeThermal) btnModeThermal.addEventListener('click', () => switchProcessSimulationMode('thermal'));
+    const btnModeRadiation = document.getElementById('btn-mode-radiation');
+    if (btnModeRadiation) btnModeRadiation.addEventListener('click', () => switchProcessSimulationMode('radiation'));
     const btnResetThermal = document.getElementById("btn-reset-thermal");
     if (btnResetThermal) btnResetThermal.addEventListener("click", resetCurrentThermalSimulation);
     const thermalSpeedSelect = document.getElementById('thermal-speed-select');
@@ -2869,7 +2929,7 @@ function initRightPanelTabs() {
             }
 
             if (tab === 'thermal') {
-                renderThermalSimulationPanel();
+                renderThermalSimulationPanel(null, processSimulationMode);
             }
         });
     });
@@ -3246,9 +3306,34 @@ init();
 
         dir.normalize();
 
-        // 如果当前是纯俯视，绕Y轴旋转视觉变化不明显，所以回到水平视角再旋转
-        if (Math.abs(dir.y) > 0.92) {
-            dir.set(0, 0, 1);
+        function rotateCurrentView90() {
+            if (!camera || !controls) {
+                setTightFitCamera(new THREE.Vector3(1, 0, 0));
+                return;
+            }
+
+            const offset = camera.position.clone().sub(controls.target);
+
+            if (offset.lengthSq() < 0.0001) {
+                setTightFitCamera(new THREE.Vector3(1, 0, 0));
+                return;
+            }
+
+            const dir = offset.clone().normalize();
+
+            // 当前是俯视 / 接近俯视：不改变相机俯视方向，只旋转画面 up 方向
+            if (Math.abs(dir.y) > 0.92) {
+                camera.up.applyAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2);
+                camera.lookAt(controls.target);
+                controls.update();
+                return;
+            }
+
+            // 普通斜视 / 正视 / 侧视：绕世界 Y 轴旋转观察方向
+            dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2);
+            dir.normalize();
+
+            setTightFitCamera(dir, 0.18);
         }
 
         // 绕世界Y轴旋转90度

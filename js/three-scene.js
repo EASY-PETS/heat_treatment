@@ -99,12 +99,14 @@ function applyMetallicMaterial(obj) {
 }
 
 
-// ==================== VACUUM QUENCH THERMAL FIELD SIMULATION ====================
-// 一期近似仿真：用于解释装炉方案，不做真实 CFD / FEA 求解。
-// 设计原则：所有热场对象都进入独立 thermalSimulationGroup，不污染工装/工件/爆炸图结构。
+
+// ==================== VACUUM QUENCH PROCESS SIMULATION ====================
+// 解释型近似仿真：升温热场 + 辐射暴露，不做真实 CFD / FEA / 光线追踪。
+// 所有对象都进入独立 thermalSimulationGroup，不污染工装/工件/爆炸图结构。
 let thermalSimulationGroup = null;
 let thermalSimRuntime = {
     visible: false,
+    activeMode: null, // thermal | radiation
     isPlaying: false,
     paused: false,
     progress: 0,
@@ -113,15 +115,28 @@ let thermalSimRuntime = {
     pointCloud: null,
     rayGroup: null,
     riskGroup: null,
+    sourceGroup: null,
     metrics: null,
+    radiationScores: null,
     onUpdate: null,
     onFinish: null
 };
 
 let thermalSceneThemeActive = false;
 let thermalSavedSceneBackground = null;
-
 let thermalSavedGridState = null;
+
+const THERMAL_BASE_Y = -120;
+const VACUUM_QUENCH_PROFILE = {
+    processName: '真空淬火',
+    startTemp: 120,
+    targetTemp: 1040,
+    quenchTemp: 80
+};
+
+function clamp01(v) {
+    return Math.max(0, Math.min(1, v));
+}
 
 function setThermalGridTheme(active) {
     if (!mainSceneGridHelper || !mainSceneGridHelper.material) return;
@@ -139,7 +154,6 @@ function setThermalGridTheme(active) {
         }));
 
         mainSceneGridHelper.visible = true;
-
         materials.forEach(mat => {
             mat.transparent = true;
             mat.opacity = 0.10;
@@ -152,13 +166,11 @@ function setThermalGridTheme(active) {
         materials.forEach((mat, idx) => {
             const saved = thermalSavedGridState[idx];
             if (!saved) return;
-
             mat.transparent = saved.transparent;
             mat.opacity = saved.opacity;
             if (mat.color && saved.color != null) mat.color.setHex(saved.color);
             mat.needsUpdate = true;
         });
-
         mainSceneGridHelper.visible = thermalSavedGridState[0]?.visible ?? displaySettings.showGrid;
         thermalSavedGridState = null;
     }
@@ -166,7 +178,6 @@ function setThermalGridTheme(active) {
 
 function setThermalSceneTheme(active) {
     if (!scene) return;
-
     if (active && !thermalSceneThemeActive) {
         thermalSavedSceneBackground = scene.background ? scene.background.clone() : null;
         scene.background = new THREE.Color(0x030712);
@@ -180,29 +191,15 @@ function setThermalSceneTheme(active) {
     }
 }
 
-const THERMAL_BASE_Y = -120;
-const VACUUM_QUENCH_PROFILE = {
-    processName: '真空淬火',
-    startTemp: 120,
-    targetTemp: 1040,
-    quenchTemp: 80
-};
-
-function clamp01(v) {
-    return Math.max(0, Math.min(1, v));
-}
-
 function ensureThermalSimulationGroup() {
     if (!thermalSimulationGroup) {
         thermalSimulationGroup = new THREE.Group();
         thermalSimulationGroup.name = 'thermalSimulationGroup';
         thermalSimulationGroup.visible = true;
     }
-
     if (scene && thermalSimulationGroup.parent !== scene) {
         scene.add(thermalSimulationGroup);
     }
-
     return thermalSimulationGroup;
 }
 
@@ -220,29 +217,34 @@ function disposeObject3D(obj) {
     });
 }
 
-export function clearThermalSimulationLayer() {
+function clearThermalGroupChildren() {
     const group = ensureThermalSimulationGroup();
     while (group.children.length > 0) {
         const child = group.children[0];
         group.remove(child);
         disposeObject3D(child);
     }
+    thermalSimRuntime.pointCloud = null;
+    thermalSimRuntime.rayGroup = null;
+    thermalSimRuntime.riskGroup = null;
+    thermalSimRuntime.sourceGroup = null;
+}
 
+export function clearThermalSimulationLayer() {
+    clearThermalGroupChildren();
     restoreThermalItemMaterials();
     setThermalSceneTheme(false);
 
     thermalSimRuntime.visible = false;
+    thermalSimRuntime.activeMode = null;
     thermalSimRuntime.isPlaying = false;
     thermalSimRuntime.paused = false;
     thermalSimRuntime.progress = 0;
-    thermalSimRuntime.pointCloud = null;
-    thermalSimRuntime.rayGroup = null;
-    thermalSimRuntime.riskGroup = null;
     thermalSimRuntime.metrics = null;
+    thermalSimRuntime.radiationScores = null;
     thermalSimRuntime.onUpdate = null;
     thermalSimRuntime.onFinish = null;
 }
-
 
 function getMeshMaterials(mesh) {
     if (!mesh || !mesh.material) return [];
@@ -282,37 +284,6 @@ function saveOriginalMaterialIfNeeded(mat) {
     };
 }
 
-function applyThermalTintToItems(furnace, progress) {
-    const group = furnaceGroups.get(currentFurnaceIndex);
-    if (!group || !furnace) return;
-    const itemMap = new Map((furnace.packedItems || []).map(item => [item.id, item]));
-    const p = clamp01(progress);
-
-    group.traverse(child => {
-        if (!child.isMesh || !child.userData || !child.userData.itemId) return;
-        const item = itemMap.get(child.userData.itemId);
-        const risk = item ? estimateItemThermalRisk(item, furnace) : 0.25;
-        const surfaceCatchUp = p * (0.18 + Math.max(0, 0.55 - risk) * 0.18);
-        const itemRatio = clamp01(p - risk * (0.32 - p * 0.16) + surfaceCatchUp);
-        const tint = colorFromTemperatureRatio(itemRatio);
-        const emissiveStrength = 0.10 + itemRatio * 0.38;
-
-        getMeshMaterials(child).forEach(mat => {
-            if (!mat.color) return;
-            saveOriginalMaterialIfNeeded(mat);
-            mat.color.copy(tint);
-            if (mat.emissive) {
-                mat.emissive.copy(tint);
-                mat.emissive.multiplyScalar(0.45);
-                mat.emissiveIntensity = emissiveStrength;
-            }
-            mat.transparent = true;
-            mat.opacity = 0.72 + itemRatio * 0.24;
-            mat.needsUpdate = true;
-        });
-    });
-}
-
 function getCurrentThermalFurnace() {
     if (!globalFurnacesResult || globalFurnacesResult.length === 0) return null;
     const idx = Math.max(0, Math.min(currentFurnaceIndex || 0, globalFurnacesResult.length - 1));
@@ -330,6 +301,11 @@ function getItemWorldBox(item, furnace) {
         minZ: (item.z || 0) - fd / 2,
         maxZ: (item.z || 0) - fd / 2 + (item.d || 0)
     };
+}
+
+function getItemCenterWorld(item, furnace) {
+    const b = getItemWorldBox(item, furnace);
+    return new THREE.Vector3((b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2, (b.minZ + b.maxZ) / 2);
 }
 
 function estimateShadowAndCoreLag(x, y, z, furnace) {
@@ -355,7 +331,6 @@ function estimateShadowAndCoreLag(x, y, z, furnace) {
 
         if (influence > 0) {
             nearMaterial = Math.max(nearMaterial, influence);
-            // 真空升温以辐射为主：大件附近和中心背面升温慢，用 shadow 表示遮挡/热容量滞后。
             const massFactor = Math.min(1, Math.cbrt(Math.max((item.w || 1) * (item.h || 1) * (item.d || 1), 1)) / 420);
             shadow += influence * (0.22 + massFactor * 0.28);
         }
@@ -374,7 +349,6 @@ function estimateShadowAndCoreLag(x, y, z, furnace) {
 
 function temperatureRatioFromMeta(meta, progress) {
     const p = clamp01(progress);
-    // 真空淬火升温段：炉壁辐射先热、中心大件附近滞后，后半段逐渐均热。
     const soakCompensation = Math.max(0, (p - 0.72) / 0.28) * (meta.coreLag * 0.24 + meta.shadow * 0.18);
     const radiationGain = meta.wallFactor * (0.24 + p * 0.14) + meta.heightFactor * 0.05;
     const lag = meta.shadow * (0.30 - p * 0.18) + meta.coreLag * (0.18 - p * 0.10);
@@ -389,19 +363,24 @@ function colorFromTemperatureRatio(ratio) {
     const red = new THREE.Color(0xdc2626);
     const whiteHot = new THREE.Color(0xfff7ed);
     const c = new THREE.Color();
+    if (ratio < 0.25) c.lerpColors(cold, cyan, ratio / 0.25);
+    else if (ratio < 0.55) c.lerpColors(cyan, yellow, (ratio - 0.25) / 0.30);
+    else if (ratio < 0.78) c.lerpColors(yellow, orange, (ratio - 0.55) / 0.23);
+    else if (ratio < 0.94) c.lerpColors(orange, red, (ratio - 0.78) / 0.16);
+    else c.lerpColors(red, whiteHot, (ratio - 0.94) / 0.06);
+    return c;
+}
 
-    if (ratio < 0.25) {
-        c.lerpColors(cold, cyan, ratio / 0.25);
-    } else if (ratio < 0.55) {
-        c.lerpColors(cyan, yellow, (ratio - 0.25) / 0.30);
-    } else if (ratio < 0.78) {
-        c.lerpColors(yellow, orange, (ratio - 0.55) / 0.23);
-    } else if (ratio < 0.94) {
-        c.lerpColors(orange, red, (ratio - 0.78) / 0.16);
-    } else {
-        c.lerpColors(red, whiteHot, (ratio - 0.94) / 0.06);
-    }
-
+function getRadiationScoreColor(score) {
+    const low = new THREE.Color(0x475569);
+    const bad = new THREE.Color(0xb91c1c);
+    const mid = new THREE.Color(0xf97316);
+    const good = new THREE.Color(0xfacc15);
+    const c = new THREE.Color();
+    const s = clamp01(score);
+    if (s < 0.34) c.lerpColors(low, bad, s / 0.34);
+    else if (s < 0.72) c.lerpColors(bad, mid, (s - 0.34) / 0.38);
+    else c.lerpColors(mid, good, (s - 0.72) / 0.28);
     return c;
 }
 
@@ -409,21 +388,9 @@ function getRingThermalRadii(furnace) {
     const params = furnace.params || {};
     const fw = Number(furnace.w || 0);
     const fd = Number(furnace.d || 0);
-
-    const outerRadius =
-        Number(params.outerRadius) ||
-        Number(params.radialRadius) ||
-        Math.min(fw, fd) / 2;
-
-    const innerRadius =
-        Number(params.centerVoidRadius) ||
-        Number(params.innerRadius) ||
-        (params.innerDia ? Number(params.innerDia) / 2 : 0);
-
-    return {
-        outerRadius: Math.max(outerRadius, 1),
-        innerRadius: Math.max(innerRadius, 0)
-    };
+    const outerRadius = Number(params.outerRadius) || Number(params.radialRadius) || Math.min(fw, fd) / 2;
+    const innerRadius = Number(params.centerVoidRadius) || Number(params.innerRadius) || (params.innerDia ? Number(params.innerDia) / 2 : 0);
+    return { outerRadius: Math.max(outerRadius, 1), innerRadius: Math.max(innerRadius, 0) };
 }
 
 function isPointInsideThermalVolume(furnace, x, y, z) {
@@ -431,26 +398,16 @@ function isPointInsideThermalVolume(furnace, x, y, z) {
     const fh = Number(furnace.h || 0);
     const fd = Number(furnace.d || 0);
     const localY = y - THERMAL_BASE_Y;
-
     if (localY < 0 || localY > fh) return false;
-
-    // 普通工装：仍然使用长方体热场
     if (furnace.toolingType !== 'ring-tooling') {
-        return (
-            x >= -fw / 2 && x <= fw / 2 &&
-            z >= -fd / 2 && z <= fd / 2
-        );
+        return x >= -fw / 2 && x <= fw / 2 && z >= -fd / 2 && z <= fd / 2;
     }
-
-    // 环形工装：使用圆柱 / 环形柱体热场
     const { outerRadius, innerRadius } = getRingThermalRadii(furnace);
     const r = Math.sqrt(x * x + z * z);
-
     return r <= outerRadius && r >= innerRadius;
 }
 
 function getThermalShapeFactors(furnace, x, y, z, xNorm, yNorm, zNorm) {
-    // 普通工装：沿用原来的长方体边界逻辑
     if (furnace.toolingType !== 'ring-tooling') {
         const distWall = Math.min(xNorm, 1 - xNorm, yNorm, 1 - yNorm, zNorm, 1 - zNorm);
         return {
@@ -458,43 +415,45 @@ function getThermalShapeFactors(furnace, x, y, z, xNorm, yNorm, zNorm) {
             centerFactor: clamp01(1 - Math.sqrt((xNorm - 0.5) ** 2 + (zNorm - 0.5) ** 2) * 2)
         };
     }
-
-    // 环形工装：按半径计算炉壁热源与中心滞后
     const { outerRadius, innerRadius } = getRingThermalRadii(furnace);
     const r = Math.sqrt(x * x + z * z);
     const ringWidth = Math.max(outerRadius - innerRadius, 1);
     const edgeDistance = Math.min(outerRadius - r, r - innerRadius);
     const radialMid = innerRadius + ringWidth / 2;
-
     return {
-        // 靠近外壁/内圈边界更容易受到辐射
         wallFactor: clamp01(1 - edgeDistance / (ringWidth * 0.45)),
-        // 环带中部更容易形成温度滞后
         centerFactor: clamp01(1 - Math.abs(r - radialMid) / (ringWidth * 0.5))
     };
+}
+
+function createThermalParticleTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gradient.addColorStop(0, 'rgba(255,255,255,1)');
+    gradient.addColorStop(0.35, 'rgba(255,255,255,0.75)');
+    gradient.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 64, 64);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    return texture;
 }
 
 function buildThermalPointCloud(furnace, progress) {
     const fw = furnace.w || 600;
     const fh = furnace.h || 600;
     const fd = furnace.d || 600;
-
     const isRing = furnace.toolingType === 'ring-tooling';
-
-    const nx = isRing
-        ? Math.max(9, Math.min(13, Math.round(fw / 85)))
-        : Math.max(7, Math.min(11, Math.round(fw / 90)));
-
-    const ny = isRing
-        ? Math.max(5, Math.min(7, Math.round(fh / 130)))
-        : Math.max(5, Math.min(8, Math.round(fh / 120)));
-
-    const nz = isRing
-        ? Math.max(9, Math.min(13, Math.round(fd / 85)))
-        : Math.max(7, Math.min(11, Math.round(fd / 90)));
+    const nx = isRing ? Math.max(9, Math.min(13, Math.round(fw / 85))) : Math.max(7, Math.min(11, Math.round(fw / 90)));
+    const ny = isRing ? Math.max(5, Math.min(7, Math.round(fh / 130))) : Math.max(5, Math.min(8, Math.round(fh / 120)));
+    const nz = isRing ? Math.max(9, Math.min(13, Math.round(fd / 85))) : Math.max(7, Math.min(11, Math.round(fd / 90)));
     const positions = [];
     const colors = [];
     const meta = [];
+    const jitter = Math.min(fw, fd) * 0.015;
 
     for (let ix = 0; ix < nx; ix++) {
         const xNorm = nx === 1 ? 0.5 : ix / (nx - 1);
@@ -505,33 +464,24 @@ function buildThermalPointCloud(furnace, progress) {
             for (let iz = 0; iz < nz; iz++) {
                 const zNorm = nz === 1 ? 0.5 : iz / (nz - 1);
                 const z = -fd / 2 + zNorm * fd;
-
-                if (!isPointInsideThermalVolume(furnace, x, y, z)) {
-                    continue;
-                }
-
+                if (!isPointInsideThermalVolume(furnace, x, y, z)) continue;
                 const shapeFactors = getThermalShapeFactors(furnace, x, y, z, xNorm, yNorm, zNorm);
-                const wallFactor = shapeFactors.wallFactor;
-                const centerFactor = shapeFactors.centerFactor;
                 const shadowInfo = estimateShadowAndCoreLag(x, y, z, furnace);
                 const pointMeta = {
-                    wallFactor,
+                    wallFactor: shapeFactors.wallFactor,
                     heightFactor: yNorm,
-                    centerFactor,
+                    centerFactor: shapeFactors.centerFactor,
                     shadow: shadowInfo.shadow,
                     coreLag: shadowInfo.coreLag,
                     nearMaterial: shadowInfo.nearMaterial
                 };
                 const ratio = temperatureRatioFromMeta(pointMeta, progress);
                 const color = colorFromTemperatureRatio(ratio);
-
-                const jitter = Math.min(fw, fd) * 0.015;
-
-                const jx = (Math.random() - 0.5) * jitter;  
-                const jy = (Math.random() - 0.5) * jitter;
-                const jz = (Math.random() - 0.5) * jitter;
-
-                positions.push(x + jx, y + jy, z + jz);
+                positions.push(
+                    x + (Math.random() - 0.5) * jitter,
+                    y + (Math.random() - 0.5) * jitter,
+                    z + (Math.random() - 0.5) * jitter
+                );
                 colors.push(color.r, color.g, color.b);
                 meta.push(pointMeta);
             }
@@ -542,38 +492,17 @@ function buildThermalPointCloud(furnace, progress) {
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
     geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
     geometry.userData.thermalMeta = meta;
-
-    function createThermalParticleTexture() {
-        const canvas = document.createElement('canvas');
-        canvas.width = 64;
-        canvas.height = 64;
-
-        const ctx = canvas.getContext('2d');
-        const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
-        gradient.addColorStop(0, 'rgba(255,255,255,1)');
-        gradient.addColorStop(0.35, 'rgba(255,255,255,0.75)');
-        gradient.addColorStop(1, 'rgba(255,255,255,0)');
-
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, 64, 64);
-
-        const texture = new THREE.CanvasTexture(canvas);
-        texture.needsUpdate = true;
-        return texture;
-    }
-
     const pointSize = Math.max(28, Math.min(62, Math.min(fw, fd) / 14));
     const material = new THREE.PointsMaterial({
         size: pointSize,
-        transparent: true,
         map: createThermalParticleTexture(),
+        transparent: true,
         opacity: 0.92,
         vertexColors: true,
         depthWrite: false,
         depthTest: true,
         blending: THREE.AdditiveBlending
     });
-
     const cloud = new THREE.Points(geometry, material);
     cloud.name = 'vacuumQuenchThermalPointCloud';
     cloud.renderOrder = 20;
@@ -585,41 +514,28 @@ function buildRadiationRays(furnace) {
     const fw = furnace.w || 600;
     const fh = furnace.h || 600;
     const fd = furnace.d || 600;
-    const items = (furnace.packedItems || []).slice(0, 48);
+    const items = (furnace.packedItems || []).slice(0, 36);
     const positions = [];
-
     items.forEach((item, idx) => {
-        const cx = (item.x || 0) - fw / 2 + (item.w || 0) / 2;
-        const cy = THERMAL_BASE_Y + (item.y || 0) + (item.h || 0) / 2;
-        const cz = (item.z || 0) - fd / 2 + (item.d || 0) / 2;
-
+        const c = getItemCenterWorld(item, furnace);
         const wallSources = [
-            [-fw / 2, cy, cz],
-            [fw / 2, cy, cz],
-            [cx, THERMAL_BASE_Y + fh, cz],
-            [cx, THERMAL_BASE_Y + fh * 0.55, -fd / 2],
-            [cx, THERMAL_BASE_Y + fh * 0.55, fd / 2]
+            new THREE.Vector3(-fw / 2, c.y, c.z),
+            new THREE.Vector3(fw / 2, c.y, c.z),
+            new THREE.Vector3(c.x, THERMAL_BASE_Y + fh, c.z),
+            new THREE.Vector3(c.x, THERMAL_BASE_Y + fh * 0.55, -fd / 2),
+            new THREE.Vector3(c.x, THERMAL_BASE_Y + fh * 0.55, fd / 2)
         ];
-
-        // 每个工件只采样两到三条，避免线段过密。
         const count = idx % 3 === 0 ? 3 : 2;
         for (let i = 0; i < count; i++) {
             const src = wallSources[(idx + i) % wallSources.length];
-            positions.push(src[0], src[1], src[2], cx, cy, cz);
+            positions.push(src.x, src.y, src.z, c.x, c.y, c.z);
         }
     });
-
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    const material = new THREE.LineBasicMaterial({
-        color: 0xffb703,
-        transparent: true,
-        opacity: 0.34,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending
-    });
+    const material = new THREE.LineBasicMaterial({ color: 0xffb703, transparent: true, opacity: 0.28, depthWrite: false, blending: THREE.AdditiveBlending });
     const rays = new THREE.LineSegments(geometry, material);
-    rays.name = 'vacuumQuenchRadiationRays';
+    rays.name = 'vacuumQuenchThermalRays';
     rays.userData = { isThermalRays: true };
     return rays;
 }
@@ -638,96 +554,64 @@ function estimateItemThermalRisk(item, furnace) {
     return clamp01(massLag + centerLag);
 }
 
-function buildRiskMarkers(furnace) {
+function buildRiskMarkers(furnace, scoreMap = null) {
     const group = new THREE.Group();
-    group.name = 'vacuumQuenchThermalRiskMarkers';
+    group.name = scoreMap ? 'radiationExposureRiskMarkers' : 'vacuumQuenchThermalRiskMarkers';
     const sorted = [...(furnace.packedItems || [])]
-        .map(item => ({ item, risk: estimateItemThermalRisk(item, furnace) }))
+        .map(item => ({ item, risk: scoreMap ? (1 - (scoreMap.get(item.id)?.score ?? 0.5)) : estimateItemThermalRisk(item, furnace) }))
         .sort((a, b) => b.risk - a.risk)
-        .slice(0, 8);
-
+        .slice(0, 10);
     sorted.forEach(({ item, risk }) => {
-        if (risk < 0.28) return;
+        if (risk < (scoreMap ? 0.30 : 0.28)) return;
         const geometry = new THREE.BoxGeometry((item.w || 1) + 14, (item.h || 1) + 14, (item.d || 1) + 14);
         const edges = new THREE.EdgesGeometry(geometry);
         const mat = new THREE.LineBasicMaterial({
-            color: risk > 0.52 ? 0xdc2626 : 0xf97316,
+            color: risk > 0.58 ? 0xdc2626 : 0xf97316,
             transparent: true,
-            opacity: 0.45
+            opacity: scoreMap ? 0.62 : 0.45
         });
         const marker = new THREE.LineSegments(edges, mat);
-        marker.position.set(
-            (item.x || 0) - (furnace.w || 0) / 2 + (item.w || 0) / 2,
-            THERMAL_BASE_Y + (item.y || 0) + (item.h || 0) / 2,
-            (item.z || 0) - (furnace.d || 0) / 2 + (item.d || 0) / 2
-        );
-        marker.userData = { isThermalRiskMarker: true, risk };
+        const c = getItemCenterWorld(item, furnace);
+        marker.position.copy(c);
+        marker.userData = { isThermalRiskMarker: true, isRadiationRiskMarker: !!scoreMap, risk };
         group.add(marker);
     });
-
     return group;
 }
 
 function buildRingThermalBoundary(furnace) {
     if (furnace.toolingType !== 'ring-tooling') return null;
-
     const group = new THREE.Group();
     group.name = 'ringThermalBoundary';
-
     const { outerRadius, innerRadius } = getRingThermalRadii(furnace);
     const height = Number(furnace.h || 0);
     const y0 = THERMAL_BASE_Y;
     const y1 = THERMAL_BASE_Y + height;
-
-    const matOuter = new THREE.LineBasicMaterial({
-        color: 0xffb703,
-        transparent: true,
-        opacity: 0.34,
-        depthWrite: false
-    });
-
-    const matInner = new THREE.LineBasicMaterial({
-        color: 0x38bdf8,
-        transparent: true,
-        opacity: 0.22,
-        depthWrite: false
-    });
-
+    const matOuter = new THREE.LineBasicMaterial({ color: 0xffb703, transparent: true, opacity: 0.34, depthWrite: false });
+    const matInner = new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.22, depthWrite: false });
     function makeCircle(radius, y, mat) {
         const pts = [];
         const segments = 128;
         for (let i = 0; i < segments; i++) {
             const a = (i / segments) * Math.PI * 2;
-            pts.push(new THREE.Vector3(
-                Math.cos(a) * radius,
-                y,
-                Math.sin(a) * radius
-            ));
+            pts.push(new THREE.Vector3(Math.cos(a) * radius, y, Math.sin(a) * radius));
         }
         const geo = new THREE.BufferGeometry().setFromPoints(pts);
         return new THREE.LineLoop(geo, mat);
     }
-
     group.add(makeCircle(outerRadius, y0, matOuter));
     group.add(makeCircle(outerRadius, y1, matOuter));
-
     if (innerRadius > 1) {
         group.add(makeCircle(innerRadius, y0, matInner));
         group.add(makeCircle(innerRadius, y1, matInner));
     }
-
-    // 四根高度参考线
     for (let i = 0; i < 4; i++) {
         const a = i * Math.PI / 2;
         const x = Math.cos(a) * outerRadius;
         const z = Math.sin(a) * outerRadius;
-        const geo = new THREE.BufferGeometry().setFromPoints([
-            new THREE.Vector3(x, y0, z),
-            new THREE.Vector3(x, y1, z)
-        ]);
+        const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, y0, z), new THREE.Vector3(x, y1, z)]);
         group.add(new THREE.Line(geo, matOuter));
     }
-
     return group;
 }
 
@@ -742,8 +626,8 @@ function calculateThermalMetrics(furnace, progress) {
     const density = packedVolume / furnaceVolume;
     const uniformityScore = Math.max(48, Math.round(94 - avgRisk * 42 - maxRisk * 18 - density * 28));
     const currentTemp = Math.round(VACUUM_QUENCH_PROFILE.startTemp + clamp01(progress) * (VACUUM_QUENCH_PROFILE.targetTemp - VACUUM_QUENCH_PROFILE.startTemp));
-
     return {
+        mode: 'thermal',
         processName: VACUUM_QUENCH_PROFILE.processName,
         currentTemp,
         targetTemp: VACUUM_QUENCH_PROFILE.targetTemp,
@@ -775,31 +659,384 @@ function updateThermalPointCloud(progress) {
     }
 }
 
-function updateThermalRayPulse(now) {
-    const rayGroup = thermalSimRuntime.rayGroup;
-    if (!rayGroup) return;
-    const pulse = 0.16 + (Math.sin(now * 0.004) + 1) * 0.10;
-    rayGroup.traverse(child => {
-        if (child.material && child.userData && child.userData.isThermalRays) {
-            child.material.opacity = pulse;
-            child.material.needsUpdate = true;
-        }
+function applyThermalTintToItems(furnace, progress) {
+    const group = furnaceGroups.get(currentFurnaceIndex);
+    if (!group || !furnace) return;
+    const itemMap = new Map((furnace.packedItems || []).map(item => [item.id, item]));
+    const p = clamp01(progress);
+    group.traverse(child => {
+        if (!child.isMesh || !child.userData || !child.userData.itemId) return;
+        const item = itemMap.get(child.userData.itemId);
+        const risk = item ? estimateItemThermalRisk(item, furnace) : 0.25;
+        const surfaceCatchUp = p * (0.18 + Math.max(0, 0.55 - risk) * 0.18);
+        const itemRatio = clamp01(p - risk * (0.32 - p * 0.16) + surfaceCatchUp);
+        const tint = colorFromTemperatureRatio(itemRatio);
+        const emissiveStrength = 0.10 + itemRatio * 0.38;
+        getMeshMaterials(child).forEach(mat => {
+            if (!mat.color) return;
+            saveOriginalMaterialIfNeeded(mat);
+            mat.color.copy(tint);
+            if (mat.emissive) {
+                mat.emissive.copy(tint);
+                mat.emissive.multiplyScalar(0.45);
+                mat.emissiveIntensity = emissiveStrength;
+            }
+            mat.transparent = true;
+            mat.opacity = 0.72 + itemRatio * 0.24;
+            mat.needsUpdate = true;
+        });
     });
+}
+
+// ---------- 辐射暴露 v1 ----------
+function buildRadiationSources(furnace) {
+    const fw = Number(furnace.w || 600);
+    const fh = Number(furnace.h || 600);
+    const fd = Number(furnace.d || 600);
+    const y0 = THERMAL_BASE_Y;
+    const yMid = y0 + fh * 0.52;
+    const sources = [];
+
+    if (furnace.toolingType === 'ring-tooling') {
+        const { outerRadius, innerRadius } = getRingThermalRadii(furnace);
+        const radius = outerRadius;
+        for (let i = 0; i < 16; i++) {
+            const a = i / 16 * Math.PI * 2;
+            sources.push({
+                position: new THREE.Vector3(Math.cos(a) * radius, yMid, Math.sin(a) * radius),
+                side: '外圆周热源',
+                strength: 1
+            });
+        }
+        for (let i = 0; i < 8; i++) {
+            const a = i / 8 * Math.PI * 2;
+            const r = innerRadius + (outerRadius - innerRadius) * 0.65;
+            sources.push({
+                position: new THREE.Vector3(Math.cos(a) * r, y0 + fh, Math.sin(a) * r),
+                side: '顶部圆环热源',
+                strength: 0.92
+            });
+        }
+        return sources;
+    }
+
+    const yLevels = [0.22, 0.55, 0.86].map(v => y0 + fh * v);
+    const zLevels = [-fd * 0.33, 0, fd * 0.33];
+    const xLevels = [-fw * 0.33, 0, fw * 0.33];
+    yLevels.forEach(y => {
+        zLevels.forEach(z => {
+            sources.push({ position: new THREE.Vector3(-fw / 2, y, z), side: '左壁热源', strength: 1 });
+            sources.push({ position: new THREE.Vector3(fw / 2, y, z), side: '右壁热源', strength: 1 });
+        });
+        xLevels.forEach(x => {
+            sources.push({ position: new THREE.Vector3(x, y, -fd / 2), side: '前壁热源', strength: 0.88 });
+            sources.push({ position: new THREE.Vector3(x, y, fd / 2), side: '后壁热源', strength: 0.88 });
+        });
+    });
+    xLevels.forEach(x => zLevels.forEach(z => sources.push({ position: new THREE.Vector3(x, y0 + fh, z), side: '顶部热源', strength: 0.96 })));
+    return sources;
+}
+
+function getItemRadiationSamplePoints(item, furnace) {
+    const b = getItemWorldBox(item, furnace);
+    const cx = (b.minX + b.maxX) / 2;
+    const cy = (b.minY + b.maxY) / 2;
+    const cz = (b.minZ + b.maxZ) / 2;
+    return [
+        new THREE.Vector3(cx, cy, cz),
+        new THREE.Vector3(cx, b.maxY, cz),
+        new THREE.Vector3(b.minX, cy, cz),
+        new THREE.Vector3(b.maxX, cy, cz),
+        new THREE.Vector3(cx, cy, b.minZ),
+        new THREE.Vector3(cx, cy, b.maxZ)
+    ];
+}
+
+function segmentIntersectsBox(p0, p1, box) {
+    let tMin = 0;
+    let tMax = 1;
+    const axes = [
+        ['x', box.minX, box.maxX],
+        ['y', box.minY, box.maxY],
+        ['z', box.minZ, box.maxZ]
+    ];
+    for (const [axis, minV, maxV] of axes) {
+        const start = p0[axis];
+        const end = p1[axis];
+        const d = end - start;
+        if (Math.abs(d) < 1e-6) {
+            if (start < minV || start > maxV) return false;
+            continue;
+        }
+        let t1 = (minV - start) / d;
+        let t2 = (maxV - start) / d;
+        if (t1 > t2) [t1, t2] = [t2, t1];
+        tMin = Math.max(tMin, t1);
+        tMax = Math.min(tMax, t2);
+        if (tMin > tMax) return false;
+    }
+    // 避免把源点或目标点刚贴边误判为完全遮挡。
+    return tMax > 0.035 && tMin < 0.965;
+}
+
+function isRadiationBlocked(sourcePoint, targetPoint, targetItem, allItems, furnace) {
+    for (const other of allItems) {
+        if (!other || other.id === targetItem.id) continue;
+        const box = getItemWorldBox(other, furnace);
+        if (segmentIntersectsBox(sourcePoint, targetPoint, box)) return true;
+    }
+    return false;
+}
+
+function calculateRadiationExposureScores(furnace) {
+    const items = furnace.packedItems || [];
+    const sources = buildRadiationSources(furnace);
+    const result = new Map();
+    if (!items.length || !sources.length) return { scores: result, sources };
+
+    items.forEach(item => {
+        const samples = getItemRadiationSamplePoints(item, furnace);
+        let total = 0;
+        let visible = 0;
+        let blocked = 0;
+        const visibleRays = [];
+        const blockedRays = [];
+
+        sources.forEach((src, si) => {
+            // 每个热源只抽样两个目标点，避免成本太高；不同热源错开采样面。
+            const sampleA = samples[si % samples.length];
+            const sampleB = samples[(si + 2) % samples.length];
+            [sampleA, sampleB].forEach(target => {
+                total += src.strength;
+                const isBlocked = isRadiationBlocked(src.position, target, item, items, furnace);
+                if (isBlocked) {
+                    blocked += src.strength;
+                    if (blockedRays.length < 4) blockedRays.push({ source: src.position.clone(), target: target.clone(), blocked: true });
+                } else {
+                    const dist = src.position.distanceTo(target);
+                    const distanceFactor = clamp01(1.15 - dist / Math.max(furnace.w || 1, furnace.h || 1, furnace.d || 1) * 0.18);
+                    visible += src.strength * distanceFactor;
+                    if (visibleRays.length < 4) visibleRays.push({ source: src.position.clone(), target: target.clone(), blocked: false });
+                }
+            });
+        });
+
+        const rawScore = total > 0 ? visible / total : 0;
+        const thermalRisk = estimateItemThermalRisk(item, furnace);
+        const score = clamp01(rawScore * (1 - thermalRisk * 0.18));
+        result.set(item.id, {
+            item,
+            score,
+            visibleRayCount: Math.round(visible),
+            blockedRayCount: Math.round(blocked),
+            totalRayWeight: Math.round(total),
+            rays: [...visibleRays.slice(0, 3), ...blockedRays.slice(0, 3)]
+        });
+
+        item.simulation = {
+            ...(item.simulation || {}),
+            radiationExposureScore: Math.round(score * 100),
+            visibleRayCount: Math.round(visible),
+            blockedRayCount: Math.round(blocked)
+        };
+    });
+
+    return { scores: result, sources };
+}
+
+function buildRadiationHeatSourcesVisual(furnace, sources) {
+    const group = new THREE.Group();
+    group.name = 'radiationHeatSourcesVisual';
+    const fw = furnace.w || 600;
+    const fh = furnace.h || 600;
+    const fd = furnace.d || 600;
+    const y0 = THERMAL_BASE_Y;
+
+    const mat = new THREE.MeshBasicMaterial({
+        color: 0xff7a18,
+        transparent: true,
+        opacity: 0.12,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+    });
+
+    if (furnace.toolingType === 'ring-tooling') {
+        const { outerRadius, innerRadius } = getRingThermalRadii(furnace);
+        const ringGeo = new THREE.RingGeometry(innerRadius, outerRadius, 128);
+        const topRing = new THREE.Mesh(ringGeo, mat.clone());
+        topRing.rotation.x = -Math.PI / 2;
+        topRing.position.y = y0 + fh;
+        group.add(topRing);
+
+        const boundary = buildRingThermalBoundary(furnace);
+        if (boundary) group.add(boundary);
+    } else {
+        const planes = [
+            { geo: new THREE.PlaneGeometry(fd, fh), pos: [-fw / 2, y0 + fh / 2, 0], rot: [0, Math.PI / 2, 0] },
+            { geo: new THREE.PlaneGeometry(fd, fh), pos: [fw / 2, y0 + fh / 2, 0], rot: [0, Math.PI / 2, 0] },
+            { geo: new THREE.PlaneGeometry(fw, fh), pos: [0, y0 + fh / 2, -fd / 2], rot: [0, 0, 0] },
+            { geo: new THREE.PlaneGeometry(fw, fh), pos: [0, y0 + fh / 2, fd / 2], rot: [0, 0, 0] },
+            { geo: new THREE.PlaneGeometry(fw, fd), pos: [0, y0 + fh, 0], rot: [-Math.PI / 2, 0, 0] }
+        ];
+        planes.forEach(p => {
+            const mesh = new THREE.Mesh(p.geo, mat.clone());
+            mesh.position.set(p.pos[0], p.pos[1], p.pos[2]);
+            mesh.rotation.set(p.rot[0], p.rot[1], p.rot[2]);
+            mesh.renderOrder = 9;
+            group.add(mesh);
+        });
+    }
+
+    const sourceGeo = new THREE.BufferGeometry();
+    const pts = sources.slice(0, 80).flatMap(s => [s.position.x, s.position.y, s.position.z]);
+    sourceGeo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    const sourceMat = new THREE.PointsMaterial({
+        size: Math.max(18, Math.min(42, Math.min(fw, fd) / 18)),
+        color: 0xffd166,
+        transparent: true,
+        opacity: 0.75,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+    });
+    const sourcePoints = new THREE.Points(sourceGeo, sourceMat);
+    sourcePoints.userData = { isRadiationSourcePoints: true };
+    group.add(sourcePoints);
+    return group;
+}
+
+function buildRadiationExposureRays(scoreMap) {
+    const entries = [...scoreMap.values()].sort((a, b) => a.score - b.score);
+    const selected = [...entries.slice(0, 8), ...entries.slice(-4)];
+    const positions = [];
+    const colors = [];
+    const gold = new THREE.Color(0xffd166);
+    const red = new THREE.Color(0xff1744);
+    const weak = new THREE.Color(0xff8a00);
+
+    selected.forEach(entry => {
+        (entry.rays || []).slice(0, 3).forEach(ray => {
+            const c = ray.blocked ? red : (entry.score > 0.72 ? gold : weak);
+            positions.push(ray.source.x, ray.source.y, ray.source.z, ray.target.x, ray.target.y, ray.target.z);
+            colors.push(c.r, c.g, c.b, c.r, c.g, c.b);
+        });
+    });
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    const material = new THREE.LineBasicMaterial({
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.78,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+    });
+    const rays = new THREE.LineSegments(geometry, material);
+    rays.name = 'radiationExposureRays';
+    rays.userData = { isThermalRays: true, isRadiationExposureRays: true };
+    return rays;
+}
+
+function applyRadiationTintToItems(furnace, scoreMap) {
+    const group = furnaceGroups.get(currentFurnaceIndex);
+    if (!group || !furnace) return;
+    group.traverse(child => {
+        if (!child.isMesh || !child.userData || !child.userData.itemId) return;
+        const entry = scoreMap.get(child.userData.itemId);
+        const score = entry ? entry.score : 0.55;
+        const tint = getRadiationScoreColor(score);
+        getMeshMaterials(child).forEach(mat => {
+            if (!mat.color) return;
+            saveOriginalMaterialIfNeeded(mat);
+            mat.color.copy(tint);
+            if (mat.emissive) {
+                mat.emissive.copy(tint);
+                mat.emissive.multiplyScalar(score >= 0.72 ? 0.55 : 0.35);
+                mat.emissiveIntensity = 0.12 + score * 0.42;
+            }
+            mat.transparent = true;
+            mat.opacity = 0.62 + score * 0.34;
+            mat.needsUpdate = true;
+        });
+    });
+}
+
+function calculateRadiationMetrics(furnace, scoreMap) {
+    const scores = [...scoreMap.values()];
+    const avgScore = scores.length ? scores.reduce((s, v) => s + v.score, 0) / scores.length : 0;
+    const minScore = scores.length ? Math.min(...scores.map(v => v.score)) : 0;
+    const blockedItems = scores.filter(v => v.score < 0.58).length;
+    const severeBlockedItems = scores.filter(v => v.score < 0.42).length;
+    const totalBlockedRays = scores.reduce((s, v) => s + (v.blockedRayCount || 0), 0);
+    const worst = scores.sort((a, b) => a.score - b.score)[0];
+    return {
+        mode: 'radiation',
+        processName: VACUUM_QUENCH_PROFILE.processName,
+        radiationExposure: Math.round(avgScore * 100),
+        minRadiationExposure: Math.round(minScore * 100),
+        blockedItemCount: blockedItems,
+        severeBlockedItemCount: severeBlockedItems,
+        blockedRayCount: totalBlockedRays,
+        worstItemName: worst?.item?.name || '-',
+        suggestion: severeBlockedItems > 0
+            ? '存在明显背辐射区域，建议增加中心间距或调整大件方向。'
+            : (blockedItems > 0 ? '存在局部遮挡，可优先复核中部与下层工件。' : '辐射可达性较好，当前装炉无遮挡高风险。')
+    };
+}
+
+export function renderRadiationExposureSimulation() {
+    const furnace = getCurrentThermalFurnace();
+    if (!furnace) return null;
+
+    clearThermalGroupChildren();
+    restoreThermalItemMaterials();
+    setThermalSceneTheme(true);
+
+    const group = ensureThermalSimulationGroup();
+    const { scores, sources } = calculateRadiationExposureScores(furnace);
+    const sourceVisual = buildRadiationHeatSourcesVisual(furnace, sources);
+    const rays = buildRadiationExposureRays(scores);
+    const riskMarkers = buildRiskMarkers(furnace, scores);
+
+    group.add(sourceVisual);
+    group.add(rays);
+    group.add(riskMarkers);
+    group.visible = true;
+
+    applyRadiationTintToItems(furnace, scores);
+
+    thermalSimRuntime.visible = true;
+    thermalSimRuntime.activeMode = 'radiation';
+    thermalSimRuntime.isPlaying = false;
+    thermalSimRuntime.paused = false;
+    thermalSimRuntime.progress = 0;
+    thermalSimRuntime.sourceGroup = sourceVisual;
+    thermalSimRuntime.rayGroup = rays;
+    thermalSimRuntime.riskGroup = riskMarkers;
+    thermalSimRuntime.radiationScores = scores;
+    thermalSimRuntime.metrics = calculateRadiationMetrics(furnace, scores);
+    return thermalSimRuntime.metrics;
+}
+
+export function getRadiationExposureRuntime() {
+    return {
+        visible: thermalSimRuntime.visible && thermalSimRuntime.activeMode === 'radiation',
+        metrics: thermalSimRuntime.activeMode === 'radiation' ? thermalSimRuntime.metrics : null,
+        scores: thermalSimRuntime.radiationScores
+    };
 }
 
 export function renderVacuumQuenchThermalSimulation(progress = 0.12) {
     const furnace = getCurrentThermalFurnace();
     if (!furnace) return null;
 
-    const group = ensureThermalSimulationGroup();
-    while (group.children.length > 0) {
-        const child = group.children[0];
-        group.remove(child);
-        disposeObject3D(child);
-    }
-
+    clearThermalGroupChildren();
+    restoreThermalItemMaterials();
     const safeProgress = clamp01(progress);
     setThermalSceneTheme(true);
+
+    const group = ensureThermalSimulationGroup();
     const cloud = buildThermalPointCloud(furnace, safeProgress);
     const rays = buildRadiationRays(furnace);
     const riskMarkers = buildRiskMarkers(furnace);
@@ -812,20 +1049,19 @@ export function renderVacuumQuenchThermalSimulation(progress = 0.12) {
     group.visible = true;
 
     thermalSimRuntime.visible = true;
+    thermalSimRuntime.activeMode = 'thermal';
     thermalSimRuntime.progress = safeProgress;
     thermalSimRuntime.pointCloud = cloud;
     thermalSimRuntime.rayGroup = rays;
     thermalSimRuntime.riskGroup = riskMarkers;
     thermalSimRuntime.metrics = calculateThermalMetrics(furnace, safeProgress);
     applyThermalTintToItems(furnace, safeProgress);
-
     return thermalSimRuntime.metrics;
 }
 
 export function playVacuumQuenchThermalSimulation(options = {}) {
     const furnace = getCurrentThermalFurnace();
     if (!furnace) return null;
-
     const startProgress = clamp01(options.startProgress != null ? options.startProgress : 0.03);
     const initialMetrics = renderVacuumQuenchThermalSimulation(startProgress);
     thermalSimRuntime.isPlaying = true;
@@ -834,11 +1070,7 @@ export function playVacuumQuenchThermalSimulation(options = {}) {
     thermalSimRuntime.startedAt = performance.now() - startProgress * thermalSimRuntime.durationMs;
     thermalSimRuntime.onUpdate = typeof options.onUpdate === 'function' ? options.onUpdate : thermalSimRuntime.onUpdate;
     thermalSimRuntime.onFinish = typeof options.onFinish === 'function' ? options.onFinish : thermalSimRuntime.onFinish;
-
-    if (thermalSimRuntime.onUpdate) {
-        thermalSimRuntime.onUpdate(initialMetrics);
-    }
-
+    if (thermalSimRuntime.onUpdate) thermalSimRuntime.onUpdate(initialMetrics);
     return initialMetrics;
 }
 
@@ -854,11 +1086,8 @@ export function pauseVacuumQuenchThermalSimulation() {
 }
 
 export function resumeVacuumQuenchThermalSimulation(options = {}) {
-    if (!thermalSimRuntime.visible) return playVacuumQuenchThermalSimulation(options);
-    return playVacuumQuenchThermalSimulation({
-        ...options,
-        startProgress: thermalSimRuntime.progress || 0
-    });
+    if (!thermalSimRuntime.visible || thermalSimRuntime.activeMode !== 'thermal') return playVacuumQuenchThermalSimulation(options);
+    return playVacuumQuenchThermalSimulation({ ...options, startProgress: thermalSimRuntime.progress || 0 });
 }
 
 export function setVacuumQuenchThermalProgress(progress) {
@@ -867,7 +1096,7 @@ export function setVacuumQuenchThermalProgress(progress) {
     thermalSimRuntime.isPlaying = false;
     thermalSimRuntime.paused = true;
     const p = clamp01(progress);
-    if (!thermalSimRuntime.visible || !thermalSimRuntime.pointCloud) {
+    if (!thermalSimRuntime.visible || !thermalSimRuntime.pointCloud || thermalSimRuntime.activeMode !== 'thermal') {
         return renderVacuumQuenchThermalSimulation(p);
     }
     thermalSimRuntime.progress = p;
@@ -881,6 +1110,7 @@ export function setVacuumQuenchThermalProgress(progress) {
 export function getVacuumQuenchThermalRuntime() {
     return {
         visible: thermalSimRuntime.visible,
+        activeMode: thermalSimRuntime.activeMode,
         isPlaying: thermalSimRuntime.isPlaying,
         paused: thermalSimRuntime.paused,
         progress: thermalSimRuntime.progress,
@@ -889,10 +1119,22 @@ export function getVacuumQuenchThermalRuntime() {
     };
 }
 
+function updateThermalRayPulse(now) {
+    const rayGroup = thermalSimRuntime.rayGroup;
+    if (!rayGroup) return;
+    const pulse = 0.18 + (Math.sin(now * 0.004) + 1) * 0.16;
+    rayGroup.traverse(child => {
+        if (child.material && child.userData && child.userData.isThermalRays) {
+            child.material.opacity = child.userData.isRadiationExposureRays ? (0.42 + pulse * 0.75) : pulse;
+            child.material.needsUpdate = true;
+        }
+    });
+}
+
 function updateThermalSimulationFrame(now) {
     if (!thermalSimRuntime.visible) return;
 
-    if (thermalSimRuntime.isPlaying) {
+    if (thermalSimRuntime.activeMode === 'thermal' && thermalSimRuntime.isPlaying) {
         const elapsed = now - thermalSimRuntime.startedAt;
         const progress = clamp01(elapsed / thermalSimRuntime.durationMs);
         thermalSimRuntime.progress = progress;
@@ -902,25 +1144,29 @@ function updateThermalSimulationFrame(now) {
             thermalSimRuntime.metrics = calculateThermalMetrics(furnace, progress);
             applyThermalTintToItems(furnace, progress);
         }
-        if (thermalSimRuntime.onUpdate && thermalSimRuntime.metrics) {
-            thermalSimRuntime.onUpdate(thermalSimRuntime.metrics);
-        }
-
+        if (thermalSimRuntime.onUpdate && thermalSimRuntime.metrics) thermalSimRuntime.onUpdate(thermalSimRuntime.metrics);
         if (progress >= 1) {
             thermalSimRuntime.isPlaying = false;
             thermalSimRuntime.paused = false;
-            if (thermalSimRuntime.onFinish && thermalSimRuntime.metrics) {
-                thermalSimRuntime.onFinish(thermalSimRuntime.metrics);
-            }
+            if (thermalSimRuntime.onFinish && thermalSimRuntime.metrics) thermalSimRuntime.onFinish(thermalSimRuntime.metrics);
         }
     }
 
     updateThermalRayPulse(now);
 
+    if (thermalSimRuntime.sourceGroup) {
+        thermalSimRuntime.sourceGroup.traverse(child => {
+            if (child.material && child.userData && child.userData.isRadiationSourcePoints) {
+                child.material.opacity = 0.55 + (Math.sin(now * 0.004) + 1) * 0.18;
+                child.material.needsUpdate = true;
+            }
+        });
+    }
+
     if (thermalSimRuntime.riskGroup) {
         thermalSimRuntime.riskGroup.traverse(child => {
-            if (child.material && child.userData && child.userData.isThermalRiskMarker) {
-                child.material.opacity = 0.28 + (Math.sin(now * 0.005) + 1) * 0.14;
+            if (child.material && child.userData && (child.userData.isThermalRiskMarker || child.userData.isRadiationRiskMarker)) {
+                child.material.opacity = 0.28 + (Math.sin(now * 0.005) + 1) * 0.18;
                 child.material.needsUpdate = true;
             }
         });
@@ -2276,7 +2522,11 @@ export function renderSingleFurnace(index, filterMaterialName) {
     }
 
     if (thermalSimRuntime.visible) {
-        renderVacuumQuenchThermalSimulation(thermalSimRuntime.progress || 0.12);
+        if (thermalSimRuntime.activeMode === 'radiation') {
+            renderRadiationExposureSimulation();
+        } else {
+            renderVacuumQuenchThermalSimulation(thermalSimRuntime.progress || 0.12);
+        }
     }
 
     update3DStatsPanel(furnace);

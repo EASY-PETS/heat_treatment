@@ -893,15 +893,18 @@ export function renderLoadingSimulationPanel() {
 }
 
 
-export function renderThermalSimulationPanel(metrics = null) {
+
+export function renderThermalSimulationPanel(metrics = null, mode = null) {
     const panel = document.getElementById('thermal-simulation-panel');
     if (!panel) return;
+
+    const activeMode = mode || metrics?.mode || 'thermal';
 
     if (!globalFurnacesResult || globalFurnacesResult.length === 0) {
         panel.innerHTML = `
             <div class="thermal-sim-empty">
-                生成方案后显示真空淬火热场仿真。<br>
-                当前版本为近似可视化：炉壁辐射升温 + 工件热容量滞后 + 局部遮挡冷区。
+                生成方案后显示工艺仿真。<br>
+                当前版本包含：升温热场 + 辐射暴露。后续可继续扩展气淬冷却、气流循环和气氛覆盖。
             </div>
         `;
         return;
@@ -909,11 +912,7 @@ export function renderThermalSimulationPanel(metrics = null) {
 
     const furnace = globalFurnacesResult[currentFurnaceIndex];
     if (!furnace) {
-        panel.innerHTML = `
-            <div class="thermal-sim-empty">
-                当前炉次不存在，请重新生成方案。
-            </div>
-        `;
+        panel.innerHTML = `<div class="thermal-sim-empty">当前炉次不存在，请重新生成方案。</div>`;
         return;
     }
 
@@ -921,6 +920,50 @@ export function renderThermalSimulationPanel(metrics = null) {
     const packedVolume = items.reduce((sum, item) => sum + Number((item.w || 0) * (item.h || 0) * (item.d || 0)), 0);
     const furnaceVolume = Math.max(1, Number((furnace.w || 1) * (furnace.h || 1) * (furnace.d || 1)));
     const densityRate = metrics?.densityRate ?? Math.round((packedVolume / furnaceVolume) * 1000) / 10;
+
+    if (activeMode === 'radiation') {
+        const radiationExposure = metrics?.radiationExposure ?? Math.max(55, Math.round(92 - densityRate * 0.45));
+        const minExposure = metrics?.minRadiationExposure ?? Math.max(35, radiationExposure - 22);
+        const blockedItemCount = metrics?.blockedItemCount ?? 0;
+        const severeBlockedItemCount = metrics?.severeBlockedItemCount ?? 0;
+        const blockedRayCount = metrics?.blockedRayCount ?? 0;
+        const worstItemName = metrics?.worstItemName || '-';
+        const suggestion = metrics?.suggestion || '点击“辐射暴露”后，系统会用少量有效/遮挡射线解释工件辐射可达性。';
+
+        panel.innerHTML = `
+            <div class="thermal-header-card compact radiation-card">
+                <div class="thermal-title">☀️ ${escapeSimHtml(furnace.instanceId || '当前炉次')} · 辐射暴露</div>
+                <div class="thermal-subtitle">
+                    这一层不是继续模拟温度，而是解释真空炉热源是否能“看见”工件：金色射线代表有效辐射，红色射线代表被遮挡路径，工件颜色表示辐射暴露评分。
+                </div>
+                <div class="thermal-metric-grid">
+                    <div class="thermal-metric"><span>平均辐射覆盖</span><strong>${radiationExposure}%</strong></div>
+                    <div class="thermal-metric"><span>最低暴露工件</span><strong>${minExposure}%</strong></div>
+                    <div class="thermal-metric"><span>遮挡风险件</span><strong>${blockedItemCount} 件</strong></div>
+                    <div class="thermal-metric"><span>严重遮挡</span><strong>${severeBlockedItemCount} 件</strong></div>
+                </div>
+                <div class="thermal-legend radiation-legend">
+                    <span>遮挡</span><div class="radiation-gradient"></div><span>充分</span>
+                </div>
+                <div class="thermal-mini-note">炉壁/顶部橙色发光面 = 热源；金色线 = 可达路径；红色线 = 被其他工件包围盒遮挡；红色线框 = 需复核工件。</div>
+            </div>
+
+            <div class="thermal-risk-card radiation-card">
+                <div class="thermal-stage-title">辐射遮挡诊断</div>
+                <div class="thermal-risk-row"><span>被遮挡射线权重</span><strong>${blockedRayCount}</strong></div>
+                <div class="thermal-risk-row"><span>最低暴露工件</span><strong>${escapeSimHtml(worstItemName)}</strong></div>
+                <div class="thermal-risk-row"><span>中心/背辐射风险</span><strong>${severeBlockedItemCount > 0 ? '高' : (blockedItemCount > 0 ? '中' : '低')}</strong></div>
+                <div class="thermal-risk-row"><span>当前模式</span><strong>辐射可达性分析</strong></div>
+            </div>
+
+            <div class="thermal-stage-card radiation-card">
+                <div class="thermal-stage-title">调整建议</div>
+                <div class="thermal-mini-note strong-note">${escapeSimHtml(suggestion)}</div>
+            </div>
+        `;
+        return;
+    }
+
     const progress = metrics?.progress ?? 0;
     const currentTemp = metrics?.currentTemp ?? 120;
     const targetTemp = metrics?.targetTemp ?? 1040;
@@ -955,7 +998,7 @@ export function renderThermalSimulationPanel(metrics = null) {
 
     panel.innerHTML = `
         <div class="thermal-header-card compact">
-            <div class="thermal-title">🔥 ${escapeSimHtml(furnace.instanceId || '当前炉次')} · 真空淬火热场</div>
+            <div class="thermal-title">🔥 ${escapeSimHtml(furnace.instanceId || '当前炉次')} · 升温热场</div>
             <div class="thermal-subtitle">
                 一期为解释型近似动画：蓝色表示低温/滞后区，橙红表示炉壁辐射升温区；红色线框提示可能的厚大件中心滞后或遮挡冷区。
             </div>
@@ -968,7 +1011,7 @@ export function renderThermalSimulationPanel(metrics = null) {
             <div class="thermal-legend">
                 <span>低温</span><div class="thermal-gradient"></div><span>高温</span>
             </div>
-            <div class="thermal-mini-note">真空淬火升温段默认按“辐射为主、气流弱、中心大件滞后”的模板模拟；3D 中工件颜色也会随估算表面温度同步变化。</div>
+            <div class="thermal-mini-note">升温热场 = 看温度结果；辐射暴露 = 解释热源路径和遮挡原因。建议先看热场，再切换到辐射暴露。</div>
         </div>
 
         <div class="thermal-stage-card">
@@ -979,7 +1022,7 @@ export function renderThermalSimulationPanel(metrics = null) {
         <div class="thermal-risk-card">
             <div class="thermal-stage-title">当前风险读数</div>
             <div class="thermal-risk-row"><span>冷区风险点</span><strong>${coldSpotCount} 处</strong></div>
-            <div class="thermal-risk-row"><span>辐射覆盖率</span><strong>${radiationExposure}%</strong></div>
+            <div class="thermal-risk-row"><span>辐射覆盖估算</span><strong>${radiationExposure}%</strong></div>
             <div class="thermal-risk-row"><span>厚大件中心滞后</span><strong>${escapeSimHtml(coreLagRisk)}</strong></div>
             <div class="thermal-risk-row"><span>仿真进度</span><strong>${progress}%</strong></div>
         </div>

@@ -189,6 +189,45 @@
         .thermal-header-card.compact .thermal-subtitle {
             font-size: 11px;
         }
+
+        .thermal-mode-row {
+            display: flex;
+            gap: 6px;
+            padding: 8px 10px 0;
+            flex: 0 0 auto;
+        }
+        .process-sim-mode-btn {
+            flex: 1;
+            border: none;
+            border-radius: 10px;
+            padding: 7px 8px;
+            background: rgba(241, 245, 249, 0.96);
+            color: #64748b;
+            font-size: 11px;
+            font-weight: 800;
+            cursor: pointer;
+        }
+        .process-sim-mode-btn.active {
+            background: linear-gradient(135deg, rgba(249,115,22,0.18), rgba(250,204,21,0.18));
+            color: #ea580c;
+        }
+        .radiation-gradient {
+            flex: 1;
+            height: 8px;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #475569, #b91c1c, #f97316, #facc15);
+        }
+        .radiation-card {
+            border: 1px solid rgba(249, 115, 22, 0.12);
+        }
+        .strong-note {
+            color: #334155;
+            font-weight: 700;
+            background: rgba(249,115,22,0.08);
+            border-radius: 10px;
+            padding: 9px;
+        }
+
     </style>
     <script type="importmap">
       {
@@ -564,10 +603,14 @@
             </div>
 
             <div class="right-tab-pane" id="right-tab-thermal">
+                <div class="thermal-mode-row" id="thermal-mode-row" style="display:none;">
+                    <button class="process-sim-mode-btn active" id="btn-mode-thermal" data-process-sim-mode="thermal" type="button">升温热场</button>
+                    <button class="process-sim-mode-btn" id="btn-mode-radiation" data-process-sim-mode="radiation" type="button">辐射暴露</button>
+                </div>
                 <div class="plan-action-bar thermal-action-bar">
-                    <button class="btn plan-action-btn primary" id="btn-play-thermal" style="display:none;">播放热场仿真</button>
+                    <button class="btn plan-action-btn primary" id="btn-play-thermal" style="display:none;">播放升温热场</button>
                     <button class="btn plan-action-btn" id="btn-pause-thermal" style="display:none;">暂停</button>
-                    <button class="btn plan-action-btn" id="btn-render-thermal" style="display:none;">显示热场</button>
+                    <button class="btn plan-action-btn" id="btn-render-thermal" style="display:none;">显示升温热场</button>
                     <button class="btn plan-action-btn" id="btn-reset-thermal" style="display:none;">停止查看</button>
                     <select class="thermal-speed-select" id="thermal-speed-select" style="display:none;" title="热场动画速度">
                         <option value="16000">慢速</option>
