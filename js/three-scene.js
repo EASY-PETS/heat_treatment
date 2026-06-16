@@ -133,6 +133,13 @@ let thermalSimRuntime = {
     airflowCycleMs: 3600,
     selectedAtmosphereMediumType: 'nitriding',
     selectedAtmosphereInletDirections: null,
+    selectedQuenchMediumType: 'oil',
+    selectedQuenchFurnaceVisibilityMode: 'auto',
+    quenchTankGroup: null,
+    quenchEquipmentContext: null,
+    quenchParticleGroup: null,
+    quenchDurationMs: 8500,
+    lastQuenchVisualUpdateAt: 0,
     airflowParticles: null,
     airflowStreamGroup: null,
     selectedRadiationItemId: null,
@@ -166,28 +173,92 @@ function clamp01(v) {
     return Math.max(0, Math.min(1, v));
 }
 
-function setThermalGridTheme(active) {
+function getNormalizedProcessSceneTheme(themeKey = thermalSimRuntime.selectedProcessSceneTheme || 'auto') {
+    const key = String(themeKey || 'auto').toLowerCase();
+    if (['auto', 'dark', 'blue', 'light'].includes(key)) return key;
+    if (key === 'gray' || key === 'grey' || key === 'lightgray' || key === 'light-grey') return 'light';
+    if (key === 'industrial' || key === 'industrial-blue' || key === 'bluegray' || key === 'blue-grey') return 'blue';
+    return 'auto';
+}
+
+function getAutoProcessSceneTheme(mode = 'thermal') {
+    if (mode === 'airflow' || mode === 'quench') return 'blue';
+    if (mode === 'atmosphere') return 'teal';
+    return 'dark';
+}
+
+function getProcessSceneThemePalette(mode = 'thermal') {
+    const selected = getNormalizedProcessSceneTheme();
+    const effective = selected === 'auto' ? getAutoProcessSceneTheme(mode) : selected;
+    if (effective === 'light') {
+        return {
+            key: 'light',
+            background: 0xf3f6f8,
+            gridColor: 0x94a3b8,
+            gridOpacity: 0.28,
+            labelColor: 0x0f172a,
+            quenchPadColor: 0x93c5fd,
+            quenchPadOpacity: 0.18
+        };
+    }
+    if (effective === 'blue') {
+        return {
+            key: 'blue',
+            background: 0x0b1f2a,
+            gridColor: 0x2f5f75,
+            gridOpacity: 0.24,
+            labelColor: 0xe0f2fe,
+            quenchPadColor: 0x38bdf8,
+            quenchPadOpacity: 0.20
+        };
+    }
+    if (effective === 'teal') {
+        return {
+            key: 'teal',
+            background: 0x0f2a2b,
+            gridColor: 0x2dd4bf,
+            gridOpacity: 0.16,
+            labelColor: 0xccfbf1,
+            quenchPadColor: 0x22d3ee,
+            quenchPadOpacity: 0.18
+        };
+    }
+    return {
+        key: 'dark',
+        background: mode === 'quench' ? 0x071827 : 0x030712,
+        gridColor: 0x334155,
+        gridOpacity: mode === 'quench' || mode === 'airflow' ? 0.16 : 0.10,
+        labelColor: 0xf8fafc,
+        quenchPadColor: 0x38bdf8,
+        quenchPadOpacity: 0.16
+    };
+}
+
+function setThermalGridTheme(active, mode = thermalSceneThemeMode || 'thermal') {
     if (!mainSceneGridHelper || !mainSceneGridHelper.material) return;
 
     const materials = Array.isArray(mainSceneGridHelper.material)
         ? mainSceneGridHelper.material
         : [mainSceneGridHelper.material];
 
-    if (active && !thermalSavedGridState) {
-        thermalSavedGridState = materials.map(mat => ({
-            transparent: !!mat.transparent,
-            opacity: typeof mat.opacity === 'number' ? mat.opacity : 1,
-            color: mat.color ? mat.color.getHex() : null,
-            visible: mainSceneGridHelper.visible
-        }));
-
+    if (active) {
+        if (!thermalSavedGridState) {
+            thermalSavedGridState = materials.map(mat => ({
+                transparent: !!mat.transparent,
+                opacity: typeof mat.opacity === 'number' ? mat.opacity : 1,
+                color: mat.color ? mat.color.getHex() : null,
+                visible: mainSceneGridHelper.visible
+            }));
+        }
+        const palette = getProcessSceneThemePalette(mode);
         mainSceneGridHelper.visible = true;
         materials.forEach(mat => {
             mat.transparent = true;
-            mat.opacity = 0.10;
-            if (mat.color) mat.color.setHex(0x334155);
+            mat.opacity = palette.gridOpacity;
+            if (mat.color) mat.color.setHex(palette.gridColor);
             mat.needsUpdate = true;
         });
+        return;
     }
 
     if (!active && thermalSavedGridState) {
@@ -205,10 +276,7 @@ function setThermalGridTheme(active) {
 }
 
 function getProcessSceneBackgroundColor(mode = 'thermal') {
-    // 热场/辐射适合黑底突出发光；气流/气氛改为深蓝灰底，避免蓝色流线淹没在纯黑背景里。
-    if (mode === 'airflow') return 0x071827;
-    if (mode === 'atmosphere') return 0x0b1f1c;
-    return 0x030712;
+    return getProcessSceneThemePalette(mode).background;
 }
 
 function setThermalSceneTheme(active, mode = 'thermal') {
@@ -216,21 +284,34 @@ function setThermalSceneTheme(active, mode = 'thermal') {
     if (active) {
         if (!thermalSceneThemeActive) {
             thermalSavedSceneBackground = scene.background ? scene.background.clone() : null;
-            setThermalGridTheme(true);
             thermalSceneThemeActive = true;
         }
-        // 模式切换时允许更新背景色：thermal/radiation 仍黑底，airflow 使用深蓝灰。
-        if (thermalSceneThemeMode !== mode) {
-            scene.background = new THREE.Color(getProcessSceneBackgroundColor(mode));
-            thermalSceneThemeMode = mode;
-        }
+        setThermalGridTheme(true, mode);
+        // 模式或背景主题切换时允许更新背景色。
+        scene.background = new THREE.Color(getProcessSceneBackgroundColor(mode));
+        thermalSceneThemeMode = mode;
     } else if (thermalSceneThemeActive) {
         scene.background = thermalSavedSceneBackground || new THREE.Color(0xf5f5f5);
         thermalSavedSceneBackground = null;
-        setThermalGridTheme(false);
+        setThermalGridTheme(false, mode);
         thermalSceneThemeActive = false;
         thermalSceneThemeMode = null;
     }
+}
+
+export function setProcessSceneBackgroundTheme(themeKey = 'auto') {
+    thermalSimRuntime.selectedProcessSceneTheme = getNormalizedProcessSceneTheme(themeKey);
+    if (thermalSceneThemeActive && thermalSimRuntime.activeMode) {
+        setThermalSceneTheme(true, thermalSimRuntime.activeMode);
+    }
+    if (thermalSimRuntime.activeMode === 'quench' && thermalSimRuntime.quenchTankGroup) {
+        updateQuenchWorkstationGlow();
+    }
+    return thermalSimRuntime.metrics || null;
+}
+
+export function getProcessSceneBackgroundTheme() {
+    return getNormalizedProcessSceneTheme();
 }
 
 function ensureThermalSimulationGroup() {
@@ -276,12 +357,15 @@ function clearThermalGroupChildren() {
     thermalSimRuntime.riskGroup = null;
     thermalSimRuntime.sourceGroup = null;
     thermalSimRuntime.atmosphereSurfaceGroup = null;
+    thermalSimRuntime.quenchTankGroup = null;
+    thermalSimRuntime.quenchParticleGroup = null;
 }
 
 
 export function clearThermalSimulationLayer() {
     clearThermalGroupChildren();
     clearRadiationClipPlanes();
+    restoreQuenchFurnaceTransform();
     restoreThermalItemMaterials();
     setThermalSceneTheme(false);
 
@@ -306,6 +390,13 @@ export function clearThermalSimulationLayer() {
     thermalSimRuntime.airflowCycleMs = 3600;
     thermalSimRuntime.selectedAtmosphereMediumType = 'nitriding';
     thermalSimRuntime.selectedAtmosphereInletDirections = null;
+    thermalSimRuntime.selectedQuenchMediumType = 'oil';
+    thermalSimRuntime.selectedQuenchFurnaceVisibilityMode = 'auto';
+    thermalSimRuntime.quenchTankGroup = null;
+    thermalSimRuntime.quenchEquipmentContext = null;
+    thermalSimRuntime.quenchParticleGroup = null;
+    thermalSimRuntime.quenchDurationMs = 8500;
+    thermalSimRuntime.lastQuenchVisualUpdateAt = 0;
     thermalSimRuntime.airflowParticles = null;
     thermalSimRuntime.airflowStreamGroup = null;
     thermalSimRuntime.selectedRadiationItemId = null;
@@ -5452,6 +5543,10 @@ function updateThermalSimulationFrame(now) {
         updateAtmosphereCoverageAnimation(now);
     }
 
+    if (thermalSimRuntime.activeMode === 'quench') {
+        updateQuenchMediumAnimation(now);
+    }
+
     updateThermalRayPulse(now);
 
     if (thermalSimRuntime.sourceGroup) {
@@ -8034,6 +8129,847 @@ export function setOrthographicTopView(marginRatio = 0.02) {
     orthoCamera.up.set(0, 0, -1);
 
     return orthoCamera;
+}
+
+
+// ---------- 淬火阶段：淬火介质仿真 V3.2 ----------
+function getQuenchMediumMeta(mediumType = 'oil') {
+    const key = String(mediumType || 'oil').toLowerCase().trim();
+    const table = {
+        oil: {
+            key: 'oil',
+            label: '淬火油',
+            shortLabel: 'Oil · 60℃',
+            tankColor: 0x7c3f12,
+            surfaceColor: 0x8b5a2b,
+            bubbleColor: 0xfbbf24,
+            coolingColor: 0x38bdf8,
+            coolingIntensity: 0.82,
+            vaporFilmRiskFactor: 0.92,
+            description: '适合多用炉/渗碳淬火场景，重点看入油一致性、蒸汽膜、中心冷却滞后与变形开裂风险。'
+        },
+        polymer: {
+            key: 'polymer',
+            label: '聚合物淬火液',
+            shortLabel: 'Polymer',
+            tankColor: 0x0891b2,
+            surfaceColor: 0x22d3ee,
+            bubbleColor: 0xa7f3d0,
+            coolingColor: 0x67e8f9,
+            coolingIntensity: 0.70,
+            vaporFilmRiskFactor: 0.74,
+            description: '适合降低开裂风险的水基聚合物淬火，重点看搅拌覆盖与冷却均匀性。'
+        },
+        water: {
+            key: 'water',
+            label: '水淬',
+            shortLabel: 'Water',
+            tankColor: 0x0ea5e9,
+            surfaceColor: 0x38bdf8,
+            bubbleColor: 0xe0f2fe,
+            coolingColor: 0x7dd3fc,
+            coolingIntensity: 1.0,
+            vaporFilmRiskFactor: 1.12,
+            description: '强冷介质，冷却速度高，但厚薄混装、尖角和高碳钢开裂/变形风险更敏感。'
+        }
+    };
+    return table[key] || table.oil;
+}
+
+function estimateQuenchItemRisk(item, furnace) {
+    const fw = Math.max(1, Number(furnace?.w || 1));
+    const fd = Math.max(1, Number(furnace?.d || 1));
+    const fh = Math.max(1, Number(furnace?.h || 1));
+    const volume = Math.max(1, Number((item.w || 1) * (item.h || 1) * (item.d || 1)));
+    const maxDim = Math.max(item.w || 1, item.h || 1, item.d || 1);
+    const minDim = Math.max(1, Math.min(item.w || 1, item.h || 1, item.d || 1));
+    const slenderness = clamp01((maxDim / minDim - 1.8) / 6.5);
+    const cx = ((item.x || 0) + (item.w || 0) / 2) / fw;
+    const cz = ((item.z || 0) + (item.d || 0) / 2) / fd;
+    const cy = ((item.y || 0) + (item.h || 0) / 2) / fh;
+    const centerPenalty = clamp01(1 - Math.sqrt((cx - 0.5) ** 2 + (cz - 0.5) ** 2) * 2.1);
+    const lowerLayerPenalty = clamp01(1 - cy);
+    const massLag = clamp01(Math.cbrt(volume) / 520);
+    return clamp01(massLag * 0.46 + centerPenalty * 0.24 + lowerLayerPenalty * 0.16 + slenderness * 0.14);
+}
+
+
+function getQuenchItemDisplayName(item, fallbackIndex = 0) {
+    const raw = String(item?.showName || item?.itemCode || item?.name || '').trim();
+    const looksBad = !raw || raw.length > 22 || /广告|undefined|null|测试字段/i.test(raw);
+    if (looksBad) return `工件 #${fallbackIndex + 1}`;
+    return raw;
+}
+
+function getQuenchRiskRecords(furnace) {
+    return [...(furnace?.packedItems || [])]
+        .map((item, idx) => ({ item, idx, risk: estimateQuenchItemRisk(item, furnace), name: getQuenchItemDisplayName(item, idx) }))
+        .sort((a, b) => b.risk - a.risk);
+}
+
+function getQuenchItemLayerIndex(item, furnace) {
+    if (typeof item?.layer === 'number' && item.layer >= 1) return Math.round(item.layer);
+    const y = Number(item?.y || 0);
+    if (Array.isArray(furnace?.shelvesUsed) && furnace.shelvesUsed.length > 0) {
+        const sorted = [...furnace.shelvesUsed].sort((a, b) => Number(a.y || 0) - Number(b.y || 0));
+        for (let i = sorted.length - 1; i >= 0; i--) {
+            if (y >= Number(sorted[i].y || 0) - 0.5) return i + 2;
+        }
+        return 1;
+    }
+    const fh = Math.max(1, Number(furnace?.h || 1));
+    const centerY = y + Number(item?.h || 0) / 2;
+    if (centerY < fh * 0.34) return 1;
+    if (centerY < fh * 0.67) return 2;
+    return 3;
+}
+
+function getQuenchLayerRecords(furnace) {
+    const layers = new Map();
+    (furnace?.packedItems || []).forEach((item, idx) => {
+        const layer = getQuenchItemLayerIndex(item, furnace);
+        if (!layers.has(layer)) {
+            layers.set(layer, { layer, items: [], minY: Infinity, maxY: -Infinity, riskSum: 0, maxRisk: 0 });
+        }
+        const rec = layers.get(layer);
+        const risk = estimateQuenchItemRisk(item, furnace);
+        rec.items.push({ item, idx, risk });
+        rec.minY = Math.min(rec.minY, Number(item.y || 0));
+        rec.maxY = Math.max(rec.maxY, Number(item.y || 0) + Number(item.h || 0));
+        rec.riskSum += risk;
+        rec.maxRisk = Math.max(rec.maxRisk, risk);
+    });
+    const arr = [...layers.values()].sort((a, b) => a.minY - b.minY).map((rec, idx, all) => {
+        const rank = idx;
+        const norm = all.length <= 1 ? 0 : idx / (all.length - 1);
+        const avgRisk = rec.items.length ? rec.riskSum / rec.items.length : 0;
+        const layerName = all.length <= 1 ? '单层' : (idx === 0 ? '底层' : (idx === all.length - 1 ? '上层' : `第 ${idx + 1} 层`));
+        return { ...rec, rank, norm, avgRisk, layerName };
+    });
+    return arr;
+}
+
+function getQuenchLayerInfoForItem(item, furnace) {
+    const layer = getQuenchItemLayerIndex(item, furnace);
+    const layers = getQuenchLayerRecords(furnace);
+    return layers.find(rec => rec.layer === layer) || { layer, rank: 0, norm: 0, layerName: '单层', avgRisk: 0, maxRisk: 0 };
+}
+
+function getQuenchLocalImmersionProgress(item, furnace, globalProgress = 0) {
+    const p = clamp01(globalProgress);
+    const info = getQuenchLayerInfoForItem(item, furnace);
+    // V3.2: 底层先入油，上层后入油。20% 前主要是出炉转移，20%~58% 依层穿透油面。
+    const onset = 0.20 + info.norm * 0.18;
+    const full = onset + 0.20 + info.norm * 0.06;
+    return clamp01((p - onset) / Math.max(0.08, full - onset));
+}
+
+function getQuenchLayerDiagnostics(furnace, progress = 0) {
+    const layers = getQuenchLayerRecords(furnace);
+    if (!layers.length) {
+        return {
+            layerCount: 0,
+            immersedLayerCount: 0,
+            fullyImmersedLayerCount: 0,
+            slowestLayerLabel: '-',
+            layerCoolingSpreadLabel: '-',
+            interLayerCoolingRisk: '低',
+            layerProgressText: '暂无分层数据',
+            bottomImmersionTime: '-',
+            middleImmersionTime: '-',
+            topImmersionTime: '-'
+        };
+    }
+    const p = clamp01(progress);
+    const enriched = layers.map(layer => {
+        const pseudoItem = { y: layer.minY, h: Math.max(1, layer.maxY - layer.minY), layer: layer.layer };
+        const local = getQuenchLocalImmersionProgress(pseudoItem, furnace, p);
+        return { ...layer, local };
+    });
+    const immersedLayerCount = enriched.filter(layer => layer.local > 0.05).length;
+    const fullyImmersedLayerCount = enriched.filter(layer => layer.local > 0.86).length;
+    const slowest = [...enriched].sort((a, b) => (a.local - b.local) || (b.avgRisk - a.avgRisk))[0];
+    const spread = Math.max(...enriched.map(l => l.local)) - Math.min(...enriched.map(l => l.local));
+    const risk = spread > 0.58 ? '高' : (spread > 0.30 ? '中' : '低');
+    const layerProgressText = `已入油 ${immersedLayerCount}/${layers.length} 层，完全入油 ${fullyImmersedLayerCount}/${layers.length} 层`;
+    const first = enriched[0];
+    const mid = enriched[Math.floor((enriched.length - 1) / 2)] || first;
+    const last = enriched[enriched.length - 1] || first;
+    function timeLabel(layer) {
+        if (!layer) return '-';
+        const seconds = 0.8 + layer.norm * 3.6 + layer.avgRisk * 1.8;
+        return `${seconds.toFixed(1)}s`;
+    }
+    return {
+        layerCount: layers.length,
+        immersedLayerCount,
+        fullyImmersedLayerCount,
+        slowestLayerLabel: slowest?.layerName || '-',
+        layerCoolingSpreadLabel: risk,
+        interLayerCoolingRisk: risk,
+        layerProgressText,
+        bottomImmersionTime: timeLabel(first),
+        middleImmersionTime: layers.length >= 3 ? timeLabel(mid) : '-',
+        topImmersionTime: layers.length >= 2 ? timeLabel(last) : '-',
+        layers: enriched.map(layer => ({ layer: layer.layer, label: layer.layerName, progress: Math.round(layer.local * 100), avgRisk: Math.round(layer.avgRisk * 100) }))
+    };
+}
+
+function getQuenchFurnaceLift(progress, furnace) {
+    const p = clamp01(progress);
+    const fh = Math.max(1, Number(furnace?.h || 900));
+    const maxLift = Math.max(180, Math.min(380, fh * 0.42));
+    const t = clamp01((p - 0.08) / 0.38);
+    const smooth = t * t * (3 - 2 * t);
+    return maxLift * (1 - smooth);
+}
+
+function getCurrentQuenchFurnaceGroup() {
+    return furnaceGroups && typeof furnaceGroups.get === 'function' ? furnaceGroups.get(currentFurnaceIndex) : null;
+}
+
+function updateQuenchFurnaceImmersionTransform(progress, furnace) {
+    const group = getCurrentQuenchFurnaceGroup();
+    if (!group || !furnace) return 0;
+    if (!group.userData._quenchOriginalPosition) {
+        group.userData._quenchOriginalPosition = group.position.clone();
+    }
+    const original = group.userData._quenchOriginalPosition;
+    const lift = getQuenchFurnaceLift(progress, furnace);
+    group.position.set(original.x, original.y + lift, original.z);
+    if (thermalSimRuntime.riskGroup) {
+        thermalSimRuntime.riskGroup.position.y = lift;
+    }
+    return lift;
+}
+
+function restoreQuenchFurnaceTransform() {
+    const group = getCurrentQuenchFurnaceGroup();
+    if (group && group.userData && group.userData._quenchOriginalPosition) {
+        group.position.copy(group.userData._quenchOriginalPosition);
+        delete group.userData._quenchOriginalPosition;
+    }
+}
+
+function normalizeQuenchFurnaceVisibilityMode(mode = 'auto') {
+    const key = String(mode || 'auto').toLowerCase();
+    return ['auto', 'hidden', 'ghost', 'shown'].includes(key) ? key : 'auto';
+}
+
+function getQuenchFurnaceVisibilityState(progress = thermalSimRuntime.progress || 0, mode = thermalSimRuntime.selectedQuenchFurnaceVisibilityMode || 'auto') {
+    const p = clamp01(progress);
+    const normalized = normalizeQuenchFurnaceVisibilityMode(mode);
+    if (normalized === 'hidden') {
+        return { mode: normalized, visible: false, opacityScale: 0, label: '炉体隐藏', description: '仅显示油槽、工装、工件和冷却风险，适合入油后观察。' };
+    }
+    if (normalized === 'ghost') {
+        return { mode: normalized, visible: true, opacityScale: 0.24, label: '炉体半透明', description: '保留少量设备语境，但不遮挡油槽和工件。' };
+    }
+    if (normalized === 'shown') {
+        return { mode: normalized, visible: true, opacityScale: 1, label: '炉体显示', description: '完整显示热处理设备语境，用于查看出炉前后空间关系。' };
+    }
+
+    if (p < 0.20) {
+        return { mode: normalized, visible: true, opacityScale: 1, label: '自动 · 出炉转移', description: '出炉转移阶段保留炉体，说明工装从炉内离开。' };
+    }
+    if (p < 0.45) {
+        const fade = 1 - ((p - 0.20) / 0.25);
+        return { mode: normalized, visible: true, opacityScale: 0.18 + fade * 0.42, label: '自动 · 炉体弱化', description: '入油穿透阶段弱化炉体，让油面和底层入油关系更清楚。' };
+    }
+    return { mode: normalized, visible: false, opacityScale: 0, label: '自动 · 入油后隐藏', description: '沸腾/对流冷却阶段隐藏炉体，突出油槽、气泡、蒸汽膜和风险工件。' };
+}
+
+function applyOpacityScaleToObject3D(obj, opacityScale = 1) {
+    if (!obj) return;
+    obj.traverse(child => {
+        if (!child.material) return;
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        materials.forEach(mat => {
+            if (!mat) return;
+            if (!mat.userData) mat.userData = {};
+            if (mat.userData._quenchBaseOpacity == null) {
+                mat.userData._quenchBaseOpacity = typeof mat.opacity === 'number' ? mat.opacity : 1;
+            }
+            mat.transparent = true;
+            mat.opacity = Math.max(0, Math.min(1, mat.userData._quenchBaseOpacity * opacityScale));
+            mat.needsUpdate = true;
+        });
+    });
+}
+
+function updateQuenchFurnaceVisibility(progress = thermalSimRuntime.progress || 0) {
+    const context = thermalSimRuntime.quenchEquipmentContext;
+    if (!context) return getQuenchFurnaceVisibilityState(progress);
+    const state = getQuenchFurnaceVisibilityState(progress);
+    context.visible = !!state.visible;
+    if (state.visible) {
+        applyOpacityScaleToObject3D(context, state.opacityScale);
+    }
+    context.userData.quenchVisibilityState = state;
+    return state;
+}
+
+let quenchBubbleTexture = null;
+function getQuenchBubbleTexture() {
+    if (quenchBubbleTexture) return quenchBubbleTexture;
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    const gradient = ctx.createRadialGradient(30, 28, 3, 32, 32, 30);
+    gradient.addColorStop(0, 'rgba(255,255,255,0.96)');
+    gradient.addColorStop(0.36, 'rgba(186,230,253,0.72)');
+    gradient.addColorStop(0.68, 'rgba(125,211,252,0.28)');
+    gradient.addColorStop(1, 'rgba(125,211,252,0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 64, 64);
+    quenchBubbleTexture = new THREE.CanvasTexture(canvas);
+    quenchBubbleTexture.needsUpdate = true;
+    return quenchBubbleTexture;
+}
+
+function calculateQuenchMediumMetrics(furnace, progress = 0, mediumMeta = getQuenchMediumMeta()) {
+    const items = furnace?.packedItems || [];
+    const risks = getQuenchRiskRecords(furnace);
+    const avgRisk = risks.length ? risks.reduce((sum, record) => sum + record.risk, 0) / risks.length : 0;
+    const maxRisk = risks.length ? risks[0].risk : 0;
+    const packedVolume = items.reduce((sum, item) => sum + Number((item.w || 0) * (item.h || 0) * (item.d || 0)), 0);
+    const furnaceVolume = Math.max(1, Number((furnace?.w || 1) * (furnace?.h || 1) * (furnace?.d || 1)));
+    const density = packedVolume / furnaceVolume;
+    const immersionUniformity = Math.max(42, Math.round(96 - avgRisk * 34 - maxRisk * 12 - density * 28));
+    const coolingUniformity = Math.max(38, Math.round(94 - avgRisk * 38 - density * 36));
+    const vaporFilmCount = risks.filter(r => r.risk * (mediumMeta.vaporFilmRiskFactor || 1) > 0.58).length;
+    const severeRiskCount = risks.filter(r => r.risk > 0.66).length;
+    const crackRiskScore = clamp01(maxRisk * (mediumMeta.coolingIntensity || 0.8) * 0.72 + density * 0.26);
+    const deformationRiskScore = clamp01(avgRisk * 0.62 + density * 0.34);
+    const p = clamp01(progress);
+    const layerDiag = getQuenchLayerDiagnostics(furnace, p);
+    let stageLabel = '出炉转移';
+    let stageDesc = `工装位于油面上方，红橙色表示高温状态；当前${layerDiag.layerProgressText}，重点关注出炉到入油延迟。`;
+    if (p >= 0.20 && p < 0.45) {
+        stageLabel = '入油穿透';
+        stageDesc = `工装沿 Y 方向下降穿过液面，底层先接触介质，上层延迟入油；${layerDiag.layerProgressText}。`;
+    } else if (p >= 0.45 && p < 0.76) {
+        stageLabel = '沸腾冷却';
+        stageDesc = `已入油层周围产生蓝白气泡，厚大件/密集层保留红橙核心；层间冷却差为${layerDiag.interLayerCoolingRisk}。`;
+    } else if (p >= 0.76) {
+        stageLabel = '对流冷却';
+        stageDesc = `气泡逐步减少，蓝色冷却区扩散；仍需关注${layerDiag.slowestLayerLabel}和中心厚大件的冷却滞后。`;
+    }
+    const worstRecord = risks[0];
+    const primaryReason = vaporFilmCount > 0
+        ? '高风险件集中在中心/下层或厚大件附近，可能形成蒸汽膜和中心冷却滞后。'
+        : (density > 0.12 ? '当前装载密度偏高，建议重点复核层间油液交换和搅拌覆盖。' : '当前入油路径较顺畅，主要关注个别厚大件中心冷却。');
+    return {
+        mode: 'quench',
+        processName: '淬火阶段',
+        mediumType: mediumMeta.key,
+        mediumLabel: mediumMeta.label,
+        mediumShortLabel: mediumMeta.shortLabel,
+        oilTemperature: mediumMeta.key === 'water' ? '25℃' : (mediumMeta.key === 'polymer' ? '35℃' : '60℃'),
+        agitationLevel: density > 0.18 ? '中高' : '中',
+        transferDelaySec: Math.round(6 + density * 18 + maxRisk * 7),
+        immersionUniformity,
+        coolingUniformity,
+        vaporFilmRiskCount: vaporFilmCount,
+        severeRiskCount,
+        deformationRisk: deformationRiskScore > 0.62 ? '高' : (deformationRiskScore > 0.42 ? '中' : '低'),
+        crackRisk: crackRiskScore > 0.66 ? '高' : (crackRiskScore > 0.45 ? '中' : '低'),
+        coreLagRisk: maxRisk > 0.62 ? '高' : (maxRisk > 0.42 ? '中' : '低'),
+        worstItemName: worstRecord?.name || '-',
+        primaryRiskReason: primaryReason,
+        densityRate: Math.round(density * 1000) / 10,
+        progress: Math.round(p * 100),
+        quenchStageLabel: stageLabel,
+        quenchStageDesc: stageDesc,
+        suggestion: vaporFilmCount > 0
+            ? '建议提高搅拌强度、降低单框密度，或调整厚大件/环件入油方向，减少中心区蒸汽膜停留。'
+            : (deformationRiskScore > 0.42 ? '建议复核薄长件/环件入油方向，必要时分层或分框淬火。' : '当前淬火介质覆盖较均衡，可继续结合回火稳定性复核。'),
+        visualNote: '油槽/液面表示淬火介质；炉体按阶段自动显示/弱化/隐藏；工装下降表示入油路径；波纹表示液面冲击；蓝白气泡只在已入油层附近增强；红橙线框表示高风险工件。',
+        layerCount: layerDiag.layerCount,
+        immersedLayerCount: layerDiag.immersedLayerCount,
+        fullyImmersedLayerCount: layerDiag.fullyImmersedLayerCount,
+        layerProgressText: layerDiag.layerProgressText,
+        bottomImmersionTime: layerDiag.bottomImmersionTime,
+        middleImmersionTime: layerDiag.middleImmersionTime,
+        topImmersionTime: layerDiag.topImmersionTime,
+        slowestCoolingLayer: layerDiag.slowestLayerLabel,
+        interLayerCoolingRisk: layerDiag.interLayerCoolingRisk,
+        layerCoolingSpreadLabel: layerDiag.layerCoolingSpreadLabel,
+        quenchLayerDetails: layerDiag.layers || [],
+        quenchFurnaceVisibilityMode: normalizeQuenchFurnaceVisibilityMode(thermalSimRuntime.selectedQuenchFurnaceVisibilityMode || 'auto'),
+        quenchFurnaceVisibilityLabel: getQuenchFurnaceVisibilityState(p).label,
+        quenchFurnaceVisibilityDesc: getQuenchFurnaceVisibilityState(p).description,
+        quenchModeName: '淬火介质 V3.4'
+    };
+}
+function updateQuenchWorkstationGlow() {
+    const group = thermalSimRuntime.quenchTankGroup;
+    if (!group) return;
+    const palette = getProcessSceneThemePalette('quench');
+    group.traverse(child => {
+        if (!child.userData?.isQuenchWorkstationGlow || !child.material) return;
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        materials.forEach(mat => {
+            if (mat.color) mat.color.setHex(palette.quenchPadColor);
+            mat.opacity = palette.quenchPadOpacity;
+            mat.needsUpdate = true;
+        });
+    });
+}
+
+function buildQuenchMediumVisual(furnace, mediumMeta) {
+    const group = new THREE.Group();
+    group.name = 'quenchMediumVisual';
+    const fw = Number(furnace.w || 900);
+    const fh = Number(furnace.h || 900);
+    const fd = Number(furnace.d || 900);
+    const y0 = THERMAL_BASE_Y;
+    const isRing = furnace.toolingType === 'ring-tooling';
+    const outerRadius = isRing ? getRingThermalRadii(furnace).outerRadius : Math.max(fw, fd) / 2;
+    const pad = Math.max(90, Math.min(180, Math.max(fw, fd) * 0.16));
+    const tankHeight = fh * 0.72;
+    const tankY = y0 + tankHeight / 2 - 24;
+    const liquidY = y0 + tankHeight * 0.46;
+    const sideMat = new THREE.MeshBasicMaterial({ color: mediumMeta.tankColor, transparent: true, opacity: 0.14, side: THREE.DoubleSide, depthWrite: false });
+    const edgeMat = new THREE.LineBasicMaterial({ color: mediumMeta.coolingColor, transparent: true, opacity: 0.56, depthWrite: false });
+    const surfaceMat = new THREE.MeshBasicMaterial({ color: mediumMeta.surfaceColor, transparent: true, opacity: 0.36, side: THREE.DoubleSide, depthWrite: false });
+    let tankWidth = fw + pad * 2;
+    let tankDepth = fd + pad * 2;
+    let tankRadius = outerRadius + pad * 0.65;
+
+    if (isRing) {
+        const radius = tankRadius;
+        const wall = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, tankHeight, 112, 1, true), sideMat);
+        wall.position.y = tankY;
+        wall.renderOrder = 10;
+        group.add(wall);
+        const bottomRing = buildRingCircleLine(radius, y0 - 24, mediumMeta.coolingColor, 0.30);
+        const topRing = buildRingCircleLine(radius, y0 + tankHeight - 24, mediumMeta.coolingColor, 0.62);
+        group.add(bottomRing, topRing);
+        const surface = new THREE.Mesh(new THREE.CircleGeometry(radius * 0.96, 112), surfaceMat);
+        surface.rotation.x = -Math.PI / 2;
+        surface.position.y = liquidY;
+        surface.renderOrder = 16;
+        surface.userData.isQuenchLiquidSurface = true;
+        group.add(surface);
+    } else {
+        const tw = tankWidth;
+        const td = tankDepth;
+        const boxGeo = new THREE.BoxGeometry(tw, tankHeight, td);
+        const box = new THREE.Mesh(boxGeo, sideMat);
+        box.position.y = tankY;
+        box.renderOrder = 10;
+        group.add(box);
+        const edges = new THREE.LineSegments(new THREE.EdgesGeometry(boxGeo), edgeMat);
+        edges.position.copy(box.position);
+        edges.renderOrder = 18;
+        group.add(edges);
+        // 液位线和槽壁内框更明确，避免普通料框看起来像透明方块。
+        const surface = new THREE.Mesh(new THREE.PlaneGeometry(tw * 0.96, td * 0.96), surfaceMat);
+        surface.rotation.x = -Math.PI / 2;
+        surface.position.y = liquidY;
+        surface.renderOrder = 16;
+        surface.userData.isQuenchLiquidSurface = true;
+        group.add(surface);
+        const liquidEdge = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(tw * 0.96, 2, td * 0.96)), edgeMat.clone());
+        liquidEdge.position.set(0, liquidY, 0);
+        liquidEdge.renderOrder = 19;
+        group.add(liquidEdge);
+    }
+
+    // V3.4：淬火工位冷蓝光。让油槽从深色/浅色背景里独立出来，不再和炉体/工装糊在一起。
+    const themePalette = getProcessSceneThemePalette('quench');
+    const glowGeo = isRing
+        ? new THREE.CircleGeometry(tankRadius * 1.10, 112)
+        : new THREE.PlaneGeometry(tankWidth * 1.10, tankDepth * 1.10);
+    const glowMat = new THREE.MeshBasicMaterial({
+        color: themePalette.quenchPadColor,
+        transparent: true,
+        opacity: themePalette.quenchPadOpacity,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        depthTest: true,
+        blending: THREE.AdditiveBlending
+    });
+    const workstationGlow = new THREE.Mesh(glowGeo, glowMat);
+    workstationGlow.rotation.x = -Math.PI / 2;
+    workstationGlow.position.y = y0 - 32;
+    workstationGlow.renderOrder = 4;
+    workstationGlow.userData.isQuenchWorkstationGlow = true;
+    group.add(workstationGlow);
+
+    // 入油路径：向下箭头 + 当前液面冲击语义。
+    const arrowMat = new THREE.LineBasicMaterial({ color: 0x7dd3fc, transparent: true, opacity: 0.72, depthWrite: false });
+    const arrowCount = isRing ? 10 : 8;
+    for (let i = 0; i < arrowCount; i++) {
+        const a = (i / arrowCount) * Math.PI * 2;
+        const x = isRing ? Math.cos(a) * outerRadius * 0.76 : (-fw / 2 + (i % 4 + 0.5) * fw / 4);
+        const z = isRing ? Math.sin(a) * outerRadius * 0.76 : (i < 4 ? -fd * 0.34 : fd * 0.34);
+        const yTop = y0 + fh + 150;
+        const yEnd = liquidY + 12;
+        const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, yTop, z), new THREE.Vector3(x, yEnd, z)]);
+        const line = new THREE.Line(geo, arrowMat);
+        line.renderOrder = 26;
+        group.add(line);
+        const cone = new THREE.Mesh(new THREE.ConeGeometry(13, 34, 18), new THREE.MeshBasicMaterial({ color: 0x7dd3fc, transparent: true, opacity: 0.78, depthWrite: false }));
+        cone.rotation.x = Math.PI;
+        cone.position.set(x, yEnd + 18, z);
+        cone.renderOrder = 27;
+        group.add(cone);
+    }
+
+    // V3.1：油面波纹 / 入油冲击圈。用圆环低成本表达液面冲击，不做真实流体。
+    const waveGroup = new THREE.Group();
+    waveGroup.name = 'quenchSurfaceWaveRings';
+    const waveBaseRadius = isRing ? tankRadius * 0.22 : Math.min(tankWidth, tankDepth) * 0.16;
+    const waveMaxRadius = isRing ? tankRadius * 0.92 : Math.min(tankWidth, tankDepth) * 0.52;
+    for (let i = 0; i < 4; i++) {
+        const ringGeo = new THREE.RingGeometry(waveBaseRadius + i * 28, waveBaseRadius + i * 28 + 4, 96);
+        const ringMat = new THREE.MeshBasicMaterial({ color: 0xbae6fd, transparent: true, opacity: 0.20, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending });
+        const ring = new THREE.Mesh(ringGeo, ringMat);
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.y = liquidY + 4 + i * 0.4;
+        ring.renderOrder = 28;
+        ring.userData = { isQuenchWaveRing: true, waveIndex: i, baseRadius: waveBaseRadius, maxRadius: waveMaxRadius };
+        waveGroup.add(ring);
+    }
+    group.add(waveGroup);
+
+    // V3.1：冷却层和蒸汽膜语义层，随动画阶段改变透明度。
+    const coolingLayer = isRing
+        ? new THREE.Mesh(new THREE.CylinderGeometry(Math.max(outerRadius * 0.92, 1), Math.max(outerRadius * 0.92, 1), fh * 0.34, 96, 1, true), new THREE.MeshBasicMaterial({ color: mediumMeta.coolingColor, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }))
+        : new THREE.Mesh(new THREE.BoxGeometry(fw * 0.96, fh * 0.34, fd * 0.96), new THREE.MeshBasicMaterial({ color: mediumMeta.coolingColor, transparent: true, opacity: 0.10, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+    coolingLayer.position.y = liquidY - fh * 0.18;
+    coolingLayer.renderOrder = 17;
+    coolingLayer.userData.isQuenchCoolingLayer = true;
+    group.add(coolingLayer);
+
+    const riskRecords = getQuenchRiskRecords(furnace);
+    const particleCount = Math.min(220, Math.max(88, (furnace.packedItems || []).length * 4));
+    const positions = [];
+    const colors = [];
+    const base = [];
+    const hotItems = riskRecords.slice(0, Math.min(18, riskRecords.length));
+    const bubbleColor = new THREE.Color(mediumMeta.bubbleColor);
+    for (let i = 0; i < particleCount; i++) {
+        const anchor = hotItems.length ? hotItems[i % hotItems.length] : null;
+        let x, y, z, risk = anchor?.risk || 0.35;
+        if (anchor?.item) {
+            const center = getItemCenterWorld(anchor.item, furnace);
+            const spread = Math.max(24, Math.min(90, Math.max(anchor.item.w || 1, anchor.item.d || 1) * 0.42));
+            x = center.x + (Math.random() - 0.5) * spread;
+            z = center.z + (Math.random() - 0.5) * spread;
+            y = Math.max(y0 + 12, Math.min(liquidY - 8, center.y + (Math.random() - 0.5) * 50));
+        } else if (isRing) {
+            const a = Math.random() * Math.PI * 2;
+            const r = Math.sqrt(Math.random()) * (outerRadius + pad * 0.35);
+            x = Math.cos(a) * r;
+            z = Math.sin(a) * r;
+            y = y0 + Math.random() * tankHeight * 0.55;
+        } else {
+            x = (Math.random() - 0.5) * (fw + pad * 1.2);
+            z = (Math.random() - 0.5) * (fd + pad * 1.2);
+            y = y0 + Math.random() * tankHeight * 0.55;
+        }
+        positions.push(x, y, z);
+        const c = bubbleColor.clone().lerp(new THREE.Color(0xffffff), 0.38 + Math.random() * 0.30);
+        colors.push(c.r, c.g, c.b);
+        const layerInfo = anchor?.item ? getQuenchLayerInfoForItem(anchor.item, furnace) : { norm: 0.35 };
+        const layerOnset = 0.20 + (layerInfo.norm || 0) * 0.18 + Math.random() * 0.08;
+        base.push(x, y, z, 0.55 + Math.random() * 0.95, Math.random(), risk, layerInfo.norm || 0, layerOnset);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    const mat = new THREE.PointsMaterial({
+        size: Math.max(14, Math.min(32, Math.max(fw, fd) / 36)),
+        map: getQuenchBubbleTexture(),
+        color: 0xffffff,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.62,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+    });
+    const bubbles = new THREE.Points(geo, mat);
+    bubbles.name = 'quenchBubbleParticles';
+    bubbles.userData = { isQuenchParticles: true, base, tankHeight, y0, liquidY };
+    bubbles.renderOrder = 30;
+    group.add(bubbles);
+    thermalSimRuntime.quenchParticleGroup = bubbles;
+
+    const label = buildThermalHeatmapLabel('入油 / 沸腾冷却', `${mediumMeta.label} · 波纹=液面冲击 · 气泡=沸腾换热`, new THREE.Vector3(-fw / 2 - 20, y0 + fh + 120, -fd / 2 - 40));
+    label.userData.isQuenchLabel = true;
+    group.add(label);
+    group.userData = { isQuenchMediumVisual: true, mediumType: mediumMeta.key, waveGroup, coolingLayer, liquidY, tankHeight, y0 };
+    return group;
+}
+function applyQuenchTintToItems(furnace, progress = 0, mediumMeta = getQuenchMediumMeta()) {
+    const group = furnaceGroups.get(currentFurnaceIndex);
+    if (!group || !furnace) return;
+    const p = clamp01(progress);
+    const itemMap = new Map((furnace.packedItems || []).map(item => [item.id, item]));
+    const hot = new THREE.Color(0xf97316);
+    const cool = new THREE.Color(mediumMeta.coolingColor);
+    const riskColor = new THREE.Color(0xef4444);
+    group.traverse(child => {
+        if (!child.isMesh || !child.userData || !child.userData.itemId) return;
+        const item = itemMap.get(child.userData.itemId);
+        const risk = item ? estimateQuenchItemRisk(item, furnace) : 0.3;
+        const layerImmersion = item ? getQuenchLocalImmersionProgress(item, furnace, p) : p;
+        const localCooling = clamp01(layerImmersion * (1.12 - risk * 0.46));
+        const tint = new THREE.Color().lerpColors(hot, cool, localCooling);
+        if (risk > 0.60 && p > 0.30) tint.lerp(riskColor, 0.22);
+        getMeshMaterials(child).forEach(mat => {
+            if (!mat.color) return;
+            saveOriginalMaterialIfNeeded(mat);
+            mat.color.copy(tint);
+            if (mat.emissive) {
+                mat.emissive.copy(tint);
+                mat.emissive.multiplyScalar(0.35);
+                mat.emissiveIntensity = 0.10 + (1 - localCooling) * 0.34;
+            }
+            mat.transparent = true;
+            mat.opacity = 0.56 + localCooling * 0.20;
+            mat.needsUpdate = true;
+        });
+    });
+}
+
+function buildQuenchRiskMarkers(furnace) {
+    const group = new THREE.Group();
+    group.name = 'quenchRiskMarkers';
+    const sorted = getQuenchRiskRecords(furnace).slice(0, 6);
+    sorted.forEach(({ item, risk, name }, idx) => {
+        if (risk < 0.42) return;
+        const center = getItemCenterWorld(item, furnace);
+        const geometry = new THREE.BoxGeometry((item.w || 1) + 18, (item.h || 1) + 18, (item.d || 1) + 18);
+        const marker = new THREE.LineSegments(new THREE.EdgesGeometry(geometry), new THREE.LineBasicMaterial({ color: idx === 0 ? 0xef4444 : 0xf97316, transparent: true, opacity: idx === 0 ? 0.92 : 0.66, depthWrite: false, depthTest: false }));
+        marker.position.copy(center);
+        marker.renderOrder = 42;
+        group.add(marker);
+
+        if (risk > 0.56) {
+            // 紫灰色薄膜：表示蒸汽膜/局部换热不良风险，不等同于真实液体仿真。
+            const film = new THREE.Mesh(
+                new THREE.BoxGeometry((item.w || 1) + 26, Math.max(8, (item.h || 1) * 0.16), (item.d || 1) + 26),
+                new THREE.MeshBasicMaterial({ color: 0x8b5cf6, transparent: true, opacity: 0.18, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending })
+            );
+            film.position.copy(center).add(new THREE.Vector3(0, Math.max(4, (item.h || 1) * 0.38), 0));
+            film.renderOrder = 41;
+            film.userData.isQuenchVaporFilmMarker = true;
+            group.add(film);
+        }
+
+        if (idx < 3) {
+            group.add(createDimensionLabelSprite(idx === 0 ? `最高风险 · ${name}` : `风险 #${idx + 1}`, center.clone().add(new THREE.Vector3(0, (item.h || 1) * 0.72 + 58, 0)), {
+                width: idx === 0 ? 220 : 112,
+                height: 42,
+                color: '#fee2e2',
+                bg: 'rgba(69, 10, 10, 0.74)',
+                stroke: 'rgba(248, 113, 113, 0.62)'
+            }));
+        }
+    });
+    return group;
+}
+function updateQuenchMediumAnimation(now) {
+    if (thermalSimRuntime.activeMode !== 'quench') return;
+    if (thermalSimRuntime.isPlaying && !thermalSimRuntime.paused) {
+        const duration = Math.max(1200, Number(thermalSimRuntime.quenchDurationMs || 8500));
+        const elapsed = now - (thermalSimRuntime.startedAt || now);
+        thermalSimRuntime.progress = clamp01(elapsed / duration);
+    }
+    const progress = clamp01(thermalSimRuntime.progress || 0);
+    const furnace = getCurrentThermalFurnace();
+    if (furnace) updateQuenchFurnaceImmersionTransform(progress, furnace);
+    updateQuenchFurnaceVisibility(progress);
+    const quenchVisual = thermalSimRuntime.quenchTankGroup;
+    const liquidSurface = quenchVisual?.children?.find(child => child.userData?.isQuenchLiquidSurface);
+    const coolingLayer = quenchVisual?.userData?.coolingLayer;
+    const waveGroup = quenchVisual?.userData?.waveGroup;
+
+    if (liquidSurface && liquidSurface.material) {
+        liquidSurface.position.y = (quenchVisual.userData?.liquidY || liquidSurface.position.y) + Math.sin(now * 0.003) * 2.4 * Math.min(1, Math.max(0.15, progress));
+        liquidSurface.material.opacity = 0.22 + Math.sin(progress * Math.PI) * 0.18;
+        liquidSurface.material.needsUpdate = true;
+    }
+    if (coolingLayer && coolingLayer.material) {
+        const layerProgress = clamp01((progress - 0.28) / 0.62);
+        coolingLayer.material.opacity = 0.06 + layerProgress * 0.20;
+        coolingLayer.scale.y = 0.72 + layerProgress * 0.55;
+        coolingLayer.position.y = (quenchVisual.userData?.liquidY || coolingLayer.position.y) - 80 - layerProgress * 90;
+        coolingLayer.material.needsUpdate = true;
+    }
+    if (waveGroup) {
+        waveGroup.children.forEach(ring => {
+            if (!ring.userData?.isQuenchWaveRing) return;
+            const idx = ring.userData.waveIndex || 0;
+            const phase = (progress * 1.65 + idx * 0.22 + now * 0.000035) % 1;
+            const amp = progress > 0.12 && progress < 0.78 ? 1 : 0.28;
+            const scale = 0.18 + phase * 2.4;
+            ring.scale.setScalar(scale);
+            if (ring.material) {
+                ring.material.opacity = Math.max(0, (1 - phase) * 0.34 * amp);
+                ring.material.needsUpdate = true;
+            }
+        });
+    }
+
+    const bubbles = thermalSimRuntime.quenchParticleGroup;
+    if (bubbles && bubbles.geometry && bubbles.userData?.base) {
+        const attr = bubbles.geometry.getAttribute('position');
+        const base = bubbles.userData.base;
+        const y0 = bubbles.userData.y0 || THERMAL_BASE_Y;
+        const liquidY = bubbles.userData.liquidY || (y0 + 320);
+        const tankHeight = bubbles.userData.tankHeight || 600;
+        const stageBoost = progress < 0.28 ? 0.25 : (progress < 0.76 ? 1.0 : 0.55);
+        for (let i = 0; i < attr.count; i++) {
+            const bi = i * 8;
+            const risk = base[bi + 5] || 0.4;
+            const onset = base[bi + 7] == null ? 0.24 : base[bi + 7];
+            const localActive = clamp01((progress - onset) / 0.16);
+            const drift = (now * 0.00028 * base[bi + 3] + base[bi + 4] + progress * 0.85) % 1;
+            const riseRange = tankHeight * (0.22 + risk * 0.24);
+            if (localActive <= 0.02) {
+                attr.setXYZ(i, base[bi], y0 - 220 - i * 0.05, base[bi + 2]);
+            } else {
+                attr.setXYZ(
+                    i,
+                    base[bi] + Math.sin(now * 0.0014 + i) * (3 + risk * 7),
+                    Math.min(liquidY + 32, base[bi + 1] + drift * riseRange * localActive),
+                    base[bi + 2] + Math.cos(now * 0.0011 + i) * (3 + risk * 7)
+                );
+            }
+        }
+        attr.needsUpdate = true;
+        if (bubbles.material) {
+            bubbles.material.opacity = 0.16 + Math.sin(progress * Math.PI) * 0.50 * stageBoost;
+            bubbles.material.size = (bubbles.material.size || 20) * (1 + Math.sin(now * 0.004) * 0.002);
+            bubbles.material.needsUpdate = true;
+        }
+    }
+    const mediumMeta = getQuenchMediumMeta(thermalSimRuntime.selectedQuenchMediumType || 'oil');
+    const shouldUpdate = !thermalSimRuntime.lastQuenchVisualUpdateAt || now - thermalSimRuntime.lastQuenchVisualUpdateAt > 160 || progress >= 1;
+    if (furnace && shouldUpdate) {
+        thermalSimRuntime.lastQuenchVisualUpdateAt = now;
+        applyQuenchTintToItems(furnace, progress, mediumMeta);
+        thermalSimRuntime.metrics = calculateQuenchMediumMetrics(furnace, progress, mediumMeta);
+        if (thermalSimRuntime.onUpdate && thermalSimRuntime.metrics) thermalSimRuntime.onUpdate(thermalSimRuntime.metrics);
+    }
+    if (progress >= 1 && thermalSimRuntime.isPlaying) {
+        thermalSimRuntime.isPlaying = false;
+        thermalSimRuntime.paused = false;
+        if (thermalSimRuntime.onFinish && thermalSimRuntime.metrics) thermalSimRuntime.onFinish(thermalSimRuntime.metrics);
+    }
+}
+export function renderQuenchMediumSimulation(options = {}) {
+    const furnace = getCurrentThermalFurnace();
+    if (!furnace) return null;
+    clearThermalGroupChildren();
+    restoreThermalItemMaterials();
+    setThermalSceneTheme(true, 'quench');
+    if (options.mediumType) thermalSimRuntime.selectedQuenchMediumType = getQuenchMediumMeta(options.mediumType).key;
+    const mediumMeta = getQuenchMediumMeta(thermalSimRuntime.selectedQuenchMediumType || 'oil');
+    const progress = clamp01(options.progress != null ? Number(options.progress) : (thermalSimRuntime.progress || 0.08));
+    const group = ensureThermalSimulationGroup();
+    const equipmentContext = buildProcessEquipmentContext(furnace, 'quench');
+    if (equipmentContext) {
+        equipmentContext.name = 'quenchStageFurnaceContext';
+        group.add(equipmentContext);
+    }
+    thermalSimRuntime.quenchEquipmentContext = equipmentContext || null;
+    const visual = buildQuenchMediumVisual(furnace, mediumMeta);
+    const risk = buildQuenchRiskMarkers(furnace);
+    group.add(visual);
+    group.add(risk);
+    group.visible = true;
+    thermalSimRuntime.visible = true;
+    thermalSimRuntime.activeMode = 'quench';
+    thermalSimRuntime.isPlaying = false;
+    thermalSimRuntime.paused = false;
+    thermalSimRuntime.progress = progress;
+    thermalSimRuntime.startedAt = performance.now();
+    thermalSimRuntime.quenchTankGroup = visual;
+    thermalSimRuntime.riskGroup = risk;
+    thermalSimRuntime.metrics = calculateQuenchMediumMetrics(furnace, progress, mediumMeta);
+    applyQuenchTintToItems(furnace, progress, mediumMeta);
+    updateQuenchFurnaceImmersionTransform(progress, furnace);
+    updateQuenchFurnaceVisibility(progress);
+    return thermalSimRuntime.metrics;
+}
+
+export function playQuenchMediumSimulation(options = {}) {
+    if (options && options.durationMs) {
+        thermalSimRuntime.quenchDurationMs = Math.max(1200, Number(options.durationMs) || 8500);
+    }
+    if (thermalSimRuntime.activeMode !== 'quench' || !thermalSimRuntime.visible) {
+        renderQuenchMediumSimulation({ mediumType: thermalSimRuntime.selectedQuenchMediumType || 'oil', progress: 0 });
+    }
+    const duration = Math.max(1200, Number(thermalSimRuntime.quenchDurationMs || 8500));
+    const startProgress = clamp01(options.startProgress != null ? Number(options.startProgress) : (thermalSimRuntime.progress || 0));
+    thermalSimRuntime.progress = startProgress >= 1 ? 0 : startProgress;
+    thermalSimRuntime.isPlaying = true;
+    thermalSimRuntime.paused = false;
+    thermalSimRuntime.startedAt = performance.now() - thermalSimRuntime.progress * duration;
+    thermalSimRuntime.onUpdate = typeof options.onUpdate === 'function' ? options.onUpdate : null;
+    thermalSimRuntime.onFinish = typeof options.onFinish === 'function' ? options.onFinish : null;
+    thermalSimRuntime.lastQuenchVisualUpdateAt = 0;
+    if (thermalSimRuntime.metrics) thermalSimRuntime.metrics.animationPlaying = true;
+    return thermalSimRuntime.metrics;
+}
+
+export function pauseQuenchMediumSimulation() {
+    if (thermalSimRuntime.activeMode === 'quench') {
+        thermalSimRuntime.paused = true;
+        thermalSimRuntime.isPlaying = false;
+        if (thermalSimRuntime.metrics) thermalSimRuntime.metrics.animationPlaying = false;
+    }
+    return thermalSimRuntime.metrics;
+}
+
+export function resetQuenchMediumSimulation() {
+    if (thermalSimRuntime.activeMode === 'quench') {
+        thermalSimRuntime.progress = 0;
+        thermalSimRuntime.isPlaying = false;
+        thermalSimRuntime.paused = false;
+        const metrics = renderQuenchMediumSimulation({ mediumType: thermalSimRuntime.selectedQuenchMediumType || 'oil', progress: 0 });
+        return metrics;
+    }
+    return thermalSimRuntime.metrics;
+}
+
+export function setQuenchMediumType(mediumType = 'oil') {
+    thermalSimRuntime.selectedQuenchMediumType = getQuenchMediumMeta(mediumType).key;
+    return renderQuenchMediumSimulation({ mediumType: thermalSimRuntime.selectedQuenchMediumType, progress: thermalSimRuntime.progress || 0.08 });
+}
+
+export function setQuenchFurnaceVisibilityMode(mode = 'auto') {
+    thermalSimRuntime.selectedQuenchFurnaceVisibilityMode = normalizeQuenchFurnaceVisibilityMode(mode);
+    updateQuenchFurnaceVisibility(thermalSimRuntime.progress || 0);
+    const furnace = getCurrentThermalFurnace();
+    if (furnace && thermalSimRuntime.activeMode === 'quench') {
+        const mediumMeta = getQuenchMediumMeta(thermalSimRuntime.selectedQuenchMediumType || 'oil');
+        thermalSimRuntime.metrics = calculateQuenchMediumMetrics(furnace, thermalSimRuntime.progress || 0, mediumMeta);
+    }
+    return thermalSimRuntime.metrics;
+}
+
+export function getQuenchMediumRuntime() {
+    const mediumMeta = getQuenchMediumMeta(thermalSimRuntime.selectedQuenchMediumType || 'oil');
+    return {
+        visible: thermalSimRuntime.visible && thermalSimRuntime.activeMode === 'quench',
+        metrics: thermalSimRuntime.activeMode === 'quench' ? thermalSimRuntime.metrics : null,
+        mediumType: mediumMeta.key,
+        mediumMeta,
+        furnaceVisibilityMode: normalizeQuenchFurnaceVisibilityMode(thermalSimRuntime.selectedQuenchFurnaceVisibilityMode || 'auto'),
+        furnaceVisibilityState: getQuenchFurnaceVisibilityState(thermalSimRuntime.progress || 0),
+        isPlaying: thermalSimRuntime.activeMode === 'quench' && thermalSimRuntime.isPlaying,
+        paused: thermalSimRuntime.activeMode === 'quench' && thermalSimRuntime.paused,
+        progress: thermalSimRuntime.activeMode === 'quench' ? thermalSimRuntime.progress : 0,
+        durationMs: thermalSimRuntime.quenchDurationMs || 8500
+    };
 }
 
 // ==================== HELPERS ====================

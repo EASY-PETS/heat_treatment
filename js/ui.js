@@ -904,7 +904,7 @@ export function renderThermalSimulationPanel(metrics = null, mode = null) {
         panel.innerHTML = `
             <div class="thermal-sim-empty">
                 生成方案后显示工艺仿真。<br>
-                当前版本包含：升温热场 + 辐射暴露 + 介质场气流冷却 + 气氛覆盖。
+                当前版本包含：炉内阶段（升温热场、辐射暴露、气流冷却、气氛覆盖）+ 淬火阶段（淬火介质）。
             </div>
         `;
         return;
@@ -924,9 +924,9 @@ export function renderThermalSimulationPanel(metrics = null, mode = null) {
     if (activeMode === 'idle') {
         panel.innerHTML = `
             <div class="thermal-sim-empty process-sim-idle-card">
-                <div style="font-weight:800;color:#0f172a;margin-bottom:8px;">请选择一种工艺仿真模式</div>
+                <div style="font-weight:800;color:#0f172a;margin-bottom:8px;">请选择一个工艺阶段 / 仿真模式</div>
                 <div style="line-height:1.7;color:#64748b;">
-                    升温热场看温度分布，辐射暴露看热源遮挡，气流冷却看背风通道，气氛覆盖看表面介质覆盖。
+                    炉内阶段检查升温、辐射、气流、气氛；淬火阶段检查入油/沸腾/对流冷却与变形开裂风险。
                 </div>
                 <div style="margin-top:10px;color:#94a3b8;font-size:11px;">再次点击已打开的模式会退出仿真；点击“退出仿真”会清空 3D 仿真层。</div>
             </div>
@@ -1097,6 +1097,130 @@ export function renderThermalSimulationPanel(metrics = null, mode = null) {
             <div class="thermal-stage-card atmosphere-card">
                 <div class="thermal-stage-title">调整建议</div>
                 <div class="thermal-mini-note strong-note">${escapeSimHtml(primaryAdjustment)}</div>
+            </div>
+        `;
+        return;
+    }
+
+    if (activeMode === 'quench') {
+        const mediumType = metrics?.mediumType || 'oil';
+        const mediumLabel = metrics?.mediumLabel || '淬火油';
+        const mediumShortLabel = metrics?.mediumShortLabel || 'Oil · 60℃';
+        const oilTemperature = metrics?.oilTemperature || '60℃';
+        const agitationLevel = metrics?.agitationLevel || '中';
+        const transferDelaySec = metrics?.transferDelaySec ?? 8;
+        const immersionUniformity = metrics?.immersionUniformity ?? Math.max(48, Math.round(86 - densityRate * 0.38));
+        const coolingUniformity = metrics?.coolingUniformity ?? Math.max(42, Math.round(84 - densityRate * 0.42));
+        const vaporFilmRiskCount = metrics?.vaporFilmRiskCount ?? 0;
+        const deformationRisk = metrics?.deformationRisk || '中';
+        const crackRisk = metrics?.crackRisk || '低';
+        const coreLagRisk = metrics?.coreLagRisk || '中';
+        const worstItemName = metrics?.worstItemName || '-';
+        const progress = typeof metrics?.progress === 'number' ? metrics.progress : 8;
+        const stageLabel = metrics?.quenchStageLabel || (progress < 18 ? '入油前转移' : (progress < 45 ? '入油穿透' : (progress < 76 ? '沸腾冷却' : '对流冷却')));
+        const stageDesc = metrics?.quenchStageDesc || '淬火介质仿真用于解释出炉转移、入油一致性、蒸汽膜和中心冷却滞后。';
+        const suggestion = metrics?.suggestion || '建议结合工件厚薄、单框密度和油槽搅拌强度复核变形/开裂风险。';
+        const visualNote = metrics?.visualNote || '油槽/液面表示淬火介质；波纹表示入油冲击；蓝白气泡表示沸腾换热；紫灰薄膜表示蒸汽膜风险；红橙线框表示高风险工件。';
+        const primaryRiskReason = metrics?.primaryRiskReason || '优先复核中心/下层厚大件、贴靠面和搅拌覆盖不足区域。';
+        const layerProgressText = metrics?.layerProgressText || '分层入油数据计算中';
+        const bottomImmersionTime = metrics?.bottomImmersionTime || '-';
+        const middleImmersionTime = metrics?.middleImmersionTime || '-';
+        const topImmersionTime = metrics?.topImmersionTime || '-';
+        const slowestCoolingLayer = metrics?.slowestCoolingLayer || '-';
+        const quenchFurnaceVisibilityMode = metrics?.quenchFurnaceVisibilityMode || 'auto';
+        const quenchFurnaceVisibilityLabel = metrics?.quenchFurnaceVisibilityLabel || '自动 · 阶段联动';
+        const quenchFurnaceVisibilityDesc = metrics?.quenchFurnaceVisibilityDesc || '出炉转移显示炉体，入油穿透弱化炉体，沸腾/对流冷却阶段隐藏炉体。';
+        const interLayerCoolingRisk = metrics?.interLayerCoolingRisk || '低';
+        const layerCoolingSpreadLabel = metrics?.layerCoolingSpreadLabel || interLayerCoolingRisk;
+        const mediumOptions = [
+            { key: 'oil', label: '淬火油', sub: 'Oil · 60℃' },
+            { key: 'polymer', label: '聚合物淬火液', sub: 'Polymer' },
+            { key: 'water', label: '水淬', sub: 'Water' }
+        ];
+        const optionHtml = mediumOptions.map(opt => `
+            <option value="${opt.key}" ${mediumType === opt.key ? 'selected' : ''}>${escapeSimHtml(opt.label)} · ${escapeSimHtml(opt.sub)}</option>
+        `).join('');
+        const presetHtml = mediumOptions.map(opt => `
+            <button class="plan-action-btn quench-medium-preset ${mediumType === opt.key ? 'active' : ''}" type="button" data-action="quench-medium-preset" data-quench-medium="${opt.key}">
+                ${escapeSimHtml(opt.label)}
+            </button>
+        `).join('');
+        const riskColor = deformationRisk === '高' || crackRisk === '高' ? '#dc2626' : (deformationRisk === '中' || crackRisk === '中' ? '#f97316' : '#16a34a');
+
+        panel.innerHTML = `
+            <div class="thermal-header-card compact quench-card">
+                <div class="thermal-title">🛢️ ${escapeSimHtml(furnace.instanceId || '当前炉次')} · 淬火阶段 · 淬火介质 V3.3</div>
+                <div class="thermal-subtitle">
+                    V3.4 增强场景主题：淬火/气流/气氛可在顶部选择浅灰、工业蓝灰或默认黑色；淬火阶段继续按进度显示/弱化/隐藏炉体，让油槽、液面和风险件更清楚。
+                </div>
+                <div class="thermal-metric-grid">
+                    <div class="thermal-metric"><span>入油一致性</span><strong>${immersionUniformity} 分</strong></div>
+                    <div class="thermal-metric"><span>冷却均匀性</span><strong>${coolingUniformity} 分</strong></div>
+                    <div class="thermal-metric"><span>蒸汽膜风险件</span><strong>${vaporFilmRiskCount} 件</strong></div>
+                    <div class="thermal-metric"><span>最高风险工件</span><strong>${escapeSimHtml(worstItemName)}</strong></div>
+                </div>
+                <div class="thermal-legend airflow-legend">
+                    <span>冷却不足</span><div class="airflow-gradient" style="background:linear-gradient(90deg,#ef4444,#f97316,#fbbf24,#38bdf8);"></div><span>冷却充分</span>
+                </div>
+                <div class="thermal-mini-note">${escapeSimHtml(visualNote)}</div>
+            </div>
+
+            <div class="thermal-risk-card quench-card">
+                <div class="thermal-stage-title">淬火介质</div>
+                <div class="thermal-risk-row"><span>当前介质</span><strong>${escapeSimHtml(mediumLabel)}</strong></div>
+                <div class="thermal-risk-row"><span>参考温度</span><strong>${escapeSimHtml(oilTemperature)}</strong></div>
+                <div class="thermal-risk-row"><span>搅拌强度</span><strong>${escapeSimHtml(agitationLevel)}</strong></div>
+                <select class="thermal-speed-select" data-action="quench-medium-type" style="width:100%;margin-top:8px;">
+                    ${optionHtml}
+                </select>
+                <div class="airflow-preset-row" style="margin-top:8px;">${presetHtml}</div>
+                <div class="thermal-mini-note">${escapeSimHtml(mediumShortLabel)}：V3.3 为解释型近似仿真，不做真实 CFD；用于展示入油顺序、层间冷却差、液面冲击、沸腾换热、视图过滤和风险位置。</div>
+            </div>
+
+            <div class="thermal-risk-card quench-card">
+                <div class="thermal-stage-title">淬火视图过滤</div>
+                <div class="thermal-risk-row"><span>炉体显示</span><strong>${escapeSimHtml(quenchFurnaceVisibilityLabel)}</strong></div>
+                <select class="thermal-speed-select" data-action="quench-furnace-visibility" style="width:100%;margin-top:8px;">
+                    <option value="auto" ${quenchFurnaceVisibilityMode === 'auto' ? 'selected' : ''}>自动：按阶段显示/弱化/隐藏</option>
+                    <option value="hidden" ${quenchFurnaceVisibilityMode === 'hidden' ? 'selected' : ''}>隐藏炉体：只看油槽和工件</option>
+                    <option value="ghost" ${quenchFurnaceVisibilityMode === 'ghost' ? 'selected' : ''}>半透明炉体：保留空间参照</option>
+                    <option value="shown" ${quenchFurnaceVisibilityMode === 'shown' ? 'selected' : ''}>显示炉体：查看出炉空间关系</option>
+                </select>
+                <div class="thermal-mini-note">${escapeSimHtml(quenchFurnaceVisibilityDesc)}</div>
+            </div>
+
+            <div class="thermal-risk-card quench-card">
+                <div class="thermal-stage-title">淬火动画阶段</div>
+                <div class="thermal-risk-row"><span>当前阶段</span><strong class="quench-stage-label">${escapeSimHtml(stageLabel)}</strong></div>
+                <div class="thermal-risk-row"><span>动画进度</span><strong class="quench-progress-text">${Math.round(progress)}%</strong></div>
+                <div class="thermal-risk-row"><span>分层状态</span><strong>${escapeSimHtml(layerProgressText)}</strong></div>
+                <input class="atmosphere-progress-range quench-progress-range" type="range" min="0" max="100" value="${Math.round(progress)}" disabled style="width:100%;margin:8px 0 4px;">
+                <div class="thermal-mini-note quench-stage-desc">${escapeSimHtml(stageDesc)}</div>
+            </div>
+
+            <div class="thermal-risk-card quench-card">
+                <div class="thermal-stage-title">层间冷却诊断</div>
+                <div class="thermal-risk-row"><span>底层入油时间</span><strong>${escapeSimHtml(bottomImmersionTime)}</strong></div>
+                <div class="thermal-risk-row"><span>中层入油时间</span><strong>${escapeSimHtml(middleImmersionTime)}</strong></div>
+                <div class="thermal-risk-row"><span>上层入油时间</span><strong>${escapeSimHtml(topImmersionTime)}</strong></div>
+                <div class="thermal-risk-row"><span>最慢冷却层</span><strong>${escapeSimHtml(slowestCoolingLayer)}</strong></div>
+                <div class="thermal-risk-row"><span>层间冷却差</span><strong>${escapeSimHtml(layerCoolingSpreadLabel)}</strong></div>
+                <div class="thermal-mini-note">V3.3 按工件 Y 高度/搁板层计算入油顺序：底层先冷却，上层后冷却；密集层和厚大件会保留更长的红橙滞后区。</div>
+            </div>
+
+            <div class="thermal-risk-card quench-card">
+                <div class="thermal-stage-title">质量风险诊断</div>
+                <div class="thermal-risk-row"><span>出炉到入油延迟</span><strong>${transferDelaySec}s</strong></div>
+                <div class="thermal-risk-row"><span>中心冷却滞后</span><strong>${escapeSimHtml(coreLagRisk)}</strong></div>
+                <div class="thermal-risk-row"><span>变形风险</span><strong style="color:${riskColor};">${escapeSimHtml(deformationRisk)}</strong></div>
+                <div class="thermal-risk-row"><span>开裂风险</span><strong style="color:${riskColor};">${escapeSimHtml(crackRisk)}</strong></div>
+                <div class="thermal-risk-row"><span>装载密度</span><strong>${densityRate}%</strong></div>
+                <div class="thermal-mini-note strong-note">${escapeSimHtml(primaryRiskReason)}</div>
+            </div>
+
+            <div class="thermal-stage-card quench-card">
+                <div class="thermal-stage-title">调整建议</div>
+                <div class="thermal-mini-note strong-note">${escapeSimHtml(suggestion)}</div>
             </div>
         `;
         return;
