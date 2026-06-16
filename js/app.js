@@ -441,6 +441,11 @@ function executeAndRender() {
     clearHistoryViewState();
     if (isAnimating) return;
 
+    // 全局工件安全间距：唯一来源来自“摆放规则配置”。
+    // 不再读取单个工装卡片上的 data-spacing / actualSpacing。
+    const spacing = Number(placementRules.minSpacing ?? 5) || 5;
+    setGlobalSpacingValue(spacing);
+
     let furnacePoolInput = [];
     document.querySelectorAll(".furnace-card").forEach(card => {
         const d = getFurnaceDataFromCard(card);
@@ -470,7 +475,7 @@ function executeAndRender() {
         furnacePoolInput.push({
             name: d.name, count: d.count,
             width: d.width, height: d.height, depth: d.depth,
-            maxWeight: d.maxWeight, actualSpacing: d.actualSpacing,
+            maxWeight: d.maxWeight, actualSpacing: spacing,
             basketType: d.basketType || "grid",
             /** V4.8: 工装类型字段透传 */
             toolingType: d.toolingType || defaultToolingType,
@@ -510,11 +515,6 @@ function executeAndRender() {
             remark: d.remark || "",
         });
     });
-
-    // 全局安全间距已取消，保留 5mm 作为系统兜底值。
-    // 实际装炉优先使用每个工装自己的 actualSpacing。
-    const spacing = 5;
-    setGlobalSpacingValue(spacing);
 
     /**
      * V2.7: 执行装炉算法
@@ -695,7 +695,7 @@ function collectToolingForRecord() {
 
             maxLoadKg: d.maxWeight,
             availableCount: d.count,
-            actualSpacingMm: d.actualSpacing != null ? d.actualSpacing : 5,
+            actualSpacingMm: Number(placementRules.minSpacing ?? 5) || 5,
             params: d.extras || {}
         };
     });

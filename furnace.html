@@ -668,6 +668,11 @@
             <div class="rule-group">
                 <div class="rule-group-title">⚖️ 重量与安全规则</div>
                 <div class="rule-item">
+                    <label for="rule-min-spacing">工件安全间距 (mm)</label>
+                    <input type="number" id="rule-min-spacing" value="5" min="0" max="200" step="1">
+                    <span class="rule-desc">全局生效：所有工装统一读取该间距，不再按单个工装配置。</span>
+                </div>
+                <div class="rule-item">
                     <label for="rule-weight-margin">承重安全余量 (%)</label>
                     <input type="number" id="rule-weight-margin" value="10" min="0" max="50">
                 </div>
@@ -806,50 +811,44 @@
     <!-- Tooling Add Overlay - 装载工装参数配置 -->
     <div id="tooling-add-overlay">
         <div id="tooling-add-modal">
-            <h3>增加装载工装</h3>
-            <p class="tooling-add-subtitle">当前阶段只维护装载工装：工装名称、类型、装载空间尺寸、承重、数量、适用工艺与安全间距。真实炉膛/设备/车间关系后续再链接。</p>
-            <div class="tooling-add-body">
-                <!-- 左侧：工装类型说明 -->
+            <div class="tooling-add-header">
+                <div>
+                    <h3>增加装载工装</h3>
+                    <div class="tooling-add-kicker">选择工装类型，填写基础参数后添加到左侧工装列表</div>
+                </div>
+            </div>
+
+            <div class="tooling-add-body compact">
+                <!-- 工装类型：保留 id，避免 tooling-modal.js 失效 -->
                 <div class="tooling-add-left">
                     <div class="tooling-type-label">工装类型</div>
                     <div class="tooling-type-cards" id="tooling-type-cards">
-                        <div class="tooling-unlinked-placeholder">标准料框 / 料盘 / 网篮 / 环形工装<br><b>当前未链接真实设备</b></div>
+                        <div class="tooling-unlinked-placeholder">正在加载工装类型...</div>
                     </div>
                 </div>
-                <!-- 右侧：尺寸配置 -->
+
                 <div class="tooling-add-right">
-                    <div class="tooling-add-section">
-                        <div class="tooling-add-section-title"></div>
+                    <div class="tooling-add-section tooling-basic-section">
+                        <div class="tooling-add-section-title">基础信息</div>
+
                         <div class="tooling-add-dim-row">
-                            <div class="tooling-add-field">
+                            <div class="tooling-add-field tooling-field-wide">
                                 <label>工装名称</label>
                                 <input type="text" id="ta-name" value="">
                             </div>
                         </div>
+
                         <div class="tooling-add-dim-row">
-                            <div class="tooling-add-field">
-                                <label>工装宽度 X (mm)</label>
-                                <input type="number" id="ta-width" value="900" min="100" max="5000">
-                            </div>
-                            <div class="tooling-add-field">
-                                <label>工装高度 Y (mm)</label>
-                                <input type="number" id="ta-height" value="1200" min="100" max="5000">
-                            </div>
-                            <div class="tooling-add-field">
-                                <label>工装纵深 Z (mm)</label>
-                                <input type="number" id="ta-depth" value="900" min="100" max="5000">
-                            </div>
-                        </div>
-                        <div class="tooling-add-dim-row">
-                            <div class="tooling-add-field">
-                                <label>工装承重上限 (kg)</label>
-                                <input type="number" id="ta-weight" value="1000" min="1" max="50000">
-                            </div>
                             <div class="tooling-add-field">
                                 <label>可用数量</label>
                                 <input type="number" id="ta-count" value="1" min="1" max="100">
                             </div>
+                            <div class="tooling-add-field">
+                                <label>承重上限 kg</label>
+                                <input type="number" id="ta-weight" value="500" min="1" max="50000">
+                            </div>
                         </div>
+
                         <div class="tooling-add-dim-row">
                             <div class="tooling-add-field">
                                 <label>适用加工工艺</label>
@@ -865,33 +864,43 @@
                                 </select>
                             </div>
                         </div>
-                        <div class="tooling-add-dim-row">
-                            <div class="tooling-add-field">
-                                <label>工装安全间距 (mm) <span style="color:#666;font-size:9px;">留空=默认</span></label>
-                                <input type="number" id="ta-spacing" value="" placeholder="默认5mm">
+                    </div>
+
+                    <details class="tooling-add-section tooling-advanced-section">
+                        <summary>
+                            <span>高级参数</span>
+                            <em>尺寸 / 后续模型参数</em>
+                        </summary>
+
+                        <div class="tooling-add-dim-row tooling-dimension-row">
+                            <div class="tooling-add-field" id="ta-width-field">
+                                <label id="ta-width-label">宽度 X mm</label>
+                                <input type="number" id="ta-width" value="900" min="100" max="5000">
+                                <div class="tooling-field-hint tooling-ring-hint">环形工装使用外径作为 X/Z 等效装载直径</div>
+                            </div>
+                            <div class="tooling-add-field" id="ta-height-field">
+                                <label id="ta-height-label">高度 Y mm</label>
+                                <input type="number" id="ta-height" value="900" min="100" max="5000">
+                            </div>
+                            <div class="tooling-add-field" id="ta-depth-field">
+                                <label id="ta-depth-label">纵深 Z mm</label>
+                                <input type="number" id="ta-depth" value="900" min="100" max="5000">
                             </div>
                         </div>
-                    </div>
-                    <!-- 工装预览信息 -->
-                    <div class="tooling-add-section">
-                        <div class="tooling-add-section-title">当前链接状态</div>
-                        <div class="tooling-add-preview" id="ta-preview">
-                            <span style="color:#666;">当前工装未链接真实热处理设备；系统会先按该工装尺寸进行装载测试。</span>
-                        </div>
-                    </div>
-                    <!-- 工装实拍图预览 -->
-                    <!-- <div class="tooling-add-section">
-                        <div class="tooling-add-section-title">🖼 工装实拍图</div>
-                        <div class="tooling-add-preview-img" id="ta-preview-img-container">
-                            <img id="ta-preview-img" src="" alt="工装实拍图" style="display:none; width:100%; height:auto; border-radius:6px;" />
-                            <span id="ta-preview-img-placeholder" style="color:#666;">请先在左侧选择工装类型</span>
-                        </div>
-                    </div> -->
+
+                    </details>
+
+                    <!-- 安全间距已移到“摆放规则配置”的全局参数；保留隐藏字段兼容 tooling-modal.js 旧读取逻辑 -->
+                    <input type="hidden" id="ta-spacing" value="">
+
+                    <!-- 保留 id="ta-preview"，避免 tooling-modal.js 仍然写入时报错 -->
+                    <div class="tooling-add-summary tooling-add-preview" id="ta-preview"></div>
                 </div>
             </div>
+
             <div class="tooling-add-actions">
                 <button class="tooling-add-btn-cancel" id="btn-ta-cancel">取消</button>
-                <button class="tooling-add-btn-confirm" id="btn-ta-confirm">✅ 确认添加</button>
+                <button class="tooling-add-btn-confirm" id="btn-ta-confirm">确认添加</button>
             </div>
         </div>
     </div>
@@ -907,6 +916,78 @@
             <div class="ai-loading-hint" id="ai-loading-hint">正在分析物料组合…</div>
         </div>
     </div>
+
+
+    <script>
+    // UI-only helper for the tooling add modal.
+    // It does not replace tooling-modal.js. It only changes labels/visibility for ring tooling
+    // and keeps the hidden Z depth synchronized with the visible diameter field.
+    (function () {
+        function getSelectedToolingCard() {
+            return document.querySelector('#tooling-type-cards .tooling-type-card.selected');
+        }
+
+        function selectedToolingLooksLikeRing() {
+            const card = getSelectedToolingCard();
+            if (!card) return false;
+            const dataText = Object.entries(card.dataset || {})
+                .map(([k, v]) => `${k}:${v}`)
+                .join(' ');
+            const text = `${dataText} ${card.getAttribute('data-tooling-type') || ''} ${card.getAttribute('data-type') || ''} ${card.textContent || ''}`;
+            return /ring-tooling|ringnode|ring|环形/i.test(text);
+        }
+
+        function setText(id, value) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = value;
+        }
+
+        function syncRingDepth() {
+            if (!document.body.classList.contains('tooling-add-ring-mode')) return;
+            const width = document.getElementById('ta-width');
+            const depth = document.getElementById('ta-depth');
+            if (width && depth) depth.value = width.value;
+        }
+
+        function syncToolingAddModalMode() {
+            const isRing = selectedToolingLooksLikeRing();
+            document.body.classList.toggle('tooling-add-ring-mode', isRing);
+
+            if (isRing) {
+                setText('ta-width-label', '外径 D mm');
+                setText('ta-height-label', '高度 H mm');
+                setText('ta-depth-label', '等效外径 Z mm');
+                syncRingDepth();
+                const nameInput = document.getElementById('ta-name');
+                if (nameInput && !nameInput.value.trim()) nameInput.value = '环形工装';
+                return;
+            }
+
+            setText('ta-width-label', '宽度 X mm');
+            setText('ta-height-label', '高度 Y mm');
+            setText('ta-depth-label', '纵深 Z mm');
+        }
+
+        document.addEventListener('click', function (event) {
+            if (event.target.closest('#tooling-type-cards .tooling-type-card')) {
+                setTimeout(syncToolingAddModalMode, 0);
+            }
+        });
+
+        document.addEventListener('input', function (event) {
+            if (event.target && event.target.id === 'ta-width') syncRingDepth();
+        });
+
+        const observer = new MutationObserver(syncToolingAddModalMode);
+        document.addEventListener('DOMContentLoaded', function () {
+            const cards = document.getElementById('tooling-type-cards');
+            const overlay = document.getElementById('tooling-add-overlay');
+            if (cards) observer.observe(cards, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'data-tooling-type', 'data-type'] });
+            if (overlay) observer.observe(overlay, { attributes: true, attributeFilter: ['class', 'style'] });
+            syncToolingAddModalMode();
+        });
+    })();
+    </script>
 
     <script type="module" src="js/app.js"></script>
 </body>

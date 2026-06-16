@@ -1,0 +1,201 @@
+--- /mnt/data/furnace_tooling_modal_compact.html	2026-06-16 11:27:26.036377729 +0000
++++ /mnt/data/furnace_tooling_modal_compact_v2.html	2026-06-16 11:28:36.364005693 +0000
+@@ -867,17 +867,18 @@
+                             <em>尺寸 / 安全间距 / 后续模型参数</em>
+                         </summary>
+ 
+-                        <div class="tooling-add-dim-row">
+-                            <div class="tooling-add-field">
+-                                <label>宽度 X mm</label>
++                        <div class="tooling-add-dim-row tooling-dimension-row">
++                            <div class="tooling-add-field" id="ta-width-field">
++                                <label id="ta-width-label">宽度 X mm</label>
+                                 <input type="number" id="ta-width" value="900" min="100" max="5000">
++                                <div class="tooling-field-hint tooling-ring-hint">环形工装使用外径作为 X/Z 等效装载直径</div>
+                             </div>
+-                            <div class="tooling-add-field">
+-                                <label>高度 Y mm</label>
++                            <div class="tooling-add-field" id="ta-height-field">
++                                <label id="ta-height-label">高度 Y mm</label>
+                                 <input type="number" id="ta-height" value="900" min="100" max="5000">
+                             </div>
+-                            <div class="tooling-add-field">
+-                                <label>纵深 Z mm</label>
++                            <div class="tooling-add-field" id="ta-depth-field">
++                                <label id="ta-depth-label">纵深 Z mm</label>
+                                 <input type="number" id="ta-depth" value="900" min="100" max="5000">
+                             </div>
+                         </div>
+@@ -914,6 +915,78 @@
+         </div>
+     </div>
+ 
++
++    <script>
++    // UI-only helper for the tooling add modal.
++    // It does not replace tooling-modal.js. It only changes labels/visibility for ring tooling
++    // and keeps the hidden Z depth synchronized with the visible diameter field.
++    (function () {
++        function getSelectedToolingCard() {
++            return document.querySelector('#tooling-type-cards .tooling-type-card.selected');
++        }
++
++        function selectedToolingLooksLikeRing() {
++            const card = getSelectedToolingCard();
++            if (!card) return false;
++            const dataText = Object.entries(card.dataset || {})
++                .map(([k, v]) => `${k}:${v}`)
++                .join(' ');
++            const text = `${dataText} ${card.getAttribute('data-tooling-type') || ''} ${card.getAttribute('data-type') || ''} ${card.textContent || ''}`;
++            return /ring-tooling|ringnode|ring|环形/i.test(text);
++        }
++
++        function setText(id, value) {
++            const el = document.getElementById(id);
++            if (el) el.textContent = value;
++        }
++
++        function syncRingDepth() {
++            if (!document.body.classList.contains('tooling-add-ring-mode')) return;
++            const width = document.getElementById('ta-width');
++            const depth = document.getElementById('ta-depth');
++            if (width && depth) depth.value = width.value;
++        }
++
++        function syncToolingAddModalMode() {
++            const isRing = selectedToolingLooksLikeRing();
++            document.body.classList.toggle('tooling-add-ring-mode', isRing);
++
++            if (isRing) {
++                setText('ta-width-label', '外径 D mm');
++                setText('ta-height-label', '高度 H mm');
++                setText('ta-depth-label', '等效外径 Z mm');
++                syncRingDepth();
++                const nameInput = document.getElementById('ta-name');
++                if (nameInput && !nameInput.value.trim()) nameInput.value = '环形工装';
++                return;
++            }
++
++            setText('ta-width-label', '宽度 X mm');
++            setText('ta-height-label', '高度 Y mm');
++            setText('ta-depth-label', '纵深 Z mm');
++        }
++
++        document.addEventListener('click', function (event) {
++            if (event.target.closest('#tooling-type-cards .tooling-type-card')) {
++                setTimeout(syncToolingAddModalMode, 0);
++            }
++        });
++
++        document.addEventListener('input', function (event) {
++            if (event.target && event.target.id === 'ta-width') syncRingDepth();
++        });
++
++        const observer = new MutationObserver(syncToolingAddModalMode);
++        document.addEventListener('DOMContentLoaded', function () {
++            const cards = document.getElementById('tooling-type-cards');
++            const overlay = document.getElementById('tooling-add-overlay');
++            if (cards) observer.observe(cards, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'data-tooling-type', 'data-type'] });
++            if (overlay) observer.observe(overlay, { attributes: true, attributeFilter: ['class', 'style'] });
++            syncToolingAddModalMode();
++        });
++    })();
++    </script>
++
+     <script type="module" src="js/app.js"></script>
+ </body>
+ </html>
+\ No newline at end of file
+--- /mnt/data/main_tooling_modal_compact.css	2026-06-16 11:27:25.968806302 +0000
++++ /mnt/data/main_tooling_modal_compact_v2.css	2026-06-16 11:28:36.372595092 +0000
+@@ -6365,3 +6365,29 @@
+ body.airflow-cooling-mode #canvas-container canvas {
+     cursor: default;
+ }
++
++/* Ring tooling mode: show diameter + height only; keep hidden Z depth synced by furnace.html helper script. */
++.tooling-field-hint {
++    margin-top: 4px;
++    font-size: 10px;
++    line-height: 1.35;
++    color: var(--text-muted);
++}
++.tooling-ring-hint {
++    display: none;
++}
++body.tooling-add-ring-mode #ta-depth-field {
++    display: none;
++}
++body.tooling-add-ring-mode .tooling-ring-hint {
++    display: block;
++}
++body.tooling-add-ring-mode .tooling-dimension-row {
++    display: grid;
++    grid-template-columns: repeat(2, minmax(0, 1fr));
++}
++body.tooling-add-ring-mode #ta-width-field,
++body.tooling-add-ring-mode #ta-height-field {
++    min-width: 0;
++}
++
+--- /mnt/data/ui.js	2026-06-16 11:16:08.603419976 +0000
++++ /mnt/data/ui_tooling_select_fix_v2.js	2026-06-16 11:29:06.542885656 +0000
+@@ -138,7 +138,7 @@
+         '<span>📦 可用数量 ' + count + '</span>' +
+         '<span>⚖ ' + maxWeight + 'kg</span>' +
+     '</div>' +
+-    '<div class="f-card-status">' + ttConfig.label + ' · 点击选择 · 再次点击取消</div>';
++    '<div class="f-card-status">' + ttConfig.label + ' · 点击选择 · 再次点击收起参数</div>';
+     card.addEventListener('click', (e) => {
+         if (e.target.closest('[data-action="delete-furnace"]')) return;
+         if (e.target.closest('.f-drag-handle')) return;
+@@ -158,21 +158,18 @@
+     return { cardId, furnaceCounter: newFC, name, depth, width, height, maxWeight, count, plannedHeats: 0, basketType: basketType || 'grid', toolingType: tt };
+ }
+ 
+-// export function selectFurnaceCard(cardId) { document.querySelectorAll('.furnace-card').forEach(c => c.classList.remove('active')); const card = document.getElementById(cardId); if (card) { card.classList.add('active'); setSelectedFurnaceCardId(cardId); } }
+-export function selectFurnaceCard(cardId) { 
+-    const card = document.getElementById(cardId); 
+-    // 如果当前已经被选中，则取消选中
+-    if (card && card.classList.contains('active')) { 
+-        card.classList.remove('active'); 
+-        setSelectedFurnaceCardId(null); 
+-    } else { 
+-        // 否则，清除其他卡片的选中状态，并选中当前卡片
+-        document.querySelectorAll('.furnace-card').forEach(c => c.classList.remove('active')); 
+-        if (card) { 
+-            card.classList.add('active'); 
+-            setSelectedFurnaceCardId(cardId); 
+-        } 
+-    } 
++// 工装卡片选择：只负责选中，不再“再次点击取消选中”。
++// 原来的 toggle 逻辑会导致只有一个工装时，点击已选中的唯一卡片反而被取消，后续方案生成拿不到 selectedFurnaceCardId。
++export function selectFurnaceCard(cardId) {
++    const card = document.getElementById(cardId);
++    if (!card) {
++        setSelectedFurnaceCardId(null);
++        return;
++    }
++
++    document.querySelectorAll('.furnace-card').forEach(c => c.classList.remove('active'));
++    card.classList.add('active');
++    setSelectedFurnaceCardId(cardId);
+ }
+ 
+ function removeFurnaceInlineDetail(cardId) {
+@@ -383,7 +380,7 @@
+     // 卡片底部标签依然从原始的 data 属性读取（由添加工装时决定）
+     // const tt = card.getAttribute('data-tooling-type') || 'standard-basket';
+     const ttCfg = furnaceTooling[tt] || { label: '标准料框' };
+-    card.querySelector('.f-card-status').textContent = ttCfg.label + ' · 点击选择 · 再次点击取消';
++    card.querySelector('.f-card-status').textContent = ttCfg.label + ' · 点击选择 · 再次点击收起参数';
+     
+     if (actualSpacing !== null) card.setAttribute('data-spacing', actualSpacing); else card.removeAttribute('data-spacing');
+     const fdpTitle = document.getElementById('fdp-title'); if (fdpTitle) fdpTitle.textContent = '📋 ' + name; const drawerTitle = document.querySelector('.furnace-inline-detail[data-card-id="' + cardId + '"] .fid-title'); if (drawerTitle) drawerTitle.textContent = '📋 ' + name; updateTopSummary();
+@@ -2583,4 +2580,4 @@
+             }
+         });
+     });
+-}
+\ No newline at end of file
++}

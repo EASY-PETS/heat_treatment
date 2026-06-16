@@ -46,15 +46,16 @@ export function getFurnaceDataFromCard(card) {
     const metaSpans = card.querySelectorAll('.f-card-meta span');
     const dimSpan = metaSpans[0] ? metaSpans[0].textContent.replace('📐 ', '') : '0×0×0';
     const dims = dimSpan.split('×');
-    const countText = metaSpans[1] ? metaSpans[1].textContent : '可用数量 1';
-    const count = parseInt(countText.replace(/[^0-9]/g, '')) || 1;
+    const countInput = card.querySelector('.f-card-count-input');
+    const countText = countInput ? countInput.value : (metaSpans[1] ? metaSpans[1].textContent : '可用数量 1');
+    const count = parseInt(String(countText).replace(/[^0-9]/g, '')) || 1;
     const weightText = metaSpans[2] ? metaSpans[2].textContent : '0kg';
     const maxWeight = parseFloat(weightText.replace(/[^0-9.]/g, '')) || 0;
     // plannedHeats 是早期 Demo 字段，目前不参与算法，固定为 0 保持兼容
     const plannedHeats = 0;
 
-    const spacingText = card.getAttribute('data-spacing') || '';
-    const actualSpacing = spacingText !== '' ? parseFloat(spacingText) : null;
+    // 安全间距已改为全局摆放规则参数；工装卡片不再保存独立间距。
+    const actualSpacing = null;
     /**
      * V2.3: 每个炉膛独立存储 basketType
      * 从 data-basket-type 属性读取，默认为 'grid'
@@ -119,8 +120,8 @@ export function createFurnaceCard(name, depth, width, height, maxWeight, count, 
     const card = document.createElement('div');
     card.className = 'furnace-card'; card.id = cardId;
     card.setAttribute('data-fid', newFC);
-    const spacingToUse = actualSpacing !== undefined && actualSpacing !== null ? actualSpacing : 5;
-    card.setAttribute('data-spacing', spacingToUse);
+    // 安全间距不再作为工装基础属性保存，统一由“摆放规则配置”的全局安全间距控制。
+    card.removeAttribute('data-spacing');
     card.setAttribute('data-basket-type', basketType || 'grid');
     /** V4.8: 存储工装类型及相关参数 */
     const tt = toolingType || defaultToolingType;
@@ -135,44 +136,54 @@ export function createFurnaceCard(name, depth, width, height, maxWeight, count, 
     '<div class="f-card-name">' + name + '</div>' +
     '<div class="f-card-meta">' +
         '<span>📐 ' + width + '×' + height + '×' + depth + '</span>' +
-        '<span>📦 可用数量 ' + count + '</span>' +
+        '<label class="f-card-count-editor" title="本次方案仿真可使用的该类工装数量">' +
+            '<span>📦 数量</span>' +
+            '<input class="f-card-count-input" type="number" min="0" max="100" value="' + count + '">' +
+        '</label>' +
         '<span>⚖ ' + maxWeight + 'kg</span>' +
     '</div>' +
-    '<div class="f-card-status">' + ttConfig.label + ' · 点击选择 · 再次点击取消</div>';
+    '<div class="f-card-status">' + ttConfig.label + ' · 点击选择 · 数量可直接修改</div>';
+
+    const countInput = card.querySelector('.f-card-count-input');
+    if (countInput) {
+        ['click', 'mousedown', 'pointerdown', 'keydown'].forEach(evt => {
+            countInput.addEventListener(evt, e => e.stopPropagation());
+        });
+        countInput.addEventListener('change', () => {
+            let next = parseInt(countInput.value, 10);
+            if (!Number.isFinite(next) || next < 0) next = 0;
+            if (next > 100) next = 100;
+            countInput.value = String(next);
+            updateTopSummary();
+        });
+    }
+
     card.addEventListener('click', (e) => {
         if (e.target.closest('[data-action="delete-furnace"]')) return;
         if (e.target.closest('.f-drag-handle')) return;
-        if (e.target.closest('.furnace-inline-detail')) return;
+        if (e.target.closest('.f-card-count-input')) return;
 
-        const wasSelected = card.classList.contains('active');
+        // 工装卡片只负责选中，不再弹出基础属性二级编辑菜单。
+        removeFurnaceInlineDetail();
         selectFurnaceCard(cardId);
-
-        if (wasSelected) {
-            removeFurnaceInlineDetail(cardId);
-        } else {
-            showFurnaceDetail(cardId);
-        }
     });
     setupFurnaceDrag(card);
     document.getElementById('furnace-cards-container').appendChild(card);
     return { cardId, furnaceCounter: newFC, name, depth, width, height, maxWeight, count, plannedHeats: 0, basketType: basketType || 'grid', toolingType: tt };
 }
 
-// export function selectFurnaceCard(cardId) { document.querySelectorAll('.furnace-card').forEach(c => c.classList.remove('active')); const card = document.getElementById(cardId); if (card) { card.classList.add('active'); setSelectedFurnaceCardId(cardId); } }
-export function selectFurnaceCard(cardId) { 
-    const card = document.getElementById(cardId); 
-    // 如果当前已经被选中，则取消选中
-    if (card && card.classList.contains('active')) { 
-        card.classList.remove('active'); 
-        setSelectedFurnaceCardId(null); 
-    } else { 
-        // 否则，清除其他卡片的选中状态，并选中当前卡片
-        document.querySelectorAll('.furnace-card').forEach(c => c.classList.remove('active')); 
-        if (card) { 
-            card.classList.add('active'); 
-            setSelectedFurnaceCardId(cardId); 
-        } 
-    } 
+// 工装卡片选择：只负责选中，不再“再次点击取消选中”。
+// 原来的 toggle 逻辑会导致只有一个工装时，点击已选中的唯一卡片反而被取消，后续方案生成拿不到 selectedFurnaceCardId。
+export function selectFurnaceCard(cardId) {
+    const card = document.getElementById(cardId);
+    if (!card) {
+        setSelectedFurnaceCardId(null);
+        return;
+    }
+
+    document.querySelectorAll('.furnace-card').forEach(c => c.classList.remove('active'));
+    card.classList.add('active');
+    setSelectedFurnaceCardId(cardId);
 }
 
 function removeFurnaceInlineDetail(cardId) {
@@ -383,9 +394,9 @@ export function saveFurnaceDetail(cardId) {
     // 卡片底部标签依然从原始的 data 属性读取（由添加工装时决定）
     // const tt = card.getAttribute('data-tooling-type') || 'standard-basket';
     const ttCfg = furnaceTooling[tt] || { label: '标准料框' };
-    card.querySelector('.f-card-status').textContent = ttCfg.label + ' · 点击选择 · 再次点击取消';
+    card.querySelector('.f-card-status').textContent = ttCfg.label + ' · 点击选择 · 再次点击收起参数';
     
-    if (actualSpacing !== null) card.setAttribute('data-spacing', actualSpacing); else card.removeAttribute('data-spacing');
+    card.removeAttribute('data-spacing');
     const fdpTitle = document.getElementById('fdp-title'); if (fdpTitle) fdpTitle.textContent = '📋 ' + name; const drawerTitle = document.querySelector('.furnace-inline-detail[data-card-id="' + cardId + '"] .fid-title'); if (drawerTitle) drawerTitle.textContent = '📋 ' + name; updateTopSummary();
     const btn = document.getElementById('fdp-save-btn'); if (btn) { btn.textContent = '✅ 已保存'; setTimeout(() => { btn.textContent = '💾 保存工装参数'; }, 1500); }
 }
@@ -420,7 +431,10 @@ export function sortFurnaceCards(field) {
         const getSpans = (card) => card.querySelectorAll('.f-card-meta span');
         if (field === 'volume') { const dimA = getSpans(a)[0]?.textContent.replace('📐 ', '').split('×').map(Number) || [0,0,0]; const dimB = getSpans(b)[0]?.textContent.replace('📐 ', '').split('×').map(Number) || [0,0,0]; va = dimA.reduce((p,c) => p*c, 1); vb = dimB.reduce((p,c) => p*c, 1); }
         else if (field === 'weight') { va = parseFloat(getSpans(a)[2]?.textContent.replace(/[^0-9.]/g,'')) || 0; vb = parseFloat(getSpans(b)[2]?.textContent.replace(/[^0-9.]/g,'')) || 0; }
-        else if (field === 'count') { va = parseInt(getSpans(a)[1]?.textContent.replace(/[^0-9]/g,'')) || 0; vb = parseInt(getSpans(b)[1]?.textContent.replace(/[^0-9]/g,'')) || 0; }
+        else if (field === 'count') {
+            va = parseInt(a.querySelector('.f-card-count-input')?.value || '0', 10) || 0;
+            vb = parseInt(b.querySelector('.f-card-count-input')?.value || '0', 10) || 0;
+        }
         return currentDir === 'asc' ? va - vb : vb - va;
     });
     cards.forEach(c => container.appendChild(c));
@@ -2171,7 +2185,9 @@ export function openRulesModal() {
     // document.getElementById('rule-min-spacing').value = placementRules.minSpacing;
     // document.getElementById('rule-wall-spacing').value = placementRules.wallSpacing;
     // document.getElementById('rule-rotate').checked = placementRules.rotate;
-    // 重量与安全规则：承重安全余量
+    // 重量与安全规则：全局安全间距 + 承重安全余量
+    const minSpacingInput = document.getElementById('rule-min-spacing');
+    if (minSpacingInput) minSpacingInput.value = placementRules.minSpacing != null ? placementRules.minSpacing : 5;
     document.getElementById('rule-weight-margin').value = placementRules.weightMargin;
     // 搁板参数：主开关、层高、实体厚度
     document.getElementById('rule-shelf-layered').checked = placementRules.useShelfLayered;
@@ -2224,7 +2240,7 @@ export function saveRulesModal() {
         dense: true,                            // 密集排布已固化
         sameMaterial: false,
         sameProcess: false,
-        // minSpacing: parseFloat(document.getElementById('rule-min-spacing').value) || 5,
+        minSpacing: parseFloat(document.getElementById('rule-min-spacing')?.value) || 5,
         // wallSpacing: parseFloat(document.getElementById('rule-wall-spacing').value) || 30,
         rotate: true,
         weightMargin: parseFloat(document.getElementById('rule-weight-margin').value) || 10,
@@ -2237,10 +2253,6 @@ export function saveRulesModal() {
         discFlipRatio: parseFloat(document.getElementById('rule-disc-flip-ratio').value) || 1.0,
         centerOfGravity: true                   // 重心居中已固化，勾选搁板时无条件执行
     });
-    const globalSpacingInput = document.getElementById('global-spacing');
-    if (globalSpacingInput) {
-        globalSpacingInput.value = placementRules.minSpacing;
-    }
     document.getElementById('rules-modal-overlay').style.display = 'none';
     
     const btn = document.getElementById('btn-rules'); const orig = btn.textContent;

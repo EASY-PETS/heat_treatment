@@ -265,6 +265,42 @@ body {
     font-size: 12px; color: var(--text-muted); line-height: 1.5;
 }
 .furnace-card .f-card-meta span { background: #F1F5F9; padding: 1px 5px; border-radius: 4px; }
+.furnace-card .f-card-count-editor {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: #F1F5F9;
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.5;
+    cursor: default;
+}
+.furnace-card .f-card-count-editor span {
+    background: transparent;
+    padding: 0;
+    border-radius: 0;
+    white-space: nowrap;
+}
+.furnace-card .f-card-count-input {
+    width: 44px;
+    height: 22px;
+    padding: 0 4px;
+    border: 1px solid rgba(148, 163, 184, 0.55);
+    border-radius: 6px;
+    background: #FFFFFF;
+    color: var(--text-color);
+    font-size: 12px;
+    font-weight: 700;
+    text-align: center;
+    outline: none;
+}
+.furnace-card .f-card-count-input:focus {
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.10);
+}
+
 .furnace-card .f-card-status {
     margin-top: 4px; font-size: 12px; color: var(--text-muted);
 }
@@ -1218,218 +1254,347 @@ body {
     transition: opacity 0.6s ease;
 }
 
-/* ==================== TOOLING ADD OVERLAY ==================== */
+/* ==================== TOOLING ADD OVERLAY - COMPACT VERSION ==================== */
 #tooling-add-overlay {
     position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(15, 23, 42, 0.42);
     z-index: 950;
     display: none;
     justify-content: center;
     align-items: center;
-    backdrop-filter: blur(4px);
+    backdrop-filter: blur(6px);
 }
+
 #tooling-add-overlay.active {
     display: flex;
 }
 
 #tooling-add-modal {
     background: #FFFFFF;
-    border: 1px solid var(--border-color);
-    border-radius: 16px;
-    width: 820px;
-    max-width: 95vw;
-    max-height: 90vh;
+    border: 1px solid rgba(226, 232, 240, 0.9);
+    border-radius: 20px;
+    width: 720px;
+    max-width: 94vw;
+    max-height: 88vh;
     overflow-y: auto;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.06);
-    padding: 24px;
+    box-shadow: 0 24px 80px rgba(15, 23, 42, 0.22);
+    padding: 22px;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 14px;
 }
+
+.tooling-add-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+}
+
 #tooling-add-modal h3 {
     margin: 0;
-    font-size: 24px;
-    font-weight: 600;
+    font-size: 22px;
+    font-weight: 800;
     color: var(--text-color);
-    display: flex;
-    align-items: center;
-    gap: 8px;
 }
-.tooling-add-subtitle {
-    margin: 0;
+
+.tooling-add-kicker {
+    margin-top: 6px;
     font-size: 12px;
     color: var(--text-muted);
 }
 
-.tooling-add-body {
+.tooling-add-subtitle {
+    display: none;
+}
+
+.tooling-add-body,
+.tooling-add-body.compact {
     display: flex;
-    gap: 20px;
+    flex-direction: column;
+    gap: 12px;
     flex: 1;
     min-height: 0;
 }
 
-/* 左侧：工装类型卡片列表 */
+/* 工装类型从左侧大列表改为顶部紧凑网格 */
 .tooling-add-left {
-    flex: 0 0 320px;
+    flex: none;
     display: flex;
     flex-direction: column;
     gap: 8px;
-}
-.tooling-type-label {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text-color);
-    padding-bottom: 4px;
-    border-bottom: 1px solid var(--border-color);
-}
-.tooling-type-cards {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    overflow-y: auto;
-    max-height: 420px;
-    padding-right: 4px;
 }
 
-/* 单个工装类型卡片 */
+.tooling-type-label {
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--text-color);
+    padding: 0;
+    border-bottom: none;
+}
+
+.tooling-type-cards {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    overflow: visible;
+    max-height: none;
+    padding-right: 0;
+}
+
 .tooling-type-card {
+    min-height: 76px;
     background: #FFFFFF;
-    border: 2px solid var(--border-color);
-    border-radius: 16px;
-    padding: 12px 14px;
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    padding: 10px;
     cursor: pointer;
-    transition: all 0.2s;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.06);
+    transition: all 0.18s ease;
+    display: grid;
+    grid-template-columns: 28px 1fr;
+    grid-template-areas:
+        "icon name"
+        "icon info";
+    align-items: center;
+    gap: 3px 8px;
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
 }
+
 .tooling-type-card:hover {
-    border-color: var(--accent-color);
-    background: #EFF6FF;
+    border-color: rgba(37, 99, 235, 0.55);
+    background: #F8FAFF;
+    transform: translateY(-1px);
 }
+
 .tooling-type-card.selected {
     border-color: var(--accent-color);
     background: #EFF6FF;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.06);
-}
-.tooling-type-card .ttc-icon {
-    font-size: 22px;
-}
-.tooling-type-card .ttc-name {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text-color);
-}
-.tooling-type-card .ttc-info {
-    font-size: 12px;
-    color: var(--text-muted);
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-}
-.tooling-type-card .ttc-info span {
-    background: #F1F5F9;
-    padding: 1px 6px;
-    border-radius: 4px;
-    white-space: nowrap;
-}
-.tooling-type-card .ttc-desc {
-    font-size: 12px;
-    color: var(--text-muted);
-    margin-top: 2px;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.10);
 }
 
-/* 右侧：尺寸配置 */
+.tooling-type-card .ttc-icon {
+    grid-area: icon;
+    font-size: 22px;
+    line-height: 1;
+}
+
+.tooling-type-card .ttc-name {
+    grid-area: name;
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--text-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tooling-type-card .ttc-info {
+    grid-area: info;
+    font-size: 10px;
+    color: var(--text-muted);
+    display: flex;
+    gap: 4px;
+    flex-wrap: nowrap;
+    overflow: hidden;
+}
+
+.tooling-type-card .ttc-info span {
+    background: #F1F5F9;
+    padding: 1px 5px;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+
+.tooling-type-card .ttc-desc {
+    display: none;
+}
+
+.tooling-unlinked-placeholder {
+    grid-column: 1 / -1;
+    padding: 12px;
+    border-radius: 12px;
+    background: #F8FAFC;
+    color: var(--text-muted);
+    font-size: 12px;
+    text-align: center;
+}
+
 .tooling-add-right {
-    flex: 1;
+    flex: none;
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 10px;
     min-width: 0;
 }
+
 .tooling-add-section {
     background: #F8FAFC;
     border: 1px solid var(--border-color);
     border-radius: 16px;
     padding: 14px;
 }
+
 .tooling-add-section-title {
-    font-size: 16px;
-    font-weight: 600;
+    font-size: 14px;
+    font-weight: 800;
     color: var(--text-color);
-    margin-bottom: 10px;
-    padding-bottom: 6px;
-    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 12px;
+    padding-bottom: 0;
+    border-bottom: none;
 }
+
 .tooling-add-dim-row {
     display: flex;
     gap: 10px;
     margin-bottom: 10px;
 }
+
 .tooling-add-dim-row:last-child {
     margin-bottom: 0;
 }
+
 .tooling-add-field {
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 5px;
+    min-width: 0;
 }
+
+.tooling-field-wide {
+    flex: 1 1 100%;
+}
+
 .tooling-add-field label {
     font-size: 12px;
     color: var(--text-secondary);
-    font-weight: 600;
+    font-weight: 700;
     text-transform: none;
 }
-.tooling-add-field input {
+
+.tooling-add-field input,
+.tooling-add-field select {
     padding: 7px 10px;
     background: #FFFFFF;
     border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border-radius: 10px;
     color: var(--text-color);
     font-size: 14px;
     font-family: inherit;
     outline: none;
-    transition: border-color 0.2s;
+    transition: border-color 0.2s, box-shadow 0.2s;
     height: 40px;
-}
-.tooling-add-field input:focus {
-    border-color: var(--accent-color);
+    width: 100%;
 }
 
-/* 工装参数预览区 */
-.tooling-add-preview {
-    font-size: 14px;
-    color: var(--text-secondary);
-    line-height: 1.6;
-    min-height: 40px;
+.tooling-add-field input:focus,
+.tooling-add-field select:focus {
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
 }
-.tooling-add-preview .tap-row {
+
+/* 高级参数默认收起 */
+.tooling-advanced-section {
+    padding: 0;
+    overflow: hidden;
+}
+
+.tooling-advanced-section summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 13px 14px;
     display: flex;
-    gap: 12px;
     align-items: center;
-    padding: 2px 0;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 14px;
+    font-weight: 800;
+    color: var(--text-color);
 }
-.tooling-add-preview .tap-label {
+
+.tooling-advanced-section summary::-webkit-details-marker {
+    display: none;
+}
+
+.tooling-advanced-section summary::after {
+    content: "展开";
+    font-size: 11px;
+    font-weight: 700;
     color: var(--accent-color);
-    font-weight: 600;
-    min-width: 70px;
+    background: #EFF6FF;
+    border-radius: 999px;
+    padding: 3px 8px;
+}
+
+.tooling-advanced-section[open] summary::after {
+    content: "收起";
+}
+
+.tooling-advanced-section summary em {
+    font-style: normal;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-left: auto;
+}
+
+.tooling-advanced-section .tooling-add-dim-row {
+    padding: 0 14px 14px;
+}
+
+.tooling-advanced-section .tooling-add-dim-row:last-child {
+    padding-bottom: 14px;
+}
+
+/* 轻量摘要：保留 ta-preview，避免现有 tooling-modal.js 写入时报错 */
+.tooling-add-summary,
+.tooling-add-preview {
+    min-height: 0;
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.6;
+}
+
+.tooling-add-summary:empty,
+.tooling-add-preview:empty {
+    display: none;
+}
+
+.tooling-add-summary .tap-row,
+.tooling-add-preview .tap-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-right: 12px;
+    padding: 4px 0;
+}
+
+.tooling-add-summary .tap-label,
+.tooling-add-preview .tap-label {
+    color: var(--text-muted);
+    font-weight: 700;
+    min-width: 0;
     font-size: 12px;
 }
+
+.tooling-add-summary .tap-value,
 .tooling-add-preview .tap-value {
     color: var(--text-color);
-    font-size: 14px;
+    font-weight: 700;
+    font-size: 12px;
 }
 
-/* 空料框 3D 预览区 */
+/* 保留 3D 草稿预览样式，兼容 tooling-modal.js 如果动态创建该区域 */
 .tooling-add-preview-3d {
     width: 100%;
-    height: 220px;
+    height: 180px;
     background: #F1F5F9;
     border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border-radius: 12px;
     overflow: hidden;
     position: relative;
     display: flex;
@@ -1437,60 +1602,84 @@ body {
     justify-content: center;
     cursor: grab;
 }
+
 .tooling-add-preview-3d:active {
     cursor: grabbing;
 }
+
 .tooling-add-preview-3d canvas {
     display: block;
     width: 100%;
     height: 100%;
 }
 
-/* 底部操作按钮 */
 .tooling-add-actions {
     display: flex;
     gap: 10px;
     justify-content: flex-end;
-    padding-top: 8px;
+    padding-top: 10px;
     border-top: 1px solid var(--border-color);
 }
+
 .tooling-add-btn-cancel {
-    flex: 0 0 100px;
-    padding: 9px 16px;
+    flex: 0 0 110px;
+    padding: 10px 16px;
     background: #F8FAFC;
     color: var(--text-secondary);
     border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border-radius: 10px;
     cursor: pointer;
     font-size: 14px;
-    font-weight: 600;
+    font-weight: 700;
     transition: all 0.2s;
 }
+
 .tooling-add-btn-cancel:hover {
     background: #F1F5F9;
     color: var(--text-color);
 }
+
 .tooling-add-btn-confirm {
     flex: 1;
-    padding: 9px 16px;
+    padding: 10px 16px;
     background: var(--accent-color);
     color: #fff;
     border: none;
-    border-radius: 8px;
+    border-radius: 10px;
     cursor: pointer;
     font-size: 14px;
-    font-weight: 600;
+    font-weight: 800;
     transition: all 0.2s;
 }
+
 .tooling-add-btn-confirm:hover {
     background: var(--accent-hover);
-    box-shadow: none;
 }
+
 .tooling-add-btn-confirm:disabled {
     background: #E2E8F0;
     color: var(--text-muted);
     cursor: not-allowed;
-    box-shadow: none;
+}
+
+@media (max-width: 760px) {
+    #tooling-add-modal {
+        width: 94vw;
+        padding: 16px;
+    }
+
+    .tooling-type-cards {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .tooling-add-dim-row {
+        flex-direction: column;
+    }
+
+    .tooling-advanced-section summary {
+        align-items: flex-start;
+        flex-wrap: wrap;
+    }
 }
 
 /* ==================== PANEL COLLAPSED STATES ==================== */
@@ -6212,3 +6401,29 @@ body.radiation-pick-mode #canvas-container canvas {
 body.airflow-cooling-mode #canvas-container canvas {
     cursor: default;
 }
+
+/* Ring tooling mode: show diameter + height only; keep hidden Z depth synced by furnace.html helper script. */
+.tooling-field-hint {
+    margin-top: 4px;
+    font-size: 10px;
+    line-height: 1.35;
+    color: var(--text-muted);
+}
+.tooling-ring-hint {
+    display: none;
+}
+body.tooling-add-ring-mode #ta-depth-field {
+    display: none;
+}
+body.tooling-add-ring-mode .tooling-ring-hint {
+    display: block;
+}
+body.tooling-add-ring-mode .tooling-dimension-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+body.tooling-add-ring-mode #ta-width-field,
+body.tooling-add-ring-mode #ta-height-field {
+    min-width: 0;
+}
+

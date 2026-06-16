@@ -129,7 +129,7 @@ export function solveHeterogeneousPacking(furnacePoolInput, itemsInput, spacing)
                 typeName: f.name,
                 instanceId: `${f.name} (炉次 #${i + 1})`,
                 w: f.width, h: f.height, d: f.depth, max_weight: f.maxWeight,
-                spacing: f.actualSpacing != null ? f.actualSpacing : spacing,
+                spacing: spacing,
                 packedItems: [], totalWeight: 0,
                 emptySpaces: [{ x: 0, y: 0, z: 0, w: f.width, h: f.height, d: f.depth }],
                 /** V2.3: 每个炉膛独立存储 basketType */
@@ -484,7 +484,7 @@ export function solveShelfLayeredMultiFurnace(furnacePoolInput, itemsInput, spac
             availableFurnaceInstances.push({
                 typeName: f.name, instanceId: `${f.name} (炉次 #${i + 1})`,
                 w: f.width, h: f.height, d: f.depth, max_weight: f.maxWeight,
-                spacing: f.actualSpacing != null ? f.actualSpacing : spacing,
+                spacing: spacing,
                 packedItems: [], totalWeight: 0,
                 /** V2.3: 每个炉膛独立存储 basketType */
                 basketType: f.basketType || 'grid'
@@ -1055,7 +1055,7 @@ export function solveCenterOfGravityMultiFurnace(furnacePoolInput, itemsInput, s
             availableFurnaceInstances.push({
                 typeName: f.name, instanceId: `${f.name} (炉次 #${i + 1})`,
                 w: f.width, h: f.height, d: f.depth, max_weight: f.maxWeight,
-                spacing: f.actualSpacing != null ? f.actualSpacing : spacing,
+                spacing: spacing,
                 packedItems: [], totalWeight: 0,
                 /** V2.3: 每个炉膛独立存储 basketType */
                 basketType: f.basketType || 'grid'
@@ -2336,7 +2336,7 @@ function solveUnifiedMultiFurnace(furnacePoolInput, itemsInput, spacing, strateg
             availableFurnaceInstances.push({
                 typeName: f.name, instanceId: `${f.name} (炉次 #${i + 1})`,
                 w: f.width, h: f.height, d: f.depth, max_weight: f.maxWeight,
-                spacing: f.actualSpacing != null ? f.actualSpacing : spacing,
+                spacing: spacing,
                 packedItems: [], totalWeight: 0,
                 basketType: f.basketType || 'grid',
                 /** V4.8: 工装类型字段附加 */
