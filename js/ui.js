@@ -1034,7 +1034,7 @@ export function renderThermalSimulationPanel(metrics = null, mode = null) {
 
         panel.innerHTML = `
             <div class="thermal-header-card compact atmosphere-card">
-                <div class="thermal-title">${isCarbonMode ? '🔥' : '🌫️'} ${escapeSimHtml(furnace.instanceId || '当前炉次')} · 介质场 · ${escapeSimHtml(modeName)} V1.5</div>
+                <div class="thermal-title">${isCarbonMode ? '🔥' : '🌫️'} ${escapeSimHtml(furnace.instanceId || '当前炉次')} · 介质场 · ${escapeSimHtml(modeName)} V1.6</div>
                 <div class="thermal-subtitle">
                     ${isCarbonMode
                         ? '渗碳/碳氮共渗模式强调“碳势气氛 → 表面吸附 → 向内扩散 → 渗层形成”。金橙色浓度云从边界扩散，入口箭头表示碳势补给路径，工件金色外轮廓表示表面吸碳/渗层逐步形成。'
@@ -1051,7 +1051,7 @@ export function renderThermalSimulationPanel(metrics = null, mode = null) {
                 </div>
                 <div class="thermal-mini-note">${escapeSimHtml(visualNote)} 3D 中入口箭头表示介质补给方向，Top 3 标签会区分“低交换区”和“真实死角”：间距足够但路径较弱时不再直接判死角。</div>
                 <div class="thermal-risk-row" style="margin-top:10px;"><span>动画阶段</span><strong class="atmosphere-stage-label">${escapeSimHtml(atmosphereStageLabel)} · <span class="atmosphere-progress-value">${atmosphereProgress}%</span></strong></div>
-                <div class="thermal-mini-note atmosphere-stage-desc">${escapeSimHtml(atmosphereStageDesc)} 播放、暂停、重置、速度和进度已统一移到方案工作台顶部控制区。</div>
+                <div class="thermal-mini-note atmosphere-stage-desc">${escapeSimHtml(atmosphereStageDesc)} 播放、暂停、重置、速度和进度位于顶部“当前模式操作”区；本卡片只保留介质参数和诊断。</div>
             </div>
 
             <div class="thermal-risk-card atmosphere-card">
@@ -1084,7 +1084,7 @@ export function renderThermalSimulationPanel(metrics = null, mode = null) {
                 <div class="thermal-risk-row"><span>${escapeSimHtml(riskFaceLabel)}</span><strong>${escapeSimHtml(worstFaceLabel)}</strong></div>
                 <div class="thermal-risk-row"><span>主要遮蔽来源</span><strong>${escapeSimHtml(worstBlocker)}</strong></div>
                 <div class="thermal-risk-row"><span>局部密集度</span><strong>${localDensityRate}%</strong></div>
-                <div class="thermal-risk-row"><span>当前模式</span><strong>介质场 · ${escapeSimHtml(modeName)} V1.5</strong></div>
+                <div class="thermal-risk-row"><span>当前模式</span><strong>介质场 · ${escapeSimHtml(modeName)} V1.6</strong></div>
             </div>
 
             <div class="thermal-risk-card atmosphere-card">
@@ -1188,7 +1188,7 @@ export function renderThermalSimulationPanel(metrics = null, mode = null) {
                 <div class="thermal-stage-title">气流流线动画</div>
                 <div class="thermal-risk-row"><span>动画状态</span><strong>${animationPlaying ? '循环流动中' : '循环已暂停 / 诊断视图'}</strong></div>
                 <div class="thermal-risk-row"><span>进度语义</span><strong>循环相位，不代表冷却完成度</strong></div>
-                <div class="thermal-mini-note">这是解释型流线动画，不是 CFD：用于展示气流进入、遇到工件后曲线绕流、速度衰减、弱流区和背风风险。气流模式不再显示 0–100% 完成进度；顶部速度只控制流线循环周期。</div>
+                <div class="thermal-mini-note">这是解释型流线动画，不是 CFD：用于展示气流进入、遇到工件后曲线绕流、速度衰减、弱流区和背风风险。气流模式不显示 0–100% 完成进度；顶部“当前模式操作”只控制流线循环、暂停和速度。</div>
             </div>
 
             <div class="thermal-risk-card airflow-card">

@@ -113,7 +113,7 @@ import {
     playLayeredLoadingAnimation,
     findResultIndexByFid, generateUniqueColor,
     refreshAllDisplayVisibility,
-    toggleExplodedView, showLayeredBOM,
+    toggleExplodedView, setExplodeVertical, setExplodeHorizontal, resetExplode, showLayeredBOM,
     focusLayer,
     focusLayersUpTo,
     setTightFitCamera,
@@ -1906,6 +1906,27 @@ function updateWorkbenchUiMode() {
     });
 
     syncLeftPanelActionButton();
+
+    const runnableProcess = hasPlan;
+    document.querySelectorAll('.process-sim-mode-btn').forEach(btn => {
+        btn.disabled = !runnableProcess;
+        btn.classList.toggle('disabled', !runnableProcess);
+        btn.title = runnableProcess ? '' : '请先生成装炉方案，再进入工艺仿真';
+    });
+
+    const thermalTabBtn = document.querySelector('.right-tab-btn[data-tab="thermal"]');
+    if (thermalTabBtn) {
+        thermalTabBtn.disabled = !runnableProcess;
+        thermalTabBtn.classList.toggle('disabled', !runnableProcess);
+        thermalTabBtn.title = runnableProcess ? '查看工艺仿真' : '生成方案后才能进入工艺仿真';
+    }
+
+    const dockThermalBtn = document.getElementById('dock-thermal');
+    if (dockThermalBtn) {
+        dockThermalBtn.disabled = !runnableProcess;
+        dockThermalBtn.classList.toggle('disabled', !runnableProcess);
+        dockThermalBtn.title = runnableProcess ? '进入热场仿真' : '生成方案后才能进入热场仿真';
+    }
 }
 
 function updateEmptyStateCopy({ hasFurnaces, hasMaterials, hasPlan }) {
@@ -1986,15 +2007,56 @@ function markSimulationStepPlaying(layerIndex, stepIndex, totalSteps) {
 
 
 
+function ensureProcessSpeedSelectOptions() {
+    let select = document.getElementById('thermal-speed-select');
+
+    // UX V2.8：兼容旧版 furnace.html 里没有速度下拉框的情况，直接在当前模式操作条中补齐。
+    if (!select) {
+        const actionBar = document.querySelector('.thermal-action-bar');
+        if (!actionBar) return null;
+        select = document.createElement('select');
+        select.className = 'thermal-speed-select process-speed-select';
+        select.id = 'thermal-speed-select';
+        select.title = '动画速度';
+        select.style.display = 'none';
+        const resetBtn = document.getElementById('btn-reset-thermal');
+        if (resetBtn && resetBtn.parentElement === actionBar) {
+            resetBtn.insertAdjacentElement('afterend', select);
+        } else {
+            actionBar.appendChild(select);
+        }
+        select.addEventListener('change', applyCurrentProcessSpeedChange);
+    }
+
+    const current = getProcessPlayerSpeedKey();
+    const desired = [
+        { value: 'slow', label: '速度：慢' },
+        { value: 'normal', label: '速度：正常' },
+        { value: 'fast', label: '速度：快' }
+    ];
+
+    const hasModernOptions = [...select.options].some(opt => ['slow', 'normal', 'fast'].includes(String(opt.value)));
+    if (!hasModernOptions || select.options.length !== desired.length) {
+        select.innerHTML = desired.map(opt => `<option value="${opt.value}">${opt.label}</option>`).join('');
+    }
+
+    select.value = ['slow', 'normal', 'fast'].includes(current) ? current : 'normal';
+    select.setAttribute('data-speed-normalized', '1');
+    select.setAttribute('aria-label', '动画速度');
+    return select;
+}
+
 function getProcessPlayerSpeedKey() {
-    // UX V2.3：统一播放控制回到方案工作台顶部，不再读取 3D HUD。
+    // UX V2.7：速度控件统一为 slow / normal / fast；兼容旧毫秒值。
     const select = document.getElementById('thermal-speed-select');
     const rawValue = select && select.value ? String(select.value) : 'normal';
     if (['slow', 'normal', 'fast'].includes(rawValue)) return rawValue;
+
     const legacyValue = parseInt(rawValue, 10);
     if (Number.isFinite(legacyValue)) {
         if (legacyValue >= 11000) return 'slow';
         if (legacyValue <= 5500) return 'fast';
+        return 'normal';
     }
     return 'normal';
 }
@@ -2017,11 +2079,36 @@ function isProcessSimulationActive() {
     return !!processSimulationActive;
 }
 
+function hasRunnableProcessSimulation() {
+    return Array.isArray(globalFurnacesResult)
+        && globalFurnacesResult.length > 0
+        && !!globalFurnacesResult[Math.max(0, Math.min(currentFurnaceIndex || 0, globalFurnacesResult.length - 1))];
+}
+
+function guardProcessSimulationEntry() {
+    if (hasRunnableProcessSimulation()) return true;
+
+    processSimulationActive = false;
+    processSimulationMode = 'idle';
+    document.body.classList.remove('radiation-pick-mode', 'thermal-heatmap-mode', 'airflow-cooling-mode', 'atmosphere-coverage-mode');
+    try { clearThermalSimulationLayer(); } catch (_) {}
+    renderThermalSimulationPanel(null, 'idle');
+    syncThermalControlState(null);
+    updateProcessSimulationModeButtons();
+    return false;
+}
+
 function updateProcessSimulationModeButtons() {
+    const runnable = hasRunnableProcessSimulation();
     document.querySelectorAll('.process-sim-mode-btn').forEach(btn => {
         const mode = btn.getAttribute('data-process-sim-mode');
-        btn.classList.toggle('active', isProcessSimulationActive() && mode === processSimulationMode);
-        btn.setAttribute('aria-pressed', (isProcessSimulationActive() && mode === processSimulationMode) ? 'true' : 'false');
+        const isActive = runnable && isProcessSimulationActive() && mode === processSimulationMode;
+        btn.classList.toggle('active', isActive);
+        btn.classList.toggle('disabled', !runnable);
+        btn.disabled = !runnable;
+        btn.setAttribute('aria-disabled', runnable ? 'false' : 'true');
+        btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+        btn.title = runnable ? '' : '请先生成装炉方案，再进入工艺仿真';
     });
 }
 
@@ -2205,7 +2292,55 @@ function renderActiveProcessPanel(metrics = null) {
     }
 }
 
+function applyCurrentProcessSpeedChange() {
+    if (!isProcessSimulationActive() || processSimulationMode === 'idle' || processSimulationMode === 'radiation') {
+        syncThermalControlState(null);
+        return;
+    }
+
+    const snap = getCurrentProcessRuntimeSnapshot();
+    if (processSimulationMode === 'thermal') {
+        if (snap.isPlaying) {
+            restartThermalWithCurrentSpeedIfPlaying();
+        }
+        syncThermalControlState(snap.metrics);
+        return;
+    }
+
+    if (processSimulationMode === 'airflow') {
+        if (snap.isPlaying) {
+            playAirflowCoolingAnimation({ cycleMs: getProcessAnimationDurationMs('airflow') });
+        } else {
+            const runtime = getAirflowCoolingRuntime && getAirflowCoolingRuntime();
+            const metrics = runtime?.metrics || null;
+            syncThermalControlState(metrics);
+        }
+        return;
+    }
+
+    if (processSimulationMode === 'atmosphere') {
+        const runtime = getAtmosphereCoverageRuntime && getAtmosphereCoverageRuntime();
+        if (snap.isPlaying) {
+            playAtmosphereCoverageAnimation({
+                durationMs: getProcessAnimationDurationMs('atmosphere'),
+                startProgress: Math.max(0, Math.min(0.999, runtime?.progress || 0)),
+                onUpdate: (nextMetrics) => {
+                    syncAtmosphereAnimationProgressUi(nextMetrics);
+                    syncThermalControlState(nextMetrics);
+                },
+                onFinish: (finalMetrics) => {
+                    renderThermalSimulationPanel(finalMetrics, 'atmosphere');
+                    syncThermalControlState(finalMetrics);
+                }
+            });
+        } else {
+            syncThermalControlState(runtime?.metrics || null);
+        }
+    }
+}
+
 function playCurrentProcessAnimation() {
+    if (!guardProcessSimulationEntry()) return;
     if (!isProcessSimulationActive() || processSimulationMode === 'idle') {
         switchProcessSimulationMode('thermal');
     }
@@ -2242,6 +2377,7 @@ function playCurrentProcessAnimation() {
 }
 
 function pauseResumeCurrentProcessAnimation() {
+    if (!guardProcessSimulationEntry()) return;
     if (!isProcessSimulationActive() || processSimulationMode === 'idle' || processSimulationMode === 'radiation') return;
 
     if (processSimulationMode === 'airflow') {
@@ -2279,6 +2415,10 @@ function pauseResumeCurrentProcessAnimation() {
 }
 
 function resetCurrentProcessAnimation() {
+    if (!hasRunnableProcessSimulation()) {
+        resetCurrentThermalSimulation();
+        return;
+    }
     if (!isProcessSimulationActive() || processSimulationMode === 'idle') return;
     let metrics = null;
     if (processSimulationMode === 'thermal') {
@@ -2296,6 +2436,7 @@ function resetCurrentProcessAnimation() {
 }
 
 function scrubCurrentProcessAnimation(progressPercent) {
+    if (!guardProcessSimulationEntry()) return;
     const pct = Math.max(0, Math.min(100, Number(progressPercent || 0)));
     if (!isProcessSimulationActive() || processSimulationMode === 'idle' || processSimulationMode === 'radiation') return;
     if (processSimulationMode === 'thermal') {
@@ -2318,27 +2459,7 @@ function bindProcessPlayerHud() {
     hud.querySelector('#process-player-play')?.addEventListener('click', playCurrentProcessAnimation);
     hud.querySelector('#process-player-pause')?.addEventListener('click', pauseResumeCurrentProcessAnimation);
     hud.querySelector('#process-player-reset')?.addEventListener('click', resetCurrentProcessAnimation);
-    hud.querySelector('#process-player-speed')?.addEventListener('change', () => {
-        if (!isProcessSimulationActive()) return;
-        const snap = getCurrentProcessRuntimeSnapshot();
-        if (snap.isPlaying) {
-            if (processSimulationMode === 'thermal') restartThermalWithCurrentSpeedIfPlaying();
-            else if (processSimulationMode === 'airflow') playAirflowCoolingAnimation({ cycleMs: getProcessAnimationDurationMs('airflow') });
-            else if (processSimulationMode === 'atmosphere') playAtmosphereCoverageAnimation({
-                durationMs: getProcessAnimationDurationMs('atmosphere'),
-                startProgress: Math.max(0, Math.min(0.999, (getAtmosphereCoverageRuntime()?.progress || 0))),
-                onUpdate: (nextMetrics) => {
-                    syncAtmosphereAnimationProgressUi(nextMetrics);
-                    syncThermalControlState(nextMetrics);
-                },
-                onFinish: (finalMetrics) => {
-                    renderThermalSimulationPanel(finalMetrics, 'atmosphere');
-                    syncThermalControlState(finalMetrics);
-                }
-            });
-        }
-        syncThermalControlState(snap.metrics);
-    });
+    hud.querySelector('#process-player-speed')?.addEventListener('change', applyCurrentProcessSpeedChange);
     hud.querySelector('#process-player-progress')?.addEventListener('input', (event) => {
         scrubCurrentProcessAnimation(parseInt(event.target.value, 10) || 0);
     });
@@ -2349,11 +2470,35 @@ function syncThermalControlState(metrics = null) {
     const pauseBtn = document.getElementById('btn-pause-thermal');
     const renderBtn = document.getElementById('btn-render-thermal');
     const resetBtn = document.getElementById('btn-reset-thermal');
-    const speedSelect = document.getElementById('thermal-speed-select');
+    const speedSelect = ensureProcessSpeedSelectOptions();
     const range = document.getElementById('thermal-progress-range');
     const value = document.getElementById('thermal-progress-value');
     const scrubRow = document.getElementById('thermal-scrub-row');
     const actionBar = document.querySelector('.thermal-action-bar');
+    const runnable = hasRunnableProcessSimulation();
+    optimizeThermalToolbarLayout();
+
+    if (!runnable) {
+        if (actionBar) actionBar.style.display = 'none';
+        [playBtn, pauseBtn, renderBtn, resetBtn, speedSelect].forEach(el => {
+            if (!el) return;
+            el.disabled = true;
+            el.style.opacity = '0.45';
+        });
+        if (scrubRow) scrubRow.style.display = 'none';
+        if (range) range.disabled = true;
+        if (value) value.textContent = '';
+        updateProcessSimulationModeButtons();
+        syncProcessToolbarStatus(metrics);
+        updateDockToolVisibilityForProcess();
+        syncProcessPlayerHud(metrics);
+        return;
+    }
+
+    [playBtn, pauseBtn, renderBtn, resetBtn, speedSelect].forEach(el => {
+        if (!el) return;
+        el.style.opacity = '1';
+    });
 
     const active = isProcessSimulationActive();
     const snap = getCurrentProcessRuntimeSnapshot(metrics);
@@ -2369,9 +2514,8 @@ function syncThermalControlState(metrics = null) {
 
     if (actionBar) {
         actionBar.style.display = active ? 'grid' : 'none';
-        actionBar.style.gridTemplateColumns = animated
-            ? 'repeat(3, minmax(0, 1fr))'
-            : 'repeat(2, minmax(0, 1fr))';
+        // UX V2.9：统一为两列操作按钮；速度控件单独占满一行，保证热场/气流/气氛都可见。
+        actionBar.style.gridTemplateColumns = 'repeat(2, minmax(0, 1fr))';
         actionBar.style.gap = '6px';
     }
 
@@ -2379,25 +2523,31 @@ function syncThermalControlState(metrics = null) {
         playBtn.style.display = animated ? 'inline-block' : 'none';
         playBtn.disabled = !animated;
         if (isAirflowMode) {
-            playBtn.textContent = snap.isPlaying ? '重启循环' : (snap.paused ? '继续循环' : '播放气流');
+            playBtn.textContent = snap.isPlaying ? '重启流线' : (snap.paused ? '继续流线' : '播放气流');
+        } else if (processSimulationMode === 'atmosphere') {
+            playBtn.textContent = snap.isPlaying ? '重播扩散' : (snap.paused ? '继续扩散' : '播放扩散');
         } else {
-            playBtn.textContent = snap.isPlaying ? '重播' : (snap.paused ? '继续播放' : '播放动画');
+            playBtn.textContent = snap.isPlaying ? '重播热场' : (snap.paused ? '继续播放' : '播放热场');
         }
-        playBtn.title = `${currentModeLabel} · 播放/重播`;
+        playBtn.title = `${currentModeLabel} · 主操作`;
     }
 
     if (pauseBtn) {
         pauseBtn.style.display = animated ? 'inline-block' : 'none';
         pauseBtn.disabled = !animated;
-        pauseBtn.textContent = snap.isPlaying ? '暂停' : (snap.paused ? '继续' : (isAirflowMode ? '暂停循环' : '暂停/继续'));
+        pauseBtn.textContent = snap.isPlaying ? (isAirflowMode ? '暂停循环' : '暂停') : (snap.paused ? '继续' : '暂停');
         pauseBtn.title = `${currentModeLabel} · 暂停/继续`;
     }
 
     if (speedSelect) {
-        speedSelect.style.display = animated ? 'inline-block' : 'none';
+        speedSelect.style.display = animated ? 'block' : 'none';
+        speedSelect.style.visibility = animated ? 'visible' : 'hidden';
         speedSelect.disabled = !animated;
-        // 兼容旧 HTML：如果 option 还是毫秒值，不强行重写；如果已经是 slow/normal/fast 则保留。
         speedSelect.title = isAirflowMode ? '气流循环速度' : `${currentModeLabel} · 播放速度`;
+        speedSelect.style.gridColumn = '1 / -1';
+        speedSelect.style.width = '100%';
+        speedSelect.style.minWidth = '0';
+        speedSelect.style.height = '34px';
     }
 
     if (scrubRow) {
@@ -2407,13 +2557,13 @@ function syncThermalControlState(metrics = null) {
 
     if (renderBtn) {
         renderBtn.style.display = active ? 'inline-block' : 'none';
-        renderBtn.textContent = active ? `刷新${currentModeLabel}` : '进入仿真';
-        renderBtn.title = active ? '刷新当前仿真视图，不改变参数' : '进入工艺仿真';
+        renderBtn.textContent = active ? '重新计算' : '进入仿真';
+        renderBtn.title = active ? `重新计算${currentModeLabel}诊断视图` : '进入工艺仿真';
     }
 
     if (resetBtn) {
         resetBtn.style.display = active ? 'inline-block' : 'none';
-        resetBtn.textContent = active ? '退出仿真' : '停止查看';
+        resetBtn.textContent = '退出仿真';
         resetBtn.title = '退出当前工艺仿真并清空 3D 仿真层';
     }
 
@@ -2436,10 +2586,13 @@ function syncThermalControlState(metrics = null) {
     }
 
     updateProcessSimulationModeButtons();
+    syncProcessToolbarStatus(metrics);
+    updateDockToolVisibilityForProcess();
     syncProcessPlayerHud(metrics);
 }
 
 function renderCurrentThermalSimulation(progress = 0.18, switchTab = true) {
+    if (!guardProcessSimulationEntry()) return null;
     processSimulationMode = 'thermal';
     processSimulationActive = true;
     document.body.classList.remove('radiation-pick-mode');
@@ -2454,6 +2607,7 @@ function renderCurrentThermalSimulation(progress = 0.18, switchTab = true) {
     return metrics;
 }
 function renderCurrentRadiationSimulation(switchTab = true) {
+    if (!guardProcessSimulationEntry()) return null;
     processSimulationMode = 'radiation';
     processSimulationActive = true;
     document.body.classList.add('radiation-pick-mode');
@@ -2469,6 +2623,7 @@ function renderCurrentRadiationSimulation(switchTab = true) {
     return metrics;
 }
 function renderCurrentAirflowSimulation(switchTab = true, directionKey = null) {
+    if (!guardProcessSimulationEntry()) return null;
     processSimulationMode = 'airflow';
     processSimulationActive = true;
     document.body.classList.remove('radiation-pick-mode');
@@ -2487,6 +2642,7 @@ function renderCurrentAirflowSimulation(switchTab = true, directionKey = null) {
 }
 
 function renderCurrentAtmosphereSimulation(switchTab = true, mediumType = null) {
+    if (!guardProcessSimulationEntry()) return null;
     processSimulationMode = 'atmosphere';
     processSimulationActive = true;
     document.body.classList.remove('radiation-pick-mode');
@@ -2504,6 +2660,7 @@ function renderCurrentAtmosphereSimulation(switchTab = true, mediumType = null) 
     return metrics;
 }
 function renderCurrentProcessSimulation() {
+    if (!guardProcessSimulationEntry()) return null;
     if (!processSimulationMode || processSimulationMode === 'idle') {
         processSimulationMode = 'thermal';
     }
@@ -2522,6 +2679,7 @@ function renderCurrentProcessSimulation() {
 }
 
 function switchProcessSimulationMode(mode) {
+    if (!guardProcessSimulationEntry()) return;
     const nextMode = mode === 'radiation'
         ? 'radiation'
         : (mode === 'airflow' ? 'airflow' : (mode === 'atmosphere' ? 'atmosphere' : 'thermal'));
@@ -2548,6 +2706,7 @@ function switchProcessSimulationMode(mode) {
 }
 
 function playCurrentThermalSimulation() {
+    if (!guardProcessSimulationEntry()) return;
     processSimulationMode = 'thermal';
     processSimulationActive = true;
     document.body.classList.remove('radiation-pick-mode');
@@ -2576,6 +2735,7 @@ function playCurrentThermalSimulation() {
 }
 
 function pauseResumeCurrentThermalSimulation() {
+    if (!guardProcessSimulationEntry()) return;
     processSimulationMode = 'thermal';
     processSimulationActive = true;
     document.body.classList.remove('radiation-pick-mode');
@@ -2625,6 +2785,7 @@ function resetCurrentThermalSimulation() {
 }
 
 function scrubCurrentThermalSimulation(progressPercent) {
+    if (!guardProcessSimulationEntry()) return;
     processSimulationMode = 'thermal';
     processSimulationActive = true;
     document.body.classList.remove('radiation-pick-mode');
@@ -2889,25 +3050,284 @@ function bindRadiationItemSelection() {
 
 
 
+function ensureToolbarSectionLabel(beforeEl, id, title, desc) {
+    if (!beforeEl || !beforeEl.parentElement) return null;
+    let label = document.getElementById(id);
+    if (!label) {
+        label = document.createElement('div');
+        label.id = id;
+        label.className = 'process-toolbar-section-label';
+        beforeEl.parentElement.insertBefore(label, beforeEl);
+    }
+    label.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+            <span style="font-size:11px;font-weight:900;color:#0f172a;letter-spacing:.02em;">${title}</span>
+            <span style="font-size:10px;font-weight:700;color:#94a3b8;white-space:nowrap;">${desc || ''}</span>
+        </div>
+    `;
+    label.style.cssText = [
+        'display:block',
+        'padding:8px 10px 4px',
+        'margin-top:2px',
+        'border-top:1px solid rgba(226,232,240,.8)'
+    ].join(';');
+    return label;
+}
+
+function getProcessToolbarCopy(metrics = null) {
+    if (!hasRunnableProcessSimulation()) {
+        return {
+            title: '当前操作',
+            detail: '生成方案后启用',
+            status: '请先生成装炉方案，再进入工艺仿真。'
+        };
+    }
+    if (!isProcessSimulationActive() || processSimulationMode === 'idle') {
+        return {
+            title: '当前操作',
+            detail: '等待选择模式',
+            status: '先选择上方四种工艺仿真模式，再使用播放、重置和参数配置。'
+        };
+    }
+    const snap = getCurrentProcessRuntimeSnapshot(metrics);
+    const modeLabel = getProcessModeLabel(processSimulationMode);
+    if (processSimulationMode === 'radiation') {
+        return {
+            title: `当前操作 · ${modeLabel}`,
+            detail: '静态诊断',
+            status: '辐射暴露是静态诊断：可点击 3D 工件或左侧物料卡查看单件/批次遮挡原因。'
+        };
+    }
+    if (processSimulationMode === 'airflow') {
+        return {
+            title: `当前操作 · ${modeLabel}`,
+            detail: snap.isPlaying ? '循环流动中' : (snap.paused ? '循环已暂停' : '流线诊断'),
+            status: `${snap.stage || '气流诊断视图'} · ${snap.detail || '气流是循环相位，不代表冷却完成度。'}`
+        };
+    }
+    if (processSimulationMode === 'atmosphere') {
+        return {
+            title: `当前操作 · ${modeLabel}`,
+            detail: `${Math.round(snap.progress || 0)}%`,
+            status: `${snap.stage || '气氛扩散'} · ${snap.detail || '气氛介质'} · 使用进度条表示充入/扩散/反应阶段。`
+        };
+    }
+    return {
+        title: `当前操作 · ${modeLabel}`,
+        detail: `${Math.round(snap.progress || 0)}%`,
+        status: `${snap.stage || '升温热场'} · ${snap.detail || ''} · 进度条表示升温/均热过程。`
+    };
+}
+
+function syncProcessToolbarStatus(metrics = null) {
+    const titleEl = document.getElementById('process-operation-section-title');
+    const statusEl = document.getElementById('process-control-hint');
+    const copy = getProcessToolbarCopy(metrics);
+    if (titleEl) {
+        titleEl.innerHTML = `
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                <span style="font-size:11px;font-weight:900;color:#0f172a;letter-spacing:.02em;">${copy.title}</span>
+                <span style="font-size:10px;font-weight:800;color:#f97316;white-space:nowrap;">${copy.detail || ''}</span>
+            </div>
+        `;
+    }
+    if (statusEl) {
+        statusEl.textContent = copy.status;
+        statusEl.style.display = hasRunnableProcessSimulation() ? 'block' : 'none';
+    }
+}
+
 function optimizeThermalToolbarLayout() {
     const modeRow = document.querySelector('.thermal-mode-row');
     if (modeRow) {
+        ensureToolbarSectionLabel(modeRow, 'process-mode-section-title', '1 · 工艺仿真模式', '选择要看的物理问题');
         modeRow.style.display = 'grid';
         modeRow.style.gridTemplateColumns = 'repeat(2, minmax(0, 1fr))';
         modeRow.style.gap = '6px';
-        modeRow.style.padding = '8px 10px 0';
+        modeRow.style.padding = '6px 10px 8px';
+        modeRow.style.background = 'rgba(248,250,252,.72)';
+        modeRow.style.borderRadius = '12px';
+        modeRow.style.margin = '0 0 6px';
+        modeRow.querySelectorAll('.process-sim-mode-btn').forEach(btn => {
+            btn.style.minHeight = '34px';
+            btn.style.borderRadius = '12px';
+            btn.style.fontWeight = '850';
+            btn.style.letterSpacing = '.01em';
+        });
     }
 
     const actionBar = document.querySelector('.thermal-action-bar');
     if (actionBar) {
+        ensureToolbarSectionLabel(actionBar, 'process-operation-section-title', '2 · 当前模式操作', '选择模式后启用');
         actionBar.style.display = 'grid';
+        // UX V2.9：操作条改为两列按钮 + 独立速度行，避免第 5 列被右侧窄面板裁掉。
         actionBar.style.gridTemplateColumns = 'repeat(2, minmax(0, 1fr))';
         actionBar.style.gap = '6px';
+        actionBar.style.padding = '8px 10px';
+        actionBar.style.background = 'rgba(255,255,255,.82)';
+        actionBar.style.border = '1px solid rgba(226,232,240,.95)';
+        actionBar.style.borderRadius = '14px';
+        actionBar.style.margin = '0 0 8px';
         actionBar.querySelectorAll('button, select').forEach(el => {
             el.style.width = '100%';
             el.style.minWidth = '0';
+            el.style.height = '34px';
+            el.style.borderRadius = '11px';
+            el.style.fontWeight = '850';
         });
     }
+
+    const playBtn = document.getElementById('btn-play-thermal');
+    const pauseBtn = document.getElementById('btn-pause-thermal');
+    const renderBtn = document.getElementById('btn-render-thermal');
+    const resetBtn = document.getElementById('btn-reset-thermal');
+    if (playBtn) {
+        playBtn.style.background = '#2563eb';
+        playBtn.style.color = '#fff';
+        playBtn.style.border = '0';
+        playBtn.style.boxShadow = '0 8px 18px rgba(37,99,235,.18)';
+    }
+    [pauseBtn, renderBtn].forEach(btn => {
+        if (!btn) return;
+        btn.style.background = '#f8fafc';
+        btn.style.color = '#334155';
+        btn.style.border = '1px solid #dbeafe';
+        btn.style.boxShadow = 'none';
+    });
+    if (resetBtn) {
+        resetBtn.style.background = '#fff7ed';
+        resetBtn.style.color = '#c2410c';
+        resetBtn.style.border = '1px solid #fed7aa';
+        resetBtn.style.boxShadow = 'none';
+    }
+
+    const speedSelect = ensureProcessSpeedSelectOptions();
+    if (speedSelect) {
+        const speedVisible = isProcessSimulationActive() && ['thermal', 'airflow', 'atmosphere'].includes(processSimulationMode);
+        speedSelect.style.background = '#fff';
+        speedSelect.style.border = '1px solid #cbd5e1';
+        speedSelect.style.color = '#334155';
+        speedSelect.style.display = speedVisible ? 'block' : 'none';
+        speedSelect.style.visibility = speedVisible ? 'visible' : 'hidden';
+        speedSelect.style.gridColumn = '1 / -1';
+        speedSelect.style.width = '100%';
+        speedSelect.style.minWidth = '0';
+        speedSelect.style.padding = '0 10px';
+    }
+
+    const scrubRow = document.getElementById('thermal-scrub-row');
+    if (scrubRow) {
+        scrubRow.style.padding = '6px 10px 8px';
+        scrubRow.style.margin = '0 0 8px';
+        scrubRow.style.background = 'rgba(248,250,252,.86)';
+        scrubRow.style.border = '1px solid rgba(226,232,240,.9)';
+        scrubRow.style.borderRadius = '12px';
+        scrubRow.style.gap = '8px';
+    }
+    if (scrubRow && !document.getElementById('process-control-hint')) {
+        const hint = document.createElement('div');
+        hint.id = 'process-control-hint';
+        hint.className = 'process-control-hint';
+        hint.style.cssText = 'font-size:10px;line-height:1.45;color:#64748b;padding:0 10px 8px;margin-top:-4px;';
+        scrubRow.insertAdjacentElement('afterend', hint);
+    }
+    syncProcessToolbarStatus();
+}
+
+function updateDockToolVisibilityForProcess() {
+    const inProcess = isProcessSimulationActive() && processSimulationMode !== 'idle';
+    ['dock-explode', 'dock-explode-vertical', 'dock-explode-horizontal', 'dock-gravity', 'dock-thermal'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.style.display = inProcess ? 'none' : '';
+        el.title = inProcess ? '工艺仿真中隐藏该工具；退出仿真后恢复' : (el.title || '');
+    });
+}
+
+function setupDockViewSettingsMenu() {
+    const dockBar = document.getElementById('dock-bar');
+    const gridBtn = document.getElementById('dock-toggle-grid');
+    const axesBtn = document.getElementById('dock-toggle-axes');
+    const rulerBtn = document.getElementById('dock-toggle-rulers');
+    if (!dockBar || !gridBtn || !axesBtn || !rulerBtn || document.getElementById('dock-view-settings')) return;
+
+    const viewBtn = document.createElement('button');
+    viewBtn.className = 'dock-btn';
+    viewBtn.id = 'dock-view-settings';
+    viewBtn.type = 'button';
+    viewBtn.title = '视图设置：网格、尺寸标注、方向轴';
+    viewBtn.innerHTML = '<span class="dock-icon">⚙️</span><span class="dock-label">视图</span>';
+    rulerBtn.insertAdjacentElement('afterend', viewBtn);
+
+    [gridBtn, axesBtn, rulerBtn].forEach(btn => {
+        btn.style.display = 'none';
+        btn.setAttribute('aria-hidden', 'true');
+    });
+
+    const pop = document.createElement('div');
+    pop.id = 'dock-view-settings-popover';
+    pop.style.cssText = [
+        'position:fixed',
+        'z-index:120',
+        'display:none',
+        'min-width:180px',
+        'padding:8px',
+        'border-radius:14px',
+        'background:rgba(255,255,255,.96)',
+        'box-shadow:0 18px 44px rgba(15,23,42,.18)',
+        'border:1px solid rgba(226,232,240,.95)',
+        'backdrop-filter:blur(10px)'
+    ].join(';');
+    document.body.appendChild(pop);
+
+    function renderMenu() {
+        const items = [
+            { id: 'dock-toggle-grid', label: '地面网格', active: !!displaySettings.showGrid },
+            { id: 'dock-toggle-rulers', label: '尺寸标注', active: !!displaySettings.showRulers },
+            { id: 'dock-toggle-axes', label: '方向轴', active: !!displaySettings.showAxes }
+        ];
+        pop.innerHTML = items.map(item => `
+            <button type="button" data-dock-proxy="${item.id}" style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 10px;border:0;border-radius:10px;background:${item.active ? '#eff6ff' : 'transparent'};color:#0f172a;font-size:12px;font-weight:800;cursor:pointer;margin-bottom:2px;">
+                <span>${item.label}</span><span style="color:${item.active ? '#2563eb' : '#94a3b8'};">${item.active ? '✓' : '—'}</span>
+            </button>
+        `).join('') + '<div style="font-size:10px;color:#94a3b8;line-height:1.35;padding:6px 8px 2px;">视图设置只影响观察辅助，不改变装炉方案。</div>';
+    }
+
+    function positionMenu() {
+        const rect = viewBtn.getBoundingClientRect();
+        pop.style.left = `${Math.max(12, rect.left - 58)}px`;
+        pop.style.top = `${Math.max(12, rect.top - 168)}px`;
+    }
+
+    viewBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const willOpen = pop.style.display === 'none';
+        if (willOpen) {
+            renderMenu();
+            positionMenu();
+            pop.style.display = 'block';
+            viewBtn.classList.add('active');
+        } else {
+            pop.style.display = 'none';
+            viewBtn.classList.remove('active');
+        }
+    });
+
+    pop.addEventListener('click', (event) => {
+        const proxy = event.target.closest('[data-dock-proxy]');
+        if (!proxy) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const target = document.getElementById(proxy.getAttribute('data-dock-proxy'));
+        if (target) target.click();
+        renderMenu();
+    });
+
+    document.addEventListener('click', () => {
+        pop.style.display = 'none';
+        viewBtn.classList.remove('active');
+    });
 }
 
 function ensureAtmosphereModeButton() {
@@ -3574,28 +3994,8 @@ function init() {
     if (btnModeAtmosphere) btnModeAtmosphere.addEventListener('click', () => switchProcessSimulationMode('atmosphere'));
     const btnResetThermal = document.getElementById("btn-reset-thermal");
     if (btnResetThermal) btnResetThermal.addEventListener("click", resetCurrentThermalSimulation);
-    const thermalSpeedSelect = document.getElementById('thermal-speed-select');
-    if (thermalSpeedSelect) thermalSpeedSelect.addEventListener('change', () => {
-        if (!isProcessSimulationActive()) return;
-        const snap = getCurrentProcessRuntimeSnapshot();
-        if (snap.isPlaying) {
-            if (processSimulationMode === 'thermal') restartThermalWithCurrentSpeedIfPlaying();
-            else if (processSimulationMode === 'airflow') playAirflowCoolingAnimation({ cycleMs: getProcessAnimationDurationMs('airflow') });
-            else if (processSimulationMode === 'atmosphere') playAtmosphereCoverageAnimation({
-                durationMs: getProcessAnimationDurationMs('atmosphere'),
-                startProgress: Math.max(0, Math.min(0.999, (getAtmosphereCoverageRuntime()?.progress || 0))),
-                onUpdate: (nextMetrics) => {
-                    syncAtmosphereAnimationProgressUi(nextMetrics);
-                    syncThermalControlState(nextMetrics);
-                },
-                onFinish: (finalMetrics) => {
-                    renderThermalSimulationPanel(finalMetrics, 'atmosphere');
-                    syncThermalControlState(finalMetrics);
-                }
-            });
-        }
-        syncThermalControlState(snap.metrics);
-    });
+    const thermalSpeedSelect = ensureProcessSpeedSelectOptions();
+    if (thermalSpeedSelect) thermalSpeedSelect.addEventListener('change', applyCurrentProcessSpeedChange);
     const thermalProgressRange = document.getElementById('thermal-progress-range');
     if (thermalProgressRange) thermalProgressRange.addEventListener('input', (event) => scrubCurrentProcessAnimation(parseInt(event.target.value, 10) || 0));
     const btnExportPdf = document.getElementById("btn-export-pdf");
@@ -4365,41 +4765,87 @@ init();
     // const dockGravity = document.getElementById('dock-gravity');
     const dockThermal = document.getElementById('dock-thermal');
 
+    function ensureDockButton(id, iconText, labelText, titleText, insertAfterEl) {
+        let btn = document.getElementById(id);
+        if (btn) return btn;
+        btn = document.createElement('button');
+        btn.className = 'dock-btn';
+        btn.id = id;
+        btn.type = 'button';
+        btn.title = titleText || labelText;
+        btn.innerHTML = `<span class="dock-icon">${iconText}</span><span class="dock-label">${labelText}</span>`;
+        if (insertAfterEl && insertAfterEl.parentNode) {
+            insertAfterEl.insertAdjacentElement('afterend', btn);
+        } else {
+            document.getElementById('dock-bar')?.appendChild(btn);
+        }
+        return btn;
+    }
+
+    const dockRotate45 = ensureDockButton('dock-rotate-45', '↺', '45°', '绕当前工装中心旋转 45°', dockRotate90);
+    const dockCenterView = ensureDockButton('dock-center-view', '◎', '居中', '将当前工装重新居中到画面', dockRotate45);
+    const dockExplodeVertical = ensureDockButton('dock-explode-vertical', '↕', '纵爆', '垂直方向爆炸图 / 再次点击关闭', dockExplode);
+    const dockExplodeHorizontal = ensureDockButton('dock-explode-horizontal', '↔', '横爆', '水平方向爆炸图 / 再次点击关闭', dockExplodeVertical);
+    if (dockExplode) {
+        // UX V2.8：旧“爆炸”循环按钮不再需要，只保留“纵爆 / 横爆”两个明确按钮。
+        dockExplode.style.display = 'none';
+        dockExplode.setAttribute('aria-hidden', 'true');
+        try { dockExplode.remove(); } catch (_) {}
+    }
+
     if (dockTopView) {
         dockTopView.addEventListener('click', () => {
             setTightFitCamera(new THREE.Vector3(0, 1, 0));
             highlightDockBtn(dockTopView);
         });
     }
-    function rotateCurrentView90() {
+    function getCurrentCameraDirectionFallback() {
+        if (!camera || !controls) return new THREE.Vector3(1, 0.55, 1).normalize();
+        const offset = camera.position.clone().sub(controls.target);
+        if (offset.lengthSq() < 0.0001) return new THREE.Vector3(1, 0.55, 1).normalize();
+        return offset.normalize();
+    }
+
+    function rotateCurrentViewByAngle(angleRad) {
         if (!camera || !controls) {
             setTightFitCamera(new THREE.Vector3(1, 0, 0));
             return;
         }
 
-        const offset = camera.position.clone().sub(controls.target);
-        if (offset.lengthSq() < 0.0001) {
-            setTightFitCamera(new THREE.Vector3(1, 0, 0));
-            return;
-        }
-
-        const dir = offset.clone().normalize();
+        const dir = getCurrentCameraDirectionFallback();
 
         // 俯视状态下保持俯视，只旋转画面方向，不跳回平视。
         if (Math.abs(dir.y) > 0.92) {
-            camera.up.applyAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2);
+            camera.up.applyAxisAngle(new THREE.Vector3(0, 1, 0), angleRad);
             camera.lookAt(controls.target);
             controls.update();
             return;
         }
 
-        dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 2);
+        dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), angleRad);
         dir.normalize();
+        setTightFitCamera(dir, 0.18);
+    }
+
+    function rotateCurrentView90() {
+        rotateCurrentViewByAngle(Math.PI / 2);
+    }
+
+    function rotateCurrentView45() {
+        rotateCurrentViewByAngle(Math.PI / 4);
+    }
+
+    function centerCurrentFurnaceView() {
+        const dir = getCurrentCameraDirectionFallback();
         setTightFitCamera(dir, 0.18);
     }
 
     if (dockThermal) {
         dockThermal.addEventListener('click', () => {
+            if (!guardProcessSimulationEntry()) {
+                dockThermal.classList.remove('active');
+                return;
+            }
             renderCurrentThermalSimulation(0.18, true);
             dockThermal.classList.add('active');
         });
@@ -4409,6 +4855,18 @@ init();
         dockRotate90.addEventListener('click', () => {
             rotateCurrentView90();
             highlightDockBtn(dockRotate90);
+        });
+    }
+    if (dockRotate45) {
+        dockRotate45.addEventListener('click', () => {
+            rotateCurrentView45();
+            highlightDockBtn(dockRotate45);
+        });
+    }
+    if (dockCenterView) {
+        dockCenterView.addEventListener('click', () => {
+            centerCurrentFurnaceView();
+            highlightDockBtn(dockCenterView);
         });
     }
     if (dockFrontView) {
@@ -4432,6 +4890,8 @@ init();
         const label = dockExplode.querySelector('.dock-label');
 
         dockExplode.classList.toggle('active', dockExplodeMode !== 'none');
+        if (dockExplodeVertical) dockExplodeVertical.classList.toggle('active', dockExplodeMode === 'vertical');
+        if (dockExplodeHorizontal) dockExplodeHorizontal.classList.toggle('active', dockExplodeMode === 'horizontal');
 
         if (dockExplodeMode === 'vertical') {
             if (icon) icon.textContent = '↕';
@@ -4453,7 +4913,45 @@ init();
         updateDockExplodeButton();
     }
 
-    if (dockExplode) {
+    if (dockExplodeVertical) {
+        dockExplodeVertical.addEventListener('click', async () => {
+            if (!globalFurnacesResult || globalFurnacesResult.length === 0) {
+                dockExplodeMode = 'none';
+                updateDockExplodeButton();
+                return;
+            }
+            if (dockExplodeMode === 'vertical') {
+                await resetExplode();
+                dockExplodeMode = 'none';
+            } else {
+                await setExplodeVertical();
+                dockExplodeMode = 'vertical';
+            }
+            updateDockExplodeButton();
+            highlightDockBtn(dockExplodeVertical);
+        });
+    }
+
+    if (dockExplodeHorizontal) {
+        dockExplodeHorizontal.addEventListener('click', async () => {
+            if (!globalFurnacesResult || globalFurnacesResult.length === 0) {
+                dockExplodeMode = 'none';
+                updateDockExplodeButton();
+                return;
+            }
+            if (dockExplodeMode === 'horizontal') {
+                await resetExplode();
+                dockExplodeMode = 'none';
+            } else {
+                await setExplodeHorizontal();
+                dockExplodeMode = 'horizontal';
+            }
+            updateDockExplodeButton();
+            highlightDockBtn(dockExplodeHorizontal);
+        });
+    }
+
+    if (false && dockExplode) {
         dockExplode.addEventListener('click', async () => {
             if (!globalFurnacesResult || globalFurnacesResult.length === 0) {
                 dockExplodeMode = 'none';
@@ -4497,6 +4995,21 @@ init();
     const toggleAxes = document.getElementById('dock-toggle-axes');
     const toggleRulers = document.getElementById('dock-toggle-rulers');
 
+    if (toggleAxes) {
+        const axesLabel = toggleAxes.querySelector('.dock-label');
+        const axesIcon = toggleAxes.querySelector('.dock-icon');
+        if (axesLabel) axesLabel.textContent = '方向轴';
+        if (axesIcon) axesIcon.textContent = '🧭';
+        toggleAxes.title = '显示/隐藏开发调试方向轴（默认隐藏）';
+    }
+    if (toggleRulers) {
+        const rulerLabel = toggleRulers.querySelector('.dock-label');
+        const rulerIcon = toggleRulers.querySelector('.dock-icon');
+        if (rulerLabel) rulerLabel.textContent = '尺寸标注';
+        if (rulerIcon) rulerIcon.textContent = '📏';
+        toggleRulers.title = '显示/隐藏当前工装尺寸标注';
+    }
+
     if (toggleGrid) {
         toggleGrid.addEventListener('click', () => {
             setDisplaySettings({ ...displaySettings, showGrid: !displaySettings.showGrid });
@@ -4522,6 +5035,9 @@ init();
         });
         toggleRulers.classList.toggle('active', displaySettings.showRulers);
     }
+
+    setupDockViewSettingsMenu();
+    updateDockToolVisibilityForProcess();
 
 })();
 

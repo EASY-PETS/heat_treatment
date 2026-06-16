@@ -251,8 +251,12 @@ function disposeObject3D(obj) {
         if (child.geometry) child.geometry.dispose();
         if (child.material) {
             if (Array.isArray(child.material)) {
-                child.material.forEach(mat => mat && mat.dispose && mat.dispose());
+                child.material.forEach(mat => {
+                    if (mat && mat.map && typeof mat.map.dispose === 'function') mat.map.dispose();
+                    if (mat && typeof mat.dispose === 'function') mat.dispose();
+                });
             } else if (child.material.dispose) {
+                if (child.material.map && typeof child.material.map.dispose === 'function') child.material.map.dispose();
                 child.material.dispose();
             }
         }
@@ -1291,6 +1295,204 @@ function buildRingThermalBoundary(furnace) {
     return group;
 }
 
+
+function getProcessEquipmentColor(mode = 'thermal') {
+    if (mode === 'airflow') return 0x38bdf8;
+    if (mode === 'atmosphere') return 0x2dd4bf;
+    if (mode === 'radiation') return 0xf59e0b;
+    return 0xf97316;
+}
+
+function buildProcessEquipmentContext(furnace, mode = 'thermal') {
+    if (!furnace) return null;
+    const fw = Number(furnace.w || 600);
+    const fh = Number(furnace.h || 600);
+    const fd = Number(furnace.d || 600);
+    const y0 = THERMAL_BASE_Y;
+    const yMid = y0 + fh / 2;
+    const color = getProcessEquipmentColor(mode);
+    const group = new THREE.Group();
+    group.name = 'processEquipmentContext';
+    group.userData = { isProcessEquipmentContext: true, mode };
+
+    const panelOpacity = mode === 'thermal' ? 0.070 : (mode === 'radiation' ? 0.060 : 0.082);
+    const edgeOpacity = mode === 'thermal' ? 0.46 : (mode === 'radiation' ? 0.42 : 0.38);
+
+    const shellMat = new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: panelOpacity,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        depthTest: true
+    });
+    const edgeMat = new THREE.LineBasicMaterial({
+        color,
+        transparent: true,
+        opacity: edgeOpacity,
+        depthWrite: false,
+        depthTest: true
+    });
+
+    if (furnace.toolingType === 'ring-tooling') {
+        const { outerRadius, innerRadius } = getRingThermalRadii(furnace);
+        const radius = Math.max(outerRadius, Math.min(fw, fd) / 2) * 1.03;
+        const cylinder = new THREE.Mesh(
+            new THREE.CylinderGeometry(radius, radius, fh, 96, 1, true),
+            shellMat
+        );
+        cylinder.position.y = yMid;
+        cylinder.renderOrder = 4;
+        group.add(cylinder);
+
+        const topRing = buildRingCircleLine(radius, y0 + fh, color, edgeOpacity + 0.10);
+        const bottomRing = buildRingCircleLine(radius, y0, color, edgeOpacity + 0.06);
+        group.add(topRing, bottomRing);
+        if (innerRadius > 1) {
+            group.add(buildRingCircleLine(innerRadius, y0 + 4, 0x94a3b8, 0.18));
+        }
+        for (let i = 0; i < 8; i++) {
+            const a = (i / 8) * Math.PI * 2;
+            const x = Math.cos(a) * radius;
+            const z = Math.sin(a) * radius;
+            const geo = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(x, y0, z),
+                new THREE.Vector3(x, y0 + fh, z)
+            ]);
+            const line = new THREE.Line(geo, edgeMat.clone());
+            line.renderOrder = 5;
+            group.add(line);
+        }
+        group.add(createDimensionLabelSprite('设备有效热区', new THREE.Vector3(-radius * 0.72, y0 + fh + 58, radius * 0.55), {
+            width: 170,
+            height: 42,
+            color: '#e2e8f0',
+            bg: 'rgba(15, 23, 42, 0.64)',
+            stroke: 'rgba(148, 163, 184, 0.42)'
+        }));
+        return group;
+    }
+
+    const box = new THREE.Mesh(new THREE.BoxGeometry(fw, fh, fd), shellMat);
+    box.position.set(0, yMid, 0);
+    box.renderOrder = 4;
+    group.add(box);
+
+    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(fw, fh, fd)), edgeMat);
+    edges.position.copy(box.position);
+    edges.renderOrder = 5;
+    group.add(edges);
+
+    // UX V2.9：普通料框的外壳以前太淡，增加四角立柱与炉门边框，形成“设备内胆”语境。
+    const postMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: edgeOpacity + 0.08, depthWrite: false, depthTest: true });
+    const postR = Math.max(5, Math.min(12, Math.min(fw, fd) / 80));
+    const postGeo = new THREE.CylinderGeometry(postR, postR, fh, 12);
+    [[-fw / 2, -fd / 2], [fw / 2, -fd / 2], [fw / 2, fd / 2], [-fw / 2, fd / 2]].forEach(([x, z]) => {
+        const post = new THREE.Mesh(postGeo, postMat.clone());
+        post.position.set(x, yMid, z);
+        post.renderOrder = 6;
+        group.add(post);
+    });
+
+    // 保留一个偏后侧的半透明炉门/风道语义面，增强“在设备内部”的空间感，但不遮挡主要工件。
+    const backPanel = new THREE.Mesh(
+        new THREE.PlaneGeometry(fw, fh),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: Math.min(panelOpacity * 1.65, 0.12), side: THREE.DoubleSide, depthWrite: false })
+    );
+    backPanel.position.set(0, yMid, fd / 2 + 2);
+    backPanel.renderOrder = 3;
+    group.add(backPanel);
+    group.add(createDimensionLabelSprite('炉膛有效区', new THREE.Vector3(-fw / 2 + 120, y0 + fh + 54, fd / 2 + 12), {
+        width: 158,
+        height: 42,
+        color: '#e2e8f0',
+        bg: 'rgba(15, 23, 42, 0.64)',
+        stroke: 'rgba(148, 163, 184, 0.42)'
+    }));
+    return group;
+}
+
+function createProcessNozzleVisual(position, normal, color = 0x38bdf8, label = '', options = {}) {
+    const group = new THREE.Group();
+    group.name = options.name || 'processSourceNozzle';
+    group.userData = { isProcessSourceModel: true, label };
+    const n = (normal && normal.clone ? normal.clone() : new THREE.Vector3(0, 0, 1));
+    if (n.lengthSq() < 1e-6) n.set(0, 0, 1);
+    n.normalize();
+
+    const basePos = position.clone ? position.clone() : new THREE.Vector3(position.x || 0, position.y || 0, position.z || 0);
+    const len = options.length || 78;
+    const radius = options.radius || 28;
+    const opacity = options.opacity ?? 0.74;
+    const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, depthTest: true });
+    const glowMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: Math.min(0.26, opacity * 0.36), depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending });
+
+    const torus = new THREE.Mesh(new THREE.TorusGeometry(radius, Math.max(2.5, radius * 0.11), 8, 36), mat.clone());
+    torus.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
+    torus.position.copy(basePos.clone().add(n.clone().multiplyScalar(6)));
+    torus.renderOrder = 58;
+    group.add(torus);
+
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.42, radius * 0.58, len, 24, 1, true), mat.clone());
+    barrel.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
+    barrel.position.copy(basePos.clone().sub(n.clone().multiplyScalar(len * 0.30)));
+    barrel.renderOrder = 57;
+    group.add(barrel);
+
+    const glow = new THREE.Mesh(new THREE.SphereGeometry(radius * 0.38, 18, 12), glowMat);
+    glow.position.copy(basePos.clone().add(n.clone().multiplyScalar(radius * 0.36)));
+    glow.renderOrder = 59;
+    group.add(glow);
+
+    const arrow = new THREE.ArrowHelper(n, basePos.clone().add(n.clone().multiplyScalar(radius * 0.48)), len * 0.82, color, len * 0.24, len * 0.12);
+    arrow.renderOrder = 60;
+    arrow.userData = { isProcessSourceModel: true, isProcessSourceArrow: true };
+    group.add(arrow);
+
+    if (label) {
+        const labelOffset = options.labelOffset || new THREE.Vector3(0, 46, 0);
+        const labelPos = basePos.clone().add(n.clone().multiplyScalar(len * 0.70)).add(labelOffset);
+        group.add(createDimensionLabelSprite(label, labelPos, {
+            width: options.labelWidth || 172,
+            height: 40,
+            color: '#e0f2fe',
+            bg: 'rgba(8, 20, 32, 0.72)',
+            stroke: 'rgba(56, 189, 248, 0.55)'
+        }));
+    }
+    return group;
+}
+
+function addRadiationSourceModules(group, furnace, sources) {
+    if (!group || !furnace || !Array.isArray(sources)) return;
+    const fw = Number(furnace.w || 600);
+    const fh = Number(furnace.h || 600);
+    const fd = Number(furnace.d || 600);
+    const size = Math.max(18, Math.min(38, Math.min(fw, fd) / 26));
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffd166, transparent: true, opacity: 0.82, depthWrite: false, depthTest: true, blending: THREE.AdditiveBlending });
+    const glowMat = new THREE.MeshBasicMaterial({ color: 0xffa000, transparent: true, opacity: 0.22, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending });
+    sources.slice(0, 28).forEach((src, idx) => {
+        const p = src.position;
+        const module = new THREE.Mesh(new THREE.BoxGeometry(size * 0.52, size * 1.35, size * 0.52), mat.clone());
+        module.position.copy(p);
+        module.renderOrder = 52;
+        group.add(module);
+        const halo = new THREE.Mesh(new THREE.SphereGeometry(size * 0.76, 12, 8), glowMat.clone());
+        halo.position.copy(p);
+        halo.renderOrder = 51;
+        group.add(halo);
+        if (idx === 0) {
+            group.add(createDimensionLabelSprite('辐射加热源', p.clone().add(new THREE.Vector3(0, Math.max(70, fh * 0.08), 0)), {
+                width: 160,
+                height: 40,
+                color: '#fff7ed',
+                bg: 'rgba(40, 18, 4, 0.72)',
+                stroke: 'rgba(251, 191, 36, 0.58)'
+            }));
+        }
+    });
+}
+
 function calculateThermalMetrics(furnace, progress) {
     const items = furnace.packedItems || [];
     const risks = items.map(item => estimateItemThermalRisk(item, furnace));
@@ -1633,6 +1835,7 @@ function buildRadiationHeatSourcesVisual(furnace, sources) {
     const sourcePoints = new THREE.Points(sourceGeo, sourceMat);
     sourcePoints.userData = { isRadiationSourcePoints: true };
     group.add(sourcePoints);
+    addRadiationSourceModules(group, furnace, sources);
     return group;
 }
 
@@ -2524,6 +2727,20 @@ function buildAirflowSourceVisual(furnace, directionMetas) {
         outletPlane.renderOrder = 7;
         group.add(inletPlane, outletPlane);
 
+        const nozzlePos = axis === 'x'
+            ? new THREE.Vector3(inletCoord, THERMAL_BASE_Y + fh * 0.52, 0)
+            : (axis === 'y'
+                ? new THREE.Vector3(0, inletCoord, 0)
+                : new THREE.Vector3(0, THERMAL_BASE_Y + fh * 0.52, inletCoord));
+        group.add(createProcessNozzleVisual(nozzlePos, normal, 0x38bdf8, metas.length > 1 ? '气流入口' : '进气风机 / 喷嘴', {
+            name: 'airflowInletNozzle',
+            radius: Math.max(22, Math.min(38, Math.min(fw, fd) / 22)),
+            length: Math.max(70, Math.min(120, Math.max(fw, fh, fd) / 8)),
+            opacity: 0.76,
+            labelWidth: 190,
+            labelOffset: new THREE.Vector3(0, 54, 0)
+        }));
+
         const arrowCountA = metas.length > 2 ? 3 : 4;
         const arrowCountB = 3;
         const arrowLen = Math.max(90, Math.min(180, Math.max(fw, fh, fd) / 6));
@@ -3003,6 +3220,8 @@ export function renderRadiationExposureSimulation() {
     setThermalSceneTheme(true);
 
     const group = ensureThermalSimulationGroup();
+    const equipmentContext = buildProcessEquipmentContext(furnace, 'radiation');
+    if (equipmentContext) group.add(equipmentContext);
     const { scores, sources } = calculateRadiationExposureScores(furnace);
     const sourceVisual = buildRadiationHeatSourcesVisual(furnace, sources);
     const rays = buildRadiationExposureRays(scores);
@@ -3045,6 +3264,8 @@ export function renderAirflowCoolingSimulation(options = {}) {
     if (options.gasType) thermalSimRuntime.selectedAirflowGasType = getAirflowGasMeta(options.gasType).key;
     const directionKeys = normalizeAirflowDirections(options.directionKeys || options.directions || options.directionKey || thermalSimRuntime.selectedAirflowDirections || thermalSimRuntime.selectedAirflowDirection || 'z+');
     const group = ensureThermalSimulationGroup();
+    const equipmentContext = buildProcessEquipmentContext(furnace, 'airflow');
+    if (equipmentContext) group.add(equipmentContext);
     const { scores, directionMetas } = calculateAirflowCoolingScores(furnace, directionKeys);
     const sourceVisual = buildAirflowSourceVisual(furnace, directionMetas);
     const rays = buildAirflowCoolingRays(scores);
@@ -4198,6 +4419,16 @@ function buildAtmosphereBoundaryVisual(furnace, mediumMeta) {
         mesh.renderOrder = 8;
         mesh.userData = { isAtmosphereBoundary: true, side: p.key, isPrimaryInlet: isPrimary };
         group.add(mesh);
+        if (isPrimary) {
+            group.add(createProcessNozzleVisual(new THREE.Vector3(p.pos[0], p.pos[1], p.pos[2]), p.normal, mainColor, '气氛喷入口', {
+                name: 'atmosphereInletNozzle',
+                radius: Math.max(20, Math.min(34, Math.min(fw, fd) / 24)),
+                length: Math.max(62, Math.min(108, Math.max(fw, fh, fd) / 9)),
+                opacity: 0.66,
+                labelWidth: 166,
+                labelOffset: new THREE.Vector3(0, 48, 0)
+            }));
+        }
     });
 
     const arrowLen = Math.max(90, Math.min(190, Math.max(fw, fh, fd) * 0.16));
@@ -4363,6 +4594,8 @@ export function renderAtmosphereCoverageSimulation(options = {}) {
     }
     const { scores } = calculateAtmosphereCoverageScores(furnace, mediumMeta.key);
     const group = ensureThermalSimulationGroup();
+    const equipmentContext = buildProcessEquipmentContext(furnace, 'atmosphere');
+    if (equipmentContext) group.add(equipmentContext);
     const boundary = buildAtmosphereBoundaryVisual(furnace, mediumMeta);
     const fog = buildAtmosphereFogField(furnace, scores, mediumMeta, progress);
     const surfaceLayer = buildAtmosphereSurfaceLayerVisual(furnace, scores, mediumMeta, progress);
@@ -5022,6 +5255,8 @@ export function renderVacuumQuenchThermalSimulation(progress = 0.12, options = {
     setThermalSceneTheme(true, 'thermal');
 
     const group = ensureThermalSimulationGroup();
+    const equipmentContext = buildProcessEquipmentContext(furnace, 'thermal');
+    if (equipmentContext) group.add(equipmentContext);
     const heatmap = buildThermalHeatmapField(furnace, safeProgress, thermalSimRuntime.selectedThermalHeatmapView || 'middle');
     const riskMarkers = buildRiskMarkers(furnace);
     const ringBoundary = buildRingThermalBoundary(furnace);
@@ -5437,74 +5672,199 @@ let mainSceneRulerGroup = null;
 function updateMainSceneDisplayVisibility() {
     if (mainSceneGridHelper) mainSceneGridHelper.visible = displaySettings.showGrid;
     if (mainSceneAxesHelper) mainSceneAxesHelper.visible = displaySettings.showAxes;
-    if (mainSceneRulerGroup) mainSceneRulerGroup.visible = displaySettings.showRulers;
+    if (mainSceneRulerGroup) {
+        rebuildCurrentToolingDimensionAnnotations();
+        mainSceneRulerGroup.visible = !!displaySettings.showRulers && mainSceneRulerGroup.children.length > 0;
+    }
 }
 
-function createRulerGroup(maxRange) {
+function clearDimensionAnnotationGroup(group) {
+    if (!group) return;
+    while (group.children.length > 0) {
+        const child = group.children[0];
+        group.remove(child);
+        disposeObject3D(child);
+    }
+}
+
+function createRulerGroup() {
     const group = new THREE.Group();
-    const step = 100;
-    const range = maxRange || 4000;
-    const originY = -120;
-
-    for (let x = 0; x <= range; x += step) {
-        const canvas = document.createElement('canvas');
-        canvas.width = 64;
-        canvas.height = 32;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#333333';
-        ctx.font = 'bold 14px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText(x + 'mm', 32, 18);
-
-        const texture = new THREE.CanvasTexture(canvas);
-        texture.minFilter = THREE.LinearFilter;
-        const spriteMaterial = new THREE.SpriteMaterial({ map: texture, depthTest: false, depthWrite: false });
-        const sprite = new THREE.Sprite(spriteMaterial);
-        sprite.position.set(x, originY + 5, 20);
-        sprite.scale.set(80, 40, 1);
-        group.add(sprite);
-    }
-
-    for (let z = 0; z <= range; z += step) {
-        const canvas = document.createElement('canvas');
-        canvas.width = 64;
-        canvas.height = 32;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#333333';
-        ctx.font = 'bold 14px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText(z + 'mm', 32, 18);
-
-        const texture = new THREE.CanvasTexture(canvas);
-        texture.minFilter = THREE.LinearFilter;
-        const spriteMaterial = new THREE.SpriteMaterial({ map: texture, depthTest: false, depthWrite: false });
-        const sprite = new THREE.Sprite(spriteMaterial);
-        sprite.position.set(-20, originY + 5, z);
-        sprite.scale.set(80, 40, 1);
-        group.add(sprite);
-    }
-
-    for (let y = 100; y <= 3000; y += step) {
-        const canvas = document.createElement('canvas');
-        canvas.width = 64;
-        canvas.height = 32;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#333333';
-        ctx.font = 'bold 14px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText(y + 'mm', 32, 18);
-
-        const texture = new THREE.CanvasTexture(canvas);
-        texture.minFilter = THREE.LinearFilter;
-        const spriteMaterial = new THREE.SpriteMaterial({ map: texture, depthTest: false, depthWrite: false });
-        const sprite = new THREE.Sprite(spriteMaterial);
-        sprite.position.set(-20, originY + y, 20);
-        sprite.scale.set(80, 40, 1);
-        group.add(sprite);
-    }
-
-    group.userData = { isRulerGroup: true };
+    group.name = 'toolingDimensionAnnotationGroup';
+    group.userData = { isRulerGroup: true, isToolingDimensionAnnotation: true };
     return group;
+}
+
+function createDimensionLabelSprite(text, position, options = {}) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = options.bg || 'rgba(248, 250, 252, 0.92)';
+    roundRect(ctx, 14, 20, 484, 88, 24);
+    ctx.fill();
+    ctx.strokeStyle = options.stroke || 'rgba(37, 99, 235, 0.54)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.fillStyle = options.color || '#0f172a';
+    ctx.font = '800 32px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(text || ''), 256, 64);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.needsUpdate = true;
+    if ('colorSpace' in texture && THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+
+    const material = new THREE.SpriteMaterial({
+        map: texture,
+        transparent: true,
+        opacity: 0.94,
+        depthTest: false,
+        depthWrite: false
+    });
+    const sprite = new THREE.Sprite(material);
+    sprite.position.copy(position);
+    sprite.scale.set(options.width || 210, options.height || 52, 1);
+    sprite.renderOrder = 90;
+    sprite.userData = { isDimensionLabel: true };
+    return sprite;
+}
+
+function addDimensionLine(group, p1, p2, label, labelPos, color = 0x2563eb) {
+    const material = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.88, depthWrite: false, depthTest: false });
+    const lineGeo = new THREE.BufferGeometry().setFromPoints([p1, p2]);
+    const line = new THREE.Line(lineGeo, material);
+    line.renderOrder = 82;
+    group.add(line);
+
+    const tickSize = Math.max(18, Math.min(54, p1.distanceTo(p2) * 0.055));
+    const dir = new THREE.Vector3().subVectors(p2, p1).normalize();
+    const tick = Math.abs(dir.y) > 0.7 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+    [p1, p2].forEach(pt => {
+        const a = pt.clone().add(tick.clone().multiplyScalar(-tickSize));
+        const b = pt.clone().add(tick.clone().multiplyScalar(tickSize));
+        const tickGeo = new THREE.BufferGeometry().setFromPoints([a, b]);
+        const tickLine = new THREE.Line(tickGeo, material.clone());
+        tickLine.renderOrder = 83;
+        group.add(tickLine);
+    });
+
+    group.add(createDimensionLabelSprite(label, labelPos, { stroke: 'rgba(37, 99, 235, 0.54)' }));
+}
+
+function getCurrentDimensionFurnace() {
+    if (!Array.isArray(globalFurnacesResult) || globalFurnacesResult.length === 0) return null;
+    const idx = Math.max(0, Math.min(currentFurnaceIndex || 0, globalFurnacesResult.length - 1));
+    return globalFurnacesResult[idx] || null;
+}
+
+function buildRingCircleLine(radius, y, color, opacity = 0.54) {
+    const points = [];
+    const segments = 128;
+    for (let i = 0; i < segments; i++) {
+        const a = i / segments * Math.PI * 2;
+        points.push(new THREE.Vector3(Math.cos(a) * radius, y, Math.sin(a) * radius));
+    }
+    const geo = new THREE.BufferGeometry().setFromPoints(points);
+    const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false, depthTest: false });
+    const line = new THREE.LineLoop(geo, mat);
+    line.renderOrder = 81;
+    return line;
+}
+
+function rebuildCurrentToolingDimensionAnnotations() {
+    if (!mainSceneRulerGroup) return;
+    clearDimensionAnnotationGroup(mainSceneRulerGroup);
+    if (!displaySettings.showRulers) return;
+
+    const furnace = getCurrentDimensionFurnace();
+    if (!furnace) return;
+
+    const fw = Number(furnace.w || furnace.width || 0);
+    const fh = Number(furnace.h || furnace.height || 0);
+    const fd = Number(furnace.d || furnace.depth || 0);
+    if (fw <= 0 || fh <= 0 || fd <= 0) return;
+
+    const baseY = THERMAL_BASE_Y;
+    const pad = Math.max(80, Math.min(180, Math.max(fw, fd) * 0.12));
+    const y0 = baseY + 6;
+    const yTop = baseY + fh;
+    const labelY = baseY + 34;
+
+    if (furnace.toolingType === 'ring-tooling') {
+        const params = furnace.params || {};
+        const outerRadius = Number(params.outerRadius || params.radialRadius || Math.min(fw, fd) / 2) || Math.min(fw, fd) / 2;
+        const innerRadius = Number(params.centerVoidRadius || params.innerRadius || (params.innerDia ? Number(params.innerDia) / 2 : 0)) || 0;
+        const outerDia = Math.round(outerRadius * 2);
+        const innerDia = Math.round(innerRadius * 2);
+        const zLine = -outerRadius - pad;
+
+        mainSceneRulerGroup.add(buildRingCircleLine(outerRadius, y0 + 2, 0x2563eb, 0.64));
+        if (innerRadius > 1) mainSceneRulerGroup.add(buildRingCircleLine(innerRadius, y0 + 4, 0xf97316, 0.58));
+
+        addDimensionLine(
+            mainSceneRulerGroup,
+            new THREE.Vector3(-outerRadius, y0, zLine),
+            new THREE.Vector3(outerRadius, y0, zLine),
+            `外径 ${outerDia} mm`,
+            new THREE.Vector3(0, labelY, zLine - pad * 0.18),
+            0x2563eb
+        );
+        if (innerDia > 0) {
+            addDimensionLine(
+                mainSceneRulerGroup,
+                new THREE.Vector3(-innerRadius, y0 + 12, 0),
+                new THREE.Vector3(innerRadius, y0 + 12, 0),
+                `内径 ${innerDia} mm`,
+                new THREE.Vector3(0, labelY + 64, 0),
+                0xf97316
+            );
+        }
+        addDimensionLine(
+            mainSceneRulerGroup,
+            new THREE.Vector3(outerRadius + pad, baseY, outerRadius + pad * 0.25),
+            new THREE.Vector3(outerRadius + pad, yTop, outerRadius + pad * 0.25),
+            `高度 ${Math.round(fh)} mm`,
+            new THREE.Vector3(outerRadius + pad * 1.45, baseY + fh / 2, outerRadius + pad * 0.25),
+            0x16a34a
+        );
+        const ringCount = Number(params.ringCount || params.stationCount || furnace.shelfCount || 0);
+        if (ringCount > 0) {
+            mainSceneRulerGroup.add(createDimensionLabelSprite(`圆盘层数 ${ringCount} 层`, new THREE.Vector3(0, yTop + 80, 0), {
+                width: 230,
+                stroke: 'rgba(15, 23, 42, 0.28)'
+            }));
+        }
+        return;
+    }
+
+    addDimensionLine(
+        mainSceneRulerGroup,
+        new THREE.Vector3(-fw / 2, y0, -fd / 2 - pad),
+        new THREE.Vector3(fw / 2, y0, -fd / 2 - pad),
+        `宽度 X ${Math.round(fw)} mm`,
+        new THREE.Vector3(0, labelY, -fd / 2 - pad * 1.28),
+        0x2563eb
+    );
+    addDimensionLine(
+        mainSceneRulerGroup,
+        new THREE.Vector3(-fw / 2 - pad, y0, -fd / 2),
+        new THREE.Vector3(-fw / 2 - pad, y0, fd / 2),
+        `纵深 Z ${Math.round(fd)} mm`,
+        new THREE.Vector3(-fw / 2 - pad * 1.25, labelY, 0),
+        0x7c3aed
+    );
+    addDimensionLine(
+        mainSceneRulerGroup,
+        new THREE.Vector3(fw / 2 + pad, baseY, fd / 2 + pad * 0.28),
+        new THREE.Vector3(fw / 2 + pad, yTop, fd / 2 + pad * 0.28),
+        `高度 Y ${Math.round(fh)} mm`,
+        new THREE.Vector3(fw / 2 + pad * 1.45, baseY + fh / 2, fd / 2 + pad * 0.28),
+        0x16a34a
+    );
 }
 
 function setMainSceneDisplayRefs(gridHelper, axesHelper, rulerGroup) {
@@ -5560,7 +5920,7 @@ export function initThree() {
 
     /* 坐标轴 (默认隐藏) */
     const customAxesGroup = new THREE.Group();
-    const axesLen = 2000;
+    const axesLen = 360;
     const originY = -120;
 
     const xLineGeo = new THREE.BufferGeometry().setFromPoints([
@@ -5577,6 +5937,9 @@ export function initThree() {
         new THREE.Vector3(0, originY, 0), new THREE.Vector3(0, originY, axesLen)
     ]);
     customAxesGroup.add(new THREE.Line(zLineGeo, new THREE.LineBasicMaterial({ color: 0x0000cc, linewidth: 1 })));
+    customAxesGroup.add(createDimensionLabelSprite('X 宽度', new THREE.Vector3(axesLen + 78, originY + 22, 0), { width: 118, height: 34, color: '#991b1b', stroke: 'rgba(220,38,38,0.35)' }));
+    customAxesGroup.add(createDimensionLabelSprite('Y 高度', new THREE.Vector3(0, originY + axesLen + 58, 0), { width: 118, height: 34, color: '#166534', stroke: 'rgba(22,163,74,0.35)' }));
+    customAxesGroup.add(createDimensionLabelSprite('Z 纵深', new THREE.Vector3(0, originY + 22, axesLen + 78), { width: 118, height: 34, color: '#1d4ed8', stroke: 'rgba(37,99,235,0.35)' }));
 
     newScene.add(customAxesGroup);
 
@@ -5667,7 +6030,7 @@ export function initMasterThree() {
 
     const originY = -120;
     const customAxesGroup = new THREE.Group();
-    const axesLen = 2000;
+    const axesLen = 360;
 
     const xLineGeo = new THREE.BufferGeometry().setFromPoints([
         new THREE.Vector3(0, originY, 0), new THREE.Vector3(axesLen, originY, 0)
@@ -5683,6 +6046,9 @@ export function initMasterThree() {
         new THREE.Vector3(0, originY, 0), new THREE.Vector3(0, originY, axesLen)
     ]);
     customAxesGroup.add(new THREE.Line(zLineGeo, new THREE.LineBasicMaterial({ color: 0x0000cc, linewidth: 1 })));
+    customAxesGroup.add(createDimensionLabelSprite('X 宽度', new THREE.Vector3(axesLen + 78, originY + 22, 0), { width: 118, height: 34, color: '#991b1b', stroke: 'rgba(220,38,38,0.35)' }));
+    customAxesGroup.add(createDimensionLabelSprite('Y 高度', new THREE.Vector3(0, originY + axesLen + 58, 0), { width: 118, height: 34, color: '#166534', stroke: 'rgba(22,163,74,0.35)' }));
+    customAxesGroup.add(createDimensionLabelSprite('Z 纵深', new THREE.Vector3(0, originY + 22, axesLen + 78), { width: 118, height: 34, color: '#1d4ed8', stroke: 'rgba(37,99,235,0.35)' }));
 
     msScene.add(customAxesGroup);
     masterSceneAxesGroup = customAxesGroup;
@@ -6616,6 +6982,7 @@ export function renderSingleFurnace(index, filterMaterialName) {
         }
     }
 
+    updateMainSceneDisplayVisibility();
     update3DStatsPanel(furnace);
 }
 
