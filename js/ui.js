@@ -921,9 +921,23 @@ export function renderThermalSimulationPanel(metrics = null, mode = null) {
     const furnaceVolume = Math.max(1, Number((furnace.w || 1) * (furnace.h || 1) * (furnace.d || 1)));
     const densityRate = metrics?.densityRate ?? Math.round((packedVolume / furnaceVolume) * 1000) / 10;
 
+    if (activeMode === 'idle') {
+        panel.innerHTML = `
+            <div class="thermal-sim-empty process-sim-idle-card">
+                <div style="font-weight:800;color:#0f172a;margin-bottom:8px;">请选择一种工艺仿真模式</div>
+                <div style="line-height:1.7;color:#64748b;">
+                    升温热场看温度分布，辐射暴露看热源遮挡，气流冷却看背风通道，气氛覆盖看表面介质覆盖。
+                </div>
+                <div style="margin-top:10px;color:#94a3b8;font-size:11px;">再次点击已打开的模式会退出仿真；点击“退出仿真”会清空 3D 仿真层。</div>
+            </div>
+        `;
+        return;
+    }
+
     if (activeMode === 'atmosphere') {
         const atmosphereCoverage = metrics?.atmosphereCoverage ?? Math.max(50, Math.round(86 - densityRate * 0.42));
         const minAtmosphereCoverage = metrics?.minAtmosphereCoverage ?? Math.max(30, atmosphereCoverage - 24);
+        const weakExchangeItemCount = metrics?.weakExchangeItemCount ?? 0;
         const deadCornerItemCount = metrics?.deadCornerItemCount ?? 0;
         const severeDeadCornerItemCount = metrics?.severeDeadCornerItemCount ?? 0;
         const surfaceUniformityScore = metrics?.surfaceUniformityScore ?? Math.max(45, Math.round(88 - densityRate * 0.36));
@@ -941,12 +955,24 @@ export function renderThermalSimulationPanel(metrics = null, mode = null) {
         const visualNote = metrics?.visualNote || '气氛雾场 = 有效介质浓度；亮色表面 = 有效反应/覆盖；橙红色线框 = 表面遮蔽或贴靠死角。';
         const coverageLabel = metrics?.coverageLabel || '平均气氛覆盖';
         const minLabel = metrics?.minLabel || '最低覆盖工件';
-        const deadLabel = metrics?.deadLabel || '气氛死角件';
+        const weakExchangeLabel = metrics?.weakExchangeLabel || '气氛交换弱区';
+        const deadLabel = metrics?.deadLabel || '真实气氛死角';
         const severeLabel = metrics?.severeLabel || '严重死角';
         const uniformityLabel = metrics?.uniformityLabel || '表面覆盖均匀性';
         const faceRateLabel = metrics?.faceRateLabel || '有效接触面比例';
         const riskFaceLabel = metrics?.riskFaceLabel || '主要风险面';
         const modeName = metrics?.modeName || '气氛覆盖';
+        const atmosphereProgress = typeof metrics?.progress === 'number' ? metrics.progress : 100;
+        const atmospherePlaying = !!metrics?.animationPlaying;
+        const atmosphereStageLabel = metrics?.atmosphereStageLabel || (atmosphereProgress < 35 ? '气氛充入' : (atmosphereProgress < 75 ? '浓度扩散' : '表面反应'));
+        const atmosphereStageDesc = metrics?.atmosphereStageDesc || '气氛浓度场、入口扩散方向与表面反应层用于解释介质覆盖是否充分。';
+        const inletReachabilityRate = metrics?.inletReachabilityRate ?? 0;
+        const inletDirections = Array.isArray(metrics?.inletDirections) && metrics.inletDirections.length ? metrics.inletDirections : ['x-', 'x+', 'z-', 'z+', 'y+'];
+        const inletDirectionLabel = metrics?.inletDirectionLabel || '多面补给';
+        const inletModeLabel = metrics?.inletModeLabel || (inletDirections.length >= 4 ? '多面补给' : (inletDirections.length >= 2 ? '双向补给' : '单侧补给'));
+        const topRiskAreas = Array.isArray(metrics?.topRiskAreas) ? metrics.topRiskAreas : [];
+        const primaryRiskReason = metrics?.primaryRiskReason || '当前气氛覆盖较均匀，未发现需要优先处理的集中死角。';
+        const primaryAdjustment = metrics?.primaryAdjustment || suggestion;
         const isCarbonMode = mediumType === 'carburizing' || mediumType === 'carbonitriding';
         const gradientStyle = mediumType === 'carburizing'
             ? 'linear-gradient(90deg,#7f1d1d,#dc2626,#f97316,#facc15,#ffb703)'
@@ -973,25 +999,59 @@ export function renderThermalSimulationPanel(metrics = null, mode = null) {
                 ${escapeSimHtml(opt.label)}
             </button>
         `).join('');
+        const inletOptions = [
+            { key: 'x-', label: '-X', desc: '左侧' },
+            { key: 'x+', label: '+X', desc: '右侧' },
+            { key: 'z-', label: '-Z', desc: '前侧' },
+            { key: 'z+', label: '+Z', desc: '后侧' },
+            { key: 'y+', label: '+Y', desc: '顶部' },
+            { key: 'y-', label: '-Y', desc: '底部' }
+        ];
+        const inletButtonsHtml = inletOptions.map(opt => `
+            <button class="airflow-dir-btn ${inletDirections.includes(opt.key) ? 'active' : ''}" type="button" data-action="atmosphere-inlet-direction" data-atmosphere-inlet="${opt.key}">
+                <strong>${escapeSimHtml(opt.label)}</strong><span>${escapeSimHtml(opt.desc)}</span>
+            </button>
+        `).join('');
+        const inletPresets = [
+            { label: '四侧环流', inlets: 'x-,x+,z-,z+' },
+            { label: '顶部补给', inlets: 'y+,x-,x+,z-,z+' },
+            { label: '前后循环', inlets: 'z-,z+' },
+            { label: '上下循环', inlets: 'y+,y-' }
+        ];
+        const inletPresetHtml = inletPresets.map(preset => `
+            <button class="plan-action-btn atmosphere-medium-preset" type="button" data-action="atmosphere-inlet-preset" data-atmosphere-inlets="${preset.inlets}">
+                ${escapeSimHtml(preset.label)}
+            </button>
+        `).join('');
+
+        const topRiskHtml = topRiskAreas.length ? topRiskAreas.map(risk => `
+                <div class="thermal-risk-row">
+                    <span>#${risk.rank} ${escapeSimHtml(risk.riskTypeLabel || '风险区')} · ${escapeSimHtml(risk.itemName || '风险工件')}</span>
+                    <strong>${escapeSimHtml(risk.faceLabel || '-')} · ${risk.score ?? '-'}%</strong>
+                </div>
+                <div class="thermal-mini-note" style="margin-top:0;margin-bottom:6px;">${escapeSimHtml(risk.reason || '')}</div>
+            `).join('') : '<div class="thermal-mini-note">暂无真实死角或明显低交换区，当前覆盖较均匀。</div>';
 
         panel.innerHTML = `
             <div class="thermal-header-card compact atmosphere-card">
-                <div class="thermal-title">${isCarbonMode ? '🔥' : '🌫️'} ${escapeSimHtml(furnace.instanceId || '当前炉次')} · 介质场 · ${escapeSimHtml(modeName)} V1.1</div>
+                <div class="thermal-title">${isCarbonMode ? '🔥' : '🌫️'} ${escapeSimHtml(furnace.instanceId || '当前炉次')} · 介质场 · ${escapeSimHtml(modeName)} V1.5</div>
                 <div class="thermal-subtitle">
                     ${isCarbonMode
-                        ? '渗碳/碳氮共渗模式强调“碳势气氛 → 表面吸附 → 向内扩散 → 渗层形成”。金橙色雾场表示有效碳势，工件金色外轮廓表示表面渗层正在形成。'
-                        : '气氛覆盖用于解释氮化、保护气氛、渗碳等表面处理阶段：雾场表示有效介质浓度，工件颜色表示表面覆盖评分，红橙线框表示气氛死角。'}
+                        ? '渗碳/碳氮共渗模式强调“碳势气氛 → 表面吸附 → 向内扩散 → 渗层形成”。金橙色浓度云从边界扩散，入口箭头表示碳势补给路径，工件金色外轮廓表示表面吸碳/渗层逐步形成。'
+                        : '气氛覆盖用于解释氮化、保护气氛、渗碳等表面处理阶段：动态浓度点云表示介质扩散，入口箭头表示补给路径，工件表面薄层表示反应/保护层形成，Top 3 标签区分低交换区和真实死角。'}
                 </div>
                 <div class="thermal-metric-grid">
                     <div class="thermal-metric"><span>${escapeSimHtml(coverageLabel)}</span><strong>${atmosphereCoverage}%</strong></div>
                     <div class="thermal-metric"><span>${escapeSimHtml(minLabel)}</span><strong>${minAtmosphereCoverage}%</strong></div>
+                    <div class="thermal-metric"><span>${escapeSimHtml(weakExchangeLabel)}</span><strong>${weakExchangeItemCount} 件</strong></div>
                     <div class="thermal-metric"><span>${escapeSimHtml(deadLabel)}</span><strong>${deadCornerItemCount} 件</strong></div>
-                    <div class="thermal-metric"><span>${escapeSimHtml(severeLabel)}</span><strong>${severeDeadCornerItemCount} 件</strong></div>
                 </div>
                 <div class="thermal-legend atmosphere-legend">
-                    <span>${isCarbonMode ? '碳势死角' : '死角'}</span><div class="atmosphere-gradient" style="flex:1;height:8px;border-radius:999px;background:${gradientStyle};"></div><span>${isCarbonMode ? '碳势充足' : '覆盖充分'}</span>
+                    <span>${isCarbonMode ? '碳势不足' : '低交换'}</span><div class="atmosphere-gradient" style="flex:1;height:8px;border-radius:999px;background:${gradientStyle};"></div><span>${isCarbonMode ? '碳势充足' : '覆盖充分'}</span>
                 </div>
-                <div class="thermal-mini-note">${escapeSimHtml(visualNote)}</div>
+                <div class="thermal-mini-note">${escapeSimHtml(visualNote)} 3D 中入口箭头表示介质补给方向，Top 3 标签会区分“低交换区”和“真实死角”：间距足够但路径较弱时不再直接判死角。</div>
+                <div class="thermal-risk-row" style="margin-top:10px;"><span>动画阶段</span><strong class="atmosphere-stage-label">${escapeSimHtml(atmosphereStageLabel)} · <span class="atmosphere-progress-value">${atmosphereProgress}%</span></strong></div>
+                <div class="thermal-mini-note atmosphere-stage-desc">${escapeSimHtml(atmosphereStageDesc)} 播放、暂停、重置、速度和进度已统一移到方案工作台顶部控制区。</div>
             </div>
 
             <div class="thermal-risk-card atmosphere-card">
@@ -1006,6 +1066,16 @@ export function renderThermalSimulationPanel(metrics = null, mode = null) {
             </div>
 
             <div class="thermal-risk-card atmosphere-card">
+                <div class="thermal-stage-title">气氛入口配置</div>
+                <div class="thermal-risk-row"><span>当前入口</span><strong>${escapeSimHtml(inletDirectionLabel)}</strong></div>
+                <div class="thermal-risk-row"><span>补给模式</span><strong>${escapeSimHtml(inletModeLabel)}</strong></div>
+                <div class="airflow-dir-grid" style="margin-top:8px;">${inletButtonsHtml}</div>
+                <div class="airflow-preset-row" style="margin-top:8px;">${inletPresetHtml}</div>
+                <button class="plan-action-btn" type="button" data-action="atmosphere-inlet-reset" style="width:100%;margin-top:8px;">恢复默认入口</button>
+                <div class="thermal-mini-note">入口方向会直接影响 3D 中的边界面、扩散箭头和浓度粒子路径。可按真实炉型选择侧进、顶进、上下循环或多面补给。</div>
+            </div>
+
+            <div class="thermal-risk-card atmosphere-card">
                 <div class="thermal-stage-title">${isCarbonMode ? '表面反应 / 渗层诊断' : '表面覆盖诊断'}</div>
                 <div class="thermal-risk-row"><span>${escapeSimHtml(uniformityLabel)}</span><strong>${surfaceUniformityScore} 分</strong></div>
                 <div class="thermal-risk-row"><span>${escapeSimHtml(faceRateLabel)}</span><strong>${effectiveFaceRate}%</strong></div>
@@ -1014,12 +1084,19 @@ export function renderThermalSimulationPanel(metrics = null, mode = null) {
                 <div class="thermal-risk-row"><span>${escapeSimHtml(riskFaceLabel)}</span><strong>${escapeSimHtml(worstFaceLabel)}</strong></div>
                 <div class="thermal-risk-row"><span>主要遮蔽来源</span><strong>${escapeSimHtml(worstBlocker)}</strong></div>
                 <div class="thermal-risk-row"><span>局部密集度</span><strong>${localDensityRate}%</strong></div>
-                <div class="thermal-risk-row"><span>当前模式</span><strong>介质场 · ${escapeSimHtml(modeName)} V1.1</strong></div>
+                <div class="thermal-risk-row"><span>当前模式</span><strong>介质场 · ${escapeSimHtml(modeName)} V1.5</strong></div>
+            </div>
+
+            <div class="thermal-risk-card atmosphere-card">
+                <div class="thermal-stage-title">主要风险诊断</div>
+                <div class="thermal-mini-note strong-note">${escapeSimHtml(primaryRiskReason)}</div>
+                <div class="thermal-stage-title" style="margin-top:10px;">Top 3 低交换 / 真实死角</div>
+                ${topRiskHtml}
             </div>
 
             <div class="thermal-stage-card atmosphere-card">
                 <div class="thermal-stage-title">调整建议</div>
-                <div class="thermal-mini-note strong-note">${escapeSimHtml(suggestion)}</div>
+                <div class="thermal-mini-note strong-note">${escapeSimHtml(primaryAdjustment)}</div>
             </div>
         `;
         return;
@@ -1109,13 +1186,9 @@ export function renderThermalSimulationPanel(metrics = null, mode = null) {
 
             <div class="thermal-risk-card airflow-card">
                 <div class="thermal-stage-title">气流流线动画</div>
-                <div class="thermal-risk-row"><span>动画状态</span><strong>${animationPlaying ? '播放中' : '已暂停'}</strong></div>
-                <div class="airflow-animation-row">
-                    <button class="plan-action-btn" type="button" data-action="airflow-animation-play">${animationPlaying ? '继续播放' : '播放气流动画'}</button>
-                    <button class="plan-action-btn" type="button" data-action="airflow-animation-pause">暂停</button>
-                    <button class="plan-action-btn" type="button" data-action="airflow-animation-reset">重置</button>
-                </div>
-                <div class="thermal-mini-note">这是解释型流线动画，不是 CFD：用于展示气流进入、遇到工件后曲线绕流、速度衰减、弱流区和背风风险。</div>
+                <div class="thermal-risk-row"><span>动画状态</span><strong>${animationPlaying ? '循环流动中' : '循环已暂停 / 诊断视图'}</strong></div>
+                <div class="thermal-risk-row"><span>进度语义</span><strong>循环相位，不代表冷却完成度</strong></div>
+                <div class="thermal-mini-note">这是解释型流线动画，不是 CFD：用于展示气流进入、遇到工件后曲线绕流、速度衰减、弱流区和背风风险。气流模式不再显示 0–100% 完成进度；顶部速度只控制流线循环周期。</div>
             </div>
 
             <div class="thermal-risk-card airflow-card">

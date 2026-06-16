@@ -138,6 +138,12 @@ import {
     renderAtmosphereCoverageSimulation,
     getAtmosphereCoverageRuntime,
     setAtmosphereMediumType,
+    setAtmosphereInletDirections,
+    toggleAtmosphereInletDirection,
+    resetAtmosphereInletDirections,
+    playAtmosphereCoverageAnimation,
+    pauseAtmosphereCoverageAnimation,
+    resetAtmosphereCoverageAnimation,
     toggleAirflowCoolingDirection,
     playAirflowCoolingAnimation,
     pauseAirflowCoolingAnimation,
@@ -184,7 +190,9 @@ import {
 let candidatePlans = [];
 let currentCandidatePlanIndex = 0;
 let simulationViewMode = 'cumulative';
-let processSimulationMode = 'thermal';
+// 工艺仿真工作台状态：mode 记录最近选择，active 表示当前 3D 是否正在显示仿真层。
+let processSimulationMode = 'idle';
+let processSimulationActive = false;
 
 
 let currentWorkspaceIdentity = {
@@ -373,7 +381,10 @@ function applyCandidatePlan(index) {
     renderPlanAnalysisPanel(plan.analysis);
     renderCandidatePlanCards(candidatePlans, index, applyCandidatePlan);
     renderLoadingSimulationPanel();
-    renderThermalSimulationPanel(null, processSimulationMode);
+    processSimulationActive = false;
+    processSimulationMode = 'idle';
+    renderThermalSimulationPanel(null, 'idle');
+    syncThermalControlState(null);
     updateSimulationModeButtons();
     activateRightPanelTab('analysis');
 
@@ -531,7 +542,10 @@ function executeAndRender() {
     renderPlanAnalysisPanel(analysis);
     renderCandidatePlanCards(candidatePlans, currentCandidatePlanIndex, applyCandidatePlan);
     renderLoadingSimulationPanel();
-    renderThermalSimulationPanel(null, processSimulationMode);
+    processSimulationActive = false;
+    processSimulationMode = 'idle';
+    renderThermalSimulationPanel(null, 'idle');
+    syncThermalControlState(null);
     updateSimulationModeButtons();
     activateRightPanelTab('analysis');
 
@@ -749,7 +763,10 @@ export function clearFurnaceResults() {
     renderAISummaryBar(null);
     updateCurrentToolingHud();
     renderLoadingSimulationPanel();
-    renderThermalSimulationPanel(null, processSimulationMode);
+    processSimulationActive = false;
+    processSimulationMode = 'idle';
+    renderThermalSimulationPanel(null, 'idle');
+    syncThermalControlState(null);
     updateSimulationModeButtons();
     showCapacityFeedback('success', '筛选条件已变更，请重新生成方案');
     updateWorkbenchUiMode();
@@ -1820,6 +1837,7 @@ function showPlanActionButtons() {
         }
     });
     optimizeThermalToolbarLayout();
+    syncThermalControlState(null);
 }
 
 function hidePlanActionButtons() {
@@ -1968,65 +1986,462 @@ function markSimulationStepPlaying(layerIndex, stepIndex, totalSteps) {
 
 
 
-function getThermalDurationFromUi() {
+function getProcessPlayerSpeedKey() {
+    // UX V2.3：统一播放控制回到方案工作台顶部，不再读取 3D HUD。
     const select = document.getElementById('thermal-speed-select');
-    const v = select ? parseInt(select.value, 10) : 9000;
-    return Number.isFinite(v) && v > 0 ? v : 9000;
+    const rawValue = select && select.value ? String(select.value) : 'normal';
+    if (['slow', 'normal', 'fast'].includes(rawValue)) return rawValue;
+    const legacyValue = parseInt(rawValue, 10);
+    if (Number.isFinite(legacyValue)) {
+        if (legacyValue >= 11000) return 'slow';
+        if (legacyValue <= 5500) return 'fast';
+    }
+    return 'normal';
+}
+
+function getProcessAnimationDurationMs(mode = processSimulationMode) {
+    const key = getProcessPlayerSpeedKey();
+    const table = {
+        thermal: { slow: 12000, normal: 9000, fast: 5200 },
+        airflow: { slow: 5600, normal: 3600, fast: 1800 },
+        atmosphere: { slow: 12000, normal: 8500, fast: 5200 }
+    };
+    return (table[mode] || table.thermal)[key] || (table[mode] || table.thermal).normal;
+}
+
+function getThermalDurationFromUi() {
+    return getProcessAnimationDurationMs('thermal');
+}
+
+function isProcessSimulationActive() {
+    return !!processSimulationActive;
 }
 
 function updateProcessSimulationModeButtons() {
     document.querySelectorAll('.process-sim-mode-btn').forEach(btn => {
         const mode = btn.getAttribute('data-process-sim-mode');
-        btn.classList.toggle('active', mode === processSimulationMode);
+        btn.classList.toggle('active', isProcessSimulationActive() && mode === processSimulationMode);
+        btn.setAttribute('aria-pressed', (isProcessSimulationActive() && mode === processSimulationMode) ? 'true' : 'false');
+    });
+}
+
+function focusCurrentFurnaceForProcessSimulation() {
+    // 进入任意工艺仿真后自动把当前工装拉回视野中心，避免用户还停留在上一次旋转/缩放位置。
+    window.setTimeout(() => {
+        try {
+            if (typeof setTightFitCamera === 'function') {
+                setTightFitCamera(undefined, 0.28);
+            }
+        } catch (err) {
+            console.warn('[process simulation] focus camera failed:', err);
+        }
+    }, 80);
+}
+
+
+function getProcessModeLabel(mode = processSimulationMode) {
+    if (mode === 'radiation') return '辐射暴露';
+    if (mode === 'airflow') return '气流冷却';
+    if (mode === 'atmosphere') return '气氛覆盖';
+    if (mode === 'thermal') return '升温热场';
+    return '工艺仿真';
+}
+
+function getCurrentProcessRuntimeSnapshot(metrics = null) {
+    const mode = processSimulationMode;
+    if (!isProcessSimulationActive() || !mode || mode === 'idle') {
+        return { visible: false, mode: 'idle', progress: 0, isPlaying: false, paused: false, metrics: null };
+    }
+    if (mode === 'airflow') {
+        const runtime = typeof getAirflowCoolingRuntime === 'function' ? getAirflowCoolingRuntime() : null;
+        const cycleMs = Math.max(800, Number(runtime?.cycleMs || getProcessAnimationDurationMs('airflow') || 3600));
+        const gasLabel = runtime?.gasMeta?.label || metrics?.gasLabel || '冷却气体';
+        return {
+            visible: !!runtime?.visible,
+            mode,
+            // V2.4：气流是循环流线动画，不再把 phase 伪装成“完成进度”。
+            progress: 0,
+            hasLinearProgress: false,
+            isPlaying: !!runtime?.isPlaying,
+            paused: !!runtime?.paused,
+            stage: runtime?.isPlaying ? '循环流动中' : (runtime?.paused ? '循环已暂停' : '气流诊断视图'),
+            detail: `${gasLabel} · 循环周期 ${(cycleMs / 1000).toFixed(1)}s`,
+            metrics: metrics || runtime?.metrics || null
+        };
+    }
+    if (mode === 'atmosphere') {
+        const runtime = typeof getAtmosphereCoverageRuntime === 'function' ? getAtmosphereCoverageRuntime() : null;
+        const runtimeMetrics = metrics || runtime?.metrics || null;
+        return {
+            visible: !!runtime?.visible,
+            mode,
+            progress: Math.round(Number(runtimeMetrics?.progress ?? ((runtime?.progress || 0) * 100)) || 0),
+            isPlaying: !!runtime?.animationPlaying,
+            paused: !!runtime?.visible && !runtime?.animationPlaying && (runtime?.progress || 0) > 0 && (runtime?.progress || 0) < 1,
+            stage: runtimeMetrics?.atmosphereStageLabel || '气氛扩散',
+            detail: runtime?.mediumMeta?.label || runtimeMetrics?.mediumLabel || '气氛介质',
+            metrics: runtimeMetrics
+        };
+    }
+    if (mode === 'thermal') {
+        const runtime = typeof getVacuumQuenchThermalRuntime === 'function' ? getVacuumQuenchThermalRuntime() : null;
+        return {
+            visible: !!runtime?.visible,
+            mode,
+            progress: Math.round((runtime?.progress || 0) * 100),
+            isPlaying: !!runtime?.isPlaying,
+            paused: !!runtime?.paused,
+            stage: metrics?.currentStage || runtime?.metrics?.currentStage || '升温热场',
+            detail: `${metrics?.currentTemp ?? runtime?.metrics?.currentTemp ?? '-'} / ${metrics?.targetTemp ?? runtime?.metrics?.targetTemp ?? '-'} ℃`,
+            metrics: metrics || runtime?.metrics || null
+        };
+    }
+    return {
+        visible: true,
+        mode,
+        progress: 100,
+        isPlaying: false,
+        paused: false,
+        stage: '静态诊断视图',
+        detail: '点击工件或右侧诊断项查看原因',
+        metrics
+    };
+}
+
+function ensureProcessPlayerHud() {
+    let hud = document.getElementById('process-player-hud');
+    if (hud) return hud;
+
+    const container = document.getElementById('canvas-container') || document.getElementById('canvas-area');
+    if (!container) return null;
+    if (getComputedStyle(container).position === 'static') container.style.position = 'relative';
+
+    hud = document.createElement('div');
+    hud.id = 'process-player-hud';
+    hud.className = 'process-player-hud';
+    hud.style.cssText = [
+        'position:absolute',
+        'left:50%',
+        'bottom:78px',
+        'transform:translateX(-50%)',
+        'z-index:80',
+        'display:none',
+        'min-width:560px',
+        'max-width:min(760px, calc(100% - 48px))',
+        'padding:10px 12px',
+        'border-radius:18px',
+        'background:rgba(248,250,252,0.92)',
+        'box-shadow:0 18px 42px rgba(15,23,42,0.18)',
+        'backdrop-filter:blur(14px)',
+        'border:1px solid rgba(148,163,184,0.28)',
+        'pointer-events:auto',
+        'font-family:inherit'
+    ].join(';');
+    hud.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+            <div style="min-width:148px;max-width:210px;">
+                <div id="process-player-mode" style="font-size:12px;font-weight:800;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">工艺仿真</div>
+                <div id="process-player-stage" style="font-size:11px;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">请选择仿真模式</div>
+            </div>
+            <button id="process-player-play" type="button" title="播放/继续" style="height:34px;min-width:72px;border:0;border-radius:12px;background:#2563eb;color:white;font-weight:800;cursor:pointer;">播放</button>
+            <button id="process-player-pause" type="button" title="暂停/继续" style="height:34px;min-width:64px;border:0;border-radius:12px;background:#e2e8f0;color:#334155;font-weight:800;cursor:pointer;">暂停</button>
+            <button id="process-player-reset" type="button" title="重置当前动画" style="height:34px;min-width:64px;border:0;border-radius:12px;background:#f1f5f9;color:#475569;font-weight:800;cursor:pointer;">重置</button>
+            <select id="process-player-speed" title="播放速度" style="height:34px;border:1px solid #cbd5e1;border-radius:12px;background:white;color:#334155;font-weight:700;padding:0 8px;">
+                <option value="slow">慢速</option>
+                <option value="normal" selected>正常</option>
+                <option value="fast">快速</option>
+            </select>
+            <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:160px;">
+                <input id="process-player-progress" type="range" min="0" max="100" value="0" style="width:100%;accent-color:#f97316;" />
+                <span id="process-player-value" style="font-size:12px;font-weight:800;color:#f97316;width:42px;text-align:right;">0%</span>
+            </div>
+        </div>
+    `;
+    ['pointerdown', 'mousedown', 'click', 'touchstart', 'wheel'].forEach(eventName => {
+        hud.addEventListener(eventName, (event) => event.stopPropagation(), { passive: eventName === 'wheel' });
+    });
+    container.appendChild(hud);
+    bindProcessPlayerHud();
+    return hud;
+}
+
+let processPlayerHudTicker = null;
+
+function scheduleProcessPlayerHudTicker() {
+    if (processPlayerHudTicker) return;
+    const tick = () => {
+        processPlayerHudTicker = null;
+        if (!isProcessSimulationActive()) {
+            syncProcessPlayerHud(null);
+            return;
+        }
+        syncProcessPlayerHud(null);
+        processPlayerHudTicker = requestAnimationFrame(tick);
+    };
+    processPlayerHudTicker = requestAnimationFrame(tick);
+}
+
+function stopProcessPlayerHudTicker() {
+    if (processPlayerHudTicker) {
+        cancelAnimationFrame(processPlayerHudTicker);
+        processPlayerHudTicker = null;
+    }
+}
+
+function syncProcessPlayerHud(metrics = null) {
+    // UX V2.3：移除 3D 区域动态播放器 HUD，避免额外 RAF/DOM 刷新和 Three.js 渲染循环相互叠加。
+    const hud = document.getElementById('process-player-hud');
+    if (hud) hud.style.display = 'none';
+    stopProcessPlayerHudTicker();
+}
+
+function renderActiveProcessPanel(metrics = null) {
+    if (processSimulationMode === 'airflow') {
+        renderThermalSimulationPanel(metrics || getAirflowCoolingRuntime()?.metrics || null, 'airflow');
+    } else if (processSimulationMode === 'atmosphere') {
+        renderThermalSimulationPanel(metrics || getAtmosphereCoverageRuntime()?.metrics || null, 'atmosphere');
+    } else if (processSimulationMode === 'thermal') {
+        renderThermalSimulationPanel(metrics || getVacuumQuenchThermalRuntime()?.metrics || null, 'thermal');
+    }
+}
+
+function playCurrentProcessAnimation() {
+    if (!isProcessSimulationActive() || processSimulationMode === 'idle') {
+        switchProcessSimulationMode('thermal');
+    }
+    if (processSimulationMode === 'radiation') return;
+
+    if (processSimulationMode === 'airflow') {
+        const metrics = playAirflowCoolingAnimation({ cycleMs: getProcessAnimationDurationMs('airflow') });
+        renderThermalSimulationPanel(metrics || getAirflowCoolingRuntime()?.metrics || null, 'airflow');
+        syncThermalControlState(metrics);
+        return;
+    }
+
+    if (processSimulationMode === 'atmosphere') {
+        const runtime = getAtmosphereCoverageRuntime();
+        const startProgress = runtime?.visible ? Math.max(0, Math.min(1, runtime.progress || 0)) : 0;
+        const metrics = playAtmosphereCoverageAnimation({
+            durationMs: getProcessAnimationDurationMs('atmosphere'),
+            startProgress: startProgress >= 1 ? 0 : startProgress,
+            onUpdate: (nextMetrics) => {
+                syncAtmosphereAnimationProgressUi(nextMetrics);
+                syncThermalControlState(nextMetrics);
+            },
+            onFinish: (finalMetrics) => {
+                renderThermalSimulationPanel(finalMetrics, 'atmosphere');
+                syncThermalControlState(finalMetrics);
+            }
+        });
+        renderThermalSimulationPanel(metrics || getAtmosphereCoverageRuntime()?.metrics || null, 'atmosphere');
+        syncThermalControlState(metrics);
+        return;
+    }
+
+    playCurrentThermalSimulation();
+}
+
+function pauseResumeCurrentProcessAnimation() {
+    if (!isProcessSimulationActive() || processSimulationMode === 'idle' || processSimulationMode === 'radiation') return;
+
+    if (processSimulationMode === 'airflow') {
+        const runtime = getAirflowCoolingRuntime();
+        const metrics = runtime?.isPlaying
+            ? pauseAirflowCoolingAnimation()
+            : playAirflowCoolingAnimation({ cycleMs: getProcessAnimationDurationMs('airflow') });
+        renderThermalSimulationPanel(metrics || getAirflowCoolingRuntime()?.metrics || null, 'airflow');
+        syncThermalControlState(metrics);
+        return;
+    }
+
+    if (processSimulationMode === 'atmosphere') {
+        const runtime = getAtmosphereCoverageRuntime();
+        const metrics = runtime?.animationPlaying
+            ? pauseAtmosphereCoverageAnimation()
+            : playAtmosphereCoverageAnimation({
+                durationMs: getProcessAnimationDurationMs('atmosphere'),
+                startProgress: Math.max(0, Math.min(0.999, runtime?.progress || 0)),
+                onUpdate: (nextMetrics) => {
+                    syncAtmosphereAnimationProgressUi(nextMetrics);
+                    syncThermalControlState(nextMetrics);
+                },
+                onFinish: (finalMetrics) => {
+                    renderThermalSimulationPanel(finalMetrics, 'atmosphere');
+                    syncThermalControlState(finalMetrics);
+                }
+            });
+        renderThermalSimulationPanel(metrics || getAtmosphereCoverageRuntime()?.metrics || null, 'atmosphere');
+        syncThermalControlState(metrics);
+        return;
+    }
+
+    pauseResumeCurrentThermalSimulation();
+}
+
+function resetCurrentProcessAnimation() {
+    if (!isProcessSimulationActive() || processSimulationMode === 'idle') return;
+    let metrics = null;
+    if (processSimulationMode === 'thermal') {
+        stopVacuumQuenchThermalSimulation();
+        metrics = setVacuumQuenchThermalProgress(0);
+        renderThermalSimulationPanel(metrics, 'thermal');
+    } else if (processSimulationMode === 'airflow') {
+        metrics = resetAirflowCoolingAnimation();
+        renderThermalSimulationPanel(metrics || getAirflowCoolingRuntime()?.metrics || null, 'airflow');
+    } else if (processSimulationMode === 'atmosphere') {
+        metrics = resetAtmosphereCoverageAnimation();
+        renderThermalSimulationPanel(metrics || getAtmosphereCoverageRuntime()?.metrics || null, 'atmosphere');
+    }
+    syncThermalControlState(metrics);
+}
+
+function scrubCurrentProcessAnimation(progressPercent) {
+    const pct = Math.max(0, Math.min(100, Number(progressPercent || 0)));
+    if (!isProcessSimulationActive() || processSimulationMode === 'idle' || processSimulationMode === 'radiation') return;
+    if (processSimulationMode === 'thermal') {
+        scrubCurrentThermalSimulation(pct);
+        return;
+    }
+    if (processSimulationMode === 'airflow') {
+        // V2.4：气流是循环流线，不支持“拖到某个完成度”。速度控制只改变循环周期。
+        syncThermalControlState(null);
+        return;
+    }
+    // 气氛覆盖仍保留真实阶段进度展示；拖拽只更新顶部轻量状态，不重建复杂场景。
+    syncThermalControlState({ progress: pct });
+}
+
+function bindProcessPlayerHud() {
+    const hud = document.getElementById('process-player-hud');
+    if (!hud || hud.dataset.bound === '1') return;
+    hud.dataset.bound = '1';
+    hud.querySelector('#process-player-play')?.addEventListener('click', playCurrentProcessAnimation);
+    hud.querySelector('#process-player-pause')?.addEventListener('click', pauseResumeCurrentProcessAnimation);
+    hud.querySelector('#process-player-reset')?.addEventListener('click', resetCurrentProcessAnimation);
+    hud.querySelector('#process-player-speed')?.addEventListener('change', () => {
+        if (!isProcessSimulationActive()) return;
+        const snap = getCurrentProcessRuntimeSnapshot();
+        if (snap.isPlaying) {
+            if (processSimulationMode === 'thermal') restartThermalWithCurrentSpeedIfPlaying();
+            else if (processSimulationMode === 'airflow') playAirflowCoolingAnimation({ cycleMs: getProcessAnimationDurationMs('airflow') });
+            else if (processSimulationMode === 'atmosphere') playAtmosphereCoverageAnimation({
+                durationMs: getProcessAnimationDurationMs('atmosphere'),
+                startProgress: Math.max(0, Math.min(0.999, (getAtmosphereCoverageRuntime()?.progress || 0))),
+                onUpdate: (nextMetrics) => {
+                    syncAtmosphereAnimationProgressUi(nextMetrics);
+                    syncThermalControlState(nextMetrics);
+                },
+                onFinish: (finalMetrics) => {
+                    renderThermalSimulationPanel(finalMetrics, 'atmosphere');
+                    syncThermalControlState(finalMetrics);
+                }
+            });
+        }
+        syncThermalControlState(snap.metrics);
+    });
+    hud.querySelector('#process-player-progress')?.addEventListener('input', (event) => {
+        scrubCurrentProcessAnimation(parseInt(event.target.value, 10) || 0);
     });
 }
 
 function syncThermalControlState(metrics = null) {
-    const runtime = typeof getVacuumQuenchThermalRuntime === 'function'
-        ? getVacuumQuenchThermalRuntime()
-        : { isPlaying: false, paused: false, progress: 0, activeMode: processSimulationMode };
-
     const playBtn = document.getElementById('btn-play-thermal');
     const pauseBtn = document.getElementById('btn-pause-thermal');
     const renderBtn = document.getElementById('btn-render-thermal');
+    const resetBtn = document.getElementById('btn-reset-thermal');
+    const speedSelect = document.getElementById('thermal-speed-select');
     const range = document.getElementById('thermal-progress-range');
     const value = document.getElementById('thermal-progress-value');
+    const scrubRow = document.getElementById('thermal-scrub-row');
+    const actionBar = document.querySelector('.thermal-action-bar');
+
+    const active = isProcessSimulationActive();
+    const snap = getCurrentProcessRuntimeSnapshot(metrics);
+    const currentModeLabel = processSimulationMode === 'radiation'
+        ? '辐射暴露'
+        : (processSimulationMode === 'airflow'
+            ? '气流冷却'
+            : (processSimulationMode === 'atmosphere' ? '气氛覆盖' : '升温热场'));
+    const animated = active && ['thermal', 'airflow', 'atmosphere'].includes(processSimulationMode);
+    const isAirflowMode = active && processSimulationMode === 'airflow';
+    const showsLinearProgress = active && ['thermal', 'atmosphere'].includes(processSimulationMode);
+    const progress = Math.max(0, Math.min(100, Number(snap.progress || metrics?.progress || 0)));
+
+    if (actionBar) {
+        actionBar.style.display = active ? 'grid' : 'none';
+        actionBar.style.gridTemplateColumns = animated
+            ? 'repeat(3, minmax(0, 1fr))'
+            : 'repeat(2, minmax(0, 1fr))';
+        actionBar.style.gap = '6px';
+    }
 
     if (playBtn) {
-        playBtn.disabled = processSimulationMode !== 'thermal';
-        playBtn.style.opacity = processSimulationMode === 'thermal' ? '1' : '0.42';
-        playBtn.textContent = runtime.isPlaying ? '重新播放热力图' : (runtime.paused ? '继续播放热力图' : '播放热场升温');
+        playBtn.style.display = animated ? 'inline-block' : 'none';
+        playBtn.disabled = !animated;
+        if (isAirflowMode) {
+            playBtn.textContent = snap.isPlaying ? '重启循环' : (snap.paused ? '继续循环' : '播放气流');
+        } else {
+            playBtn.textContent = snap.isPlaying ? '重播' : (snap.paused ? '继续播放' : '播放动画');
+        }
+        playBtn.title = `${currentModeLabel} · 播放/重播`;
     }
 
     if (pauseBtn) {
-        const canPause = processSimulationMode === 'thermal' && runtime.visible;
-        pauseBtn.disabled = !canPause;
-        pauseBtn.style.opacity = canPause ? '1' : '0.42';
-        pauseBtn.textContent = runtime.isPlaying ? '暂停' : '继续';
+        pauseBtn.style.display = animated ? 'inline-block' : 'none';
+        pauseBtn.disabled = !animated;
+        pauseBtn.textContent = snap.isPlaying ? '暂停' : (snap.paused ? '继续' : (isAirflowMode ? '暂停循环' : '暂停/继续'));
+        pauseBtn.title = `${currentModeLabel} · 暂停/继续`;
+    }
+
+    if (speedSelect) {
+        speedSelect.style.display = animated ? 'inline-block' : 'none';
+        speedSelect.disabled = !animated;
+        // 兼容旧 HTML：如果 option 还是毫秒值，不强行重写；如果已经是 slow/normal/fast 则保留。
+        speedSelect.title = isAirflowMode ? '气流循环速度' : `${currentModeLabel} · 播放速度`;
+    }
+
+    if (scrubRow) {
+        scrubRow.style.display = animated ? 'flex' : 'none';
+        scrubRow.classList.toggle('airflow-loop-status-row', !!isAirflowMode);
     }
 
     if (renderBtn) {
-        renderBtn.textContent = processSimulationMode === 'radiation'
-            ? '显示辐射暴露'
-            : (processSimulationMode === 'airflow'
-                ? '显示气流冷却'
-                : (processSimulationMode === 'atmosphere' ? '显示气氛覆盖' : '显示热场热力图'));
+        renderBtn.style.display = active ? 'inline-block' : 'none';
+        renderBtn.textContent = active ? `刷新${currentModeLabel}` : '进入仿真';
+        renderBtn.title = active ? '刷新当前仿真视图，不改变参数' : '进入工艺仿真';
     }
 
-    const progress = metrics?.progress != null
-        ? metrics.progress
-        : Math.round((runtime.progress || 0) * 100);
+    if (resetBtn) {
+        resetBtn.style.display = active ? 'inline-block' : 'none';
+        resetBtn.textContent = active ? '退出仿真' : '停止查看';
+        resetBtn.title = '退出当前工艺仿真并清空 3D 仿真层';
+    }
 
     if (range && document.activeElement !== range) {
-        range.disabled = processSimulationMode !== 'thermal';
-        range.value = String(Math.max(0, Math.min(100, progress)));
+        range.disabled = !showsLinearProgress;
+        range.style.display = showsLinearProgress ? '' : 'none';
+        if (showsLinearProgress) range.value = String(Math.round(progress));
     }
-    if (value) value.textContent = processSimulationMode === 'thermal' ? `${Math.max(0, Math.min(100, progress))}%` : '—';
+    if (value) {
+        if (!animated) {
+            value.textContent = '';
+        } else if (isAirflowMode) {
+            value.textContent = snap.isPlaying ? '循环流动中' : (snap.paused ? '循环已暂停' : '气流诊断视图');
+        } else {
+            value.textContent = `${Math.round(progress)}%`;
+        }
+        value.style.width = isAirflowMode ? '100%' : '42px';
+        value.style.textAlign = isAirflowMode ? 'left' : 'right';
+        value.style.color = isAirflowMode ? '#0284c7' : '#f97316';
+    }
+
     updateProcessSimulationModeButtons();
+    syncProcessPlayerHud(metrics);
 }
 
 function renderCurrentThermalSimulation(progress = 0.18, switchTab = true) {
     processSimulationMode = 'thermal';
+    processSimulationActive = true;
     document.body.classList.remove('radiation-pick-mode');
     document.body.classList.add('thermal-heatmap-mode');
     document.body.classList.remove('airflow-cooling-mode');
@@ -2035,11 +2450,12 @@ function renderCurrentThermalSimulation(progress = 0.18, switchTab = true) {
     renderThermalSimulationPanel(metrics, 'thermal');
     syncThermalControlState(metrics);
     if (switchTab) activateRightPanelTab('thermal');
+    if (switchTab) focusCurrentFurnaceForProcessSimulation();
     return metrics;
 }
-
 function renderCurrentRadiationSimulation(switchTab = true) {
     processSimulationMode = 'radiation';
+    processSimulationActive = true;
     document.body.classList.add('radiation-pick-mode');
     document.body.classList.remove('thermal-heatmap-mode');
     document.body.classList.remove('airflow-cooling-mode');
@@ -2049,11 +2465,12 @@ function renderCurrentRadiationSimulation(switchTab = true) {
     renderThermalSimulationPanel(metrics, 'radiation');
     syncThermalControlState(metrics);
     if (switchTab) activateRightPanelTab('thermal');
+    if (switchTab) focusCurrentFurnaceForProcessSimulation();
     return metrics;
 }
-
 function renderCurrentAirflowSimulation(switchTab = true, directionKey = null) {
     processSimulationMode = 'airflow';
+    processSimulationActive = true;
     document.body.classList.remove('radiation-pick-mode');
     document.body.classList.remove('thermal-heatmap-mode');
     document.body.classList.add('airflow-cooling-mode');
@@ -2065,12 +2482,13 @@ function renderCurrentAirflowSimulation(switchTab = true, directionKey = null) {
     renderThermalSimulationPanel(metrics, 'airflow');
     syncThermalControlState(metrics);
     if (switchTab) activateRightPanelTab('thermal');
+    if (switchTab) focusCurrentFurnaceForProcessSimulation();
     return metrics;
 }
 
-
 function renderCurrentAtmosphereSimulation(switchTab = true, mediumType = null) {
     processSimulationMode = 'atmosphere';
+    processSimulationActive = true;
     document.body.classList.remove('radiation-pick-mode');
     document.body.classList.remove('thermal-heatmap-mode');
     document.body.classList.remove('airflow-cooling-mode');
@@ -2082,10 +2500,13 @@ function renderCurrentAtmosphereSimulation(switchTab = true, mediumType = null) 
     renderThermalSimulationPanel(metrics, 'atmosphere');
     syncThermalControlState(metrics);
     if (switchTab) activateRightPanelTab('thermal');
+    if (switchTab) focusCurrentFurnaceForProcessSimulation();
     return metrics;
 }
-
 function renderCurrentProcessSimulation() {
+    if (!processSimulationMode || processSimulationMode === 'idle') {
+        processSimulationMode = 'thermal';
+    }
     if (processSimulationMode === 'radiation') {
         return renderCurrentRadiationSimulation(true);
     }
@@ -2101,9 +2522,19 @@ function renderCurrentProcessSimulation() {
 }
 
 function switchProcessSimulationMode(mode) {
-    processSimulationMode = mode === 'radiation'
+    const nextMode = mode === 'radiation'
         ? 'radiation'
         : (mode === 'airflow' ? 'airflow' : (mode === 'atmosphere' ? 'atmosphere' : 'thermal'));
+
+    // 同一模式二次点击 = 退出仿真；不同模式点击 = 切换仿真。
+    if (isProcessSimulationActive() && processSimulationMode === nextMode) {
+        resetCurrentThermalSimulation();
+        return;
+    }
+
+    processSimulationMode = nextMode;
+    processSimulationActive = true;
+
     if (processSimulationMode === 'radiation') {
         renderCurrentRadiationSimulation(true);
     } else if (processSimulationMode === 'airflow') {
@@ -2118,6 +2549,7 @@ function switchProcessSimulationMode(mode) {
 
 function playCurrentThermalSimulation() {
     processSimulationMode = 'thermal';
+    processSimulationActive = true;
     document.body.classList.remove('radiation-pick-mode');
     document.body.classList.add('thermal-heatmap-mode');
     document.body.classList.remove('airflow-cooling-mode');
@@ -2145,6 +2577,7 @@ function playCurrentThermalSimulation() {
 
 function pauseResumeCurrentThermalSimulation() {
     processSimulationMode = 'thermal';
+    processSimulationActive = true;
     document.body.classList.remove('radiation-pick-mode');
     document.body.classList.add('thermal-heatmap-mode');
     document.body.classList.remove('airflow-cooling-mode');
@@ -2176,18 +2609,24 @@ function pauseResumeCurrentThermalSimulation() {
 }
 
 function resetCurrentThermalSimulation() {
+    processSimulationActive = false;
+    processSimulationMode = 'idle';
     document.body.classList.remove('radiation-pick-mode');
     document.body.classList.remove('thermal-heatmap-mode');
     document.body.classList.remove('airflow-cooling-mode');
     document.body.classList.remove('atmosphere-coverage-mode');
     stopVacuumQuenchThermalSimulation();
+    if (typeof pauseAirflowCoolingAnimation === 'function') pauseAirflowCoolingAnimation();
+    if (typeof pauseAtmosphereCoverageAnimation === 'function') pauseAtmosphereCoverageAnimation();
     clearThermalSimulationLayer();
-    renderThermalSimulationPanel(null, processSimulationMode);
+    renderThermalSimulationPanel(null, 'idle');
     syncThermalControlState(null);
+    stopProcessPlayerHudTicker();
 }
 
 function scrubCurrentThermalSimulation(progressPercent) {
     processSimulationMode = 'thermal';
+    processSimulationActive = true;
     document.body.classList.remove('radiation-pick-mode');
     document.body.classList.remove('airflow-cooling-mode');
     document.body.classList.remove('atmosphere-coverage-mode');
@@ -2259,6 +2698,7 @@ function renderSelectedRadiationMetrics(metrics) {
     if (!metrics) return;
 
     processSimulationMode = 'radiation';
+    processSimulationActive = true;
     document.body.classList.add('radiation-pick-mode');
     activateRightPanelTab('thermal');
 
@@ -2280,6 +2720,7 @@ function selectRadiationBatchFromMaterialCard(card) {
     // 左侧卡片代表“物料批次/类型”，不是某一个 3D 实例。
     // 因此这里进入批次辐射诊断；需要看单件路径时再点击 3D 工件或“定位最低暴露件”。
     processSimulationMode = 'radiation';
+    processSimulationActive = true;
     document.body.classList.add('radiation-pick-mode');
     const metrics = selectRadiationExposureBatch({
         name: cardName,
@@ -2322,6 +2763,7 @@ function bindRadiationDiagnosisActions() {
         event.stopPropagation();
 
         processSimulationMode = 'radiation';
+        processSimulationActive = true;
         document.body.classList.add('radiation-pick-mode');
         ensureRadiationOverviewVisible();
 
@@ -2349,6 +2791,7 @@ function bindRadiationDiagnosisActions() {
         event.stopPropagation();
 
         processSimulationMode = 'radiation';
+        processSimulationActive = true;
         document.body.classList.add('radiation-pick-mode');
         ensureRadiationOverviewVisible();
 
@@ -2424,6 +2867,7 @@ function bindRadiationItemSelection() {
         if (dx > 6 || dy > 6 || dt > 700) return;
 
         processSimulationMode = 'radiation';
+        processSimulationActive = true;
         document.body.classList.add('radiation-pick-mode');
         ensureRadiationOverviewVisible();
 
@@ -2493,6 +2937,7 @@ function bindThermalHeatmapActions() {
 
     function activateThermalHeatmapMode() {
         processSimulationMode = 'thermal';
+        processSimulationActive = true;
         document.body.classList.remove('radiation-pick-mode');
         document.body.classList.add('thermal-heatmap-mode');
         document.body.classList.remove('airflow-cooling-mode');
@@ -2549,8 +2994,11 @@ function bindAirflowCoolingActions() {
 
     function activateAirflowMode() {
         processSimulationMode = 'airflow';
+        processSimulationActive = true;
         document.body.classList.remove('radiation-pick-mode');
+        document.body.classList.remove('thermal-heatmap-mode');
         document.body.classList.add('airflow-cooling-mode');
+        document.body.classList.remove('atmosphere-coverage-mode');
         activateRightPanelTab('thermal');
     }
 
@@ -2606,13 +3054,45 @@ function bindAirflowCoolingActions() {
 }
 
 
+
+function syncAtmosphereAnimationProgressUi(metrics) {
+    if (!metrics || processSimulationMode !== 'atmosphere') return;
+    const panel = document.getElementById('thermal-simulation-panel');
+    if (!panel) return;
+
+    const progress = Math.max(0, Math.min(100, Number(metrics.progress || 0)));
+    const progressText = `${Math.round(progress)}%`;
+
+    panel.querySelectorAll('.atmosphere-progress-text, .atmosphere-progress-value').forEach(el => {
+        el.textContent = progressText;
+    });
+
+    panel.querySelectorAll('.atmosphere-progress-range').forEach(input => {
+        input.value = String(Math.round(progress));
+    });
+
+    panel.querySelectorAll('.atmosphere-stage-label').forEach(el => {
+        el.textContent = metrics.atmosphereStageLabel || '气氛扩散';
+    });
+
+    panel.querySelectorAll('.atmosphere-stage-desc').forEach(el => {
+        el.textContent = metrics.atmosphereStageDesc || '气氛浓度场正在随时间扩散。';
+    });
+
+    panel.querySelectorAll('[data-action="atmosphere-pause"]').forEach(btn => {
+        btn.textContent = metrics.animationPlaying ? '暂停扩散' : '暂停';
+    });
+}
+
 function bindAtmosphereCoverageActions() {
     if (document.body.dataset.atmosphereCoverageBound === '1') return;
     document.body.dataset.atmosphereCoverageBound = '1';
 
     function activateAtmosphereMode() {
         processSimulationMode = 'atmosphere';
+        processSimulationActive = true;
         document.body.classList.remove('radiation-pick-mode');
+        document.body.classList.remove('thermal-heatmap-mode');
         document.body.classList.remove('airflow-cooling-mode');
         document.body.classList.add('atmosphere-coverage-mode');
         activateRightPanelTab('thermal');
@@ -2620,15 +3100,51 @@ function bindAtmosphereCoverageActions() {
 
     document.addEventListener('click', (event) => {
         const presetBtn = event.target.closest('[data-action="atmosphere-medium-preset"]');
-        if (!presetBtn) return;
+        const inletBtn = event.target.closest('[data-action="atmosphere-inlet-direction"]');
+        const inletPresetBtn = event.target.closest('[data-action="atmosphere-inlet-preset"]');
+        const inletResetBtn = event.target.closest('[data-action="atmosphere-inlet-reset"]');
+        const playBtn = event.target.closest('[data-action="atmosphere-play"]');
+        const pauseBtn = event.target.closest('[data-action="atmosphere-pause"]');
+        const resetBtn = event.target.closest('[data-action="atmosphere-reset"]');
+        if (!presetBtn && !inletBtn && !inletPresetBtn && !inletResetBtn && !playBtn && !pauseBtn && !resetBtn) return;
 
         event.preventDefault();
         event.stopPropagation();
         activateAtmosphereMode();
-        const mediumType = presetBtn.getAttribute('data-atmosphere-medium') || 'nitriding';
-        const metrics = setAtmosphereMediumType(mediumType);
-        renderThermalSimulationPanel(metrics || getAtmosphereCoverageRuntime()?.metrics || null, 'atmosphere');
-        syncThermalControlState(metrics || null);
+
+        let metrics = null;
+        if (presetBtn) {
+            const mediumType = presetBtn.getAttribute('data-atmosphere-medium') || 'nitriding';
+            metrics = setAtmosphereMediumType(mediumType);
+        } else if (inletBtn) {
+            const directionKey = inletBtn.getAttribute('data-atmosphere-inlet') || 'z-';
+            metrics = toggleAtmosphereInletDirection(directionKey);
+        } else if (inletPresetBtn) {
+            const directions = (inletPresetBtn.getAttribute('data-atmosphere-inlets') || '').split(',').map(v => v.trim()).filter(Boolean);
+            metrics = setAtmosphereInletDirections(directions);
+        } else if (inletResetBtn) {
+            metrics = resetAtmosphereInletDirections();
+        } else if (playBtn) {
+            metrics = playAtmosphereCoverageAnimation({
+                onUpdate: (nextMetrics) => {
+                    syncAtmosphereAnimationProgressUi(nextMetrics);
+                    syncThermalControlState(nextMetrics);
+                },
+                onFinish: (finalMetrics) => {
+                    renderThermalSimulationPanel(finalMetrics, 'atmosphere');
+                    syncThermalControlState(finalMetrics);
+                }
+            });
+        } else if (pauseBtn) {
+            metrics = pauseAtmosphereCoverageAnimation();
+        } else if (resetBtn) {
+            metrics = resetAtmosphereCoverageAnimation();
+        }
+
+        const finalMetrics = metrics || getAtmosphereCoverageRuntime()?.metrics || null;
+        renderThermalSimulationPanel(finalMetrics, 'atmosphere');
+        syncAtmosphereAnimationProgressUi(finalMetrics);
+        syncThermalControlState(finalMetrics || null);
     }, true);
 
     document.addEventListener('change', (event) => {
@@ -3043,9 +3559,9 @@ function init() {
     const btnAnimate = document.getElementById("btn-animate");
     if (btnAnimate) btnAnimate.addEventListener("click", playCurrentSimulation);
     const btnPlayThermal = document.getElementById("btn-play-thermal");
-    if (btnPlayThermal) btnPlayThermal.addEventListener("click", playCurrentThermalSimulation);
+    if (btnPlayThermal) btnPlayThermal.addEventListener("click", playCurrentProcessAnimation);
     const btnPauseThermal = document.getElementById("btn-pause-thermal");
-    if (btnPauseThermal) btnPauseThermal.addEventListener("click", pauseResumeCurrentThermalSimulation);
+    if (btnPauseThermal) btnPauseThermal.addEventListener("click", pauseResumeCurrentProcessAnimation);
     const btnRenderThermal = document.getElementById("btn-render-thermal");
     if (btnRenderThermal) btnRenderThermal.addEventListener("click", renderCurrentProcessSimulation);
     const btnModeThermal = document.getElementById('btn-mode-thermal');
@@ -3059,9 +3575,29 @@ function init() {
     const btnResetThermal = document.getElementById("btn-reset-thermal");
     if (btnResetThermal) btnResetThermal.addEventListener("click", resetCurrentThermalSimulation);
     const thermalSpeedSelect = document.getElementById('thermal-speed-select');
-    if (thermalSpeedSelect) thermalSpeedSelect.addEventListener('change', restartThermalWithCurrentSpeedIfPlaying);
+    if (thermalSpeedSelect) thermalSpeedSelect.addEventListener('change', () => {
+        if (!isProcessSimulationActive()) return;
+        const snap = getCurrentProcessRuntimeSnapshot();
+        if (snap.isPlaying) {
+            if (processSimulationMode === 'thermal') restartThermalWithCurrentSpeedIfPlaying();
+            else if (processSimulationMode === 'airflow') playAirflowCoolingAnimation({ cycleMs: getProcessAnimationDurationMs('airflow') });
+            else if (processSimulationMode === 'atmosphere') playAtmosphereCoverageAnimation({
+                durationMs: getProcessAnimationDurationMs('atmosphere'),
+                startProgress: Math.max(0, Math.min(0.999, (getAtmosphereCoverageRuntime()?.progress || 0))),
+                onUpdate: (nextMetrics) => {
+                    syncAtmosphereAnimationProgressUi(nextMetrics);
+                    syncThermalControlState(nextMetrics);
+                },
+                onFinish: (finalMetrics) => {
+                    renderThermalSimulationPanel(finalMetrics, 'atmosphere');
+                    syncThermalControlState(finalMetrics);
+                }
+            });
+        }
+        syncThermalControlState(snap.metrics);
+    });
     const thermalProgressRange = document.getElementById('thermal-progress-range');
-    if (thermalProgressRange) thermalProgressRange.addEventListener('input', (event) => scrubCurrentThermalSimulation(parseInt(event.target.value, 10) || 0));
+    if (thermalProgressRange) thermalProgressRange.addEventListener('input', (event) => scrubCurrentProcessAnimation(parseInt(event.target.value, 10) || 0));
     const btnExportPdf = document.getElementById("btn-export-pdf");
     if (btnExportPdf) btnExportPdf.addEventListener("click", showPdfSelectModal);
     // JSON 导出并入 PDF 导出弹窗，顶部不再单独提供入口

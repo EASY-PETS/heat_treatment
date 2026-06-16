@@ -125,10 +125,14 @@ let thermalSimRuntime = {
     radiationScores: null,
     airflowScores: null,
     atmosphereScores: null,
+    atmosphereSurfaceGroup: null,
+    atmosphereAnimationStartedAt: 0,
     selectedAirflowDirection: 'z+',
     selectedAirflowDirections: ['z+'],
     selectedAirflowGasType: 'n2',
+    airflowCycleMs: 3600,
     selectedAtmosphereMediumType: 'nitriding',
+    selectedAtmosphereInletDirections: null,
     airflowParticles: null,
     airflowStreamGroup: null,
     selectedRadiationItemId: null,
@@ -136,7 +140,11 @@ let thermalSimRuntime = {
     selectedRadiationBatch: null,
     selectedRadiationSection: null,
     onUpdate: null,
-    onFinish: null
+    onFinish: null,
+    lastThermalHeavyUpdateAt: 0,
+    lastAirflowParticleUpdateAt: 0,
+    lastAtmosphereVisualUpdateAt: 0,
+    lastAtmosphereUiUpdateAt: 0
 };
 
 let radiationSectionDragState = null;
@@ -263,6 +271,7 @@ function clearThermalGroupChildren() {
     thermalSimRuntime.rayGroup = null;
     thermalSimRuntime.riskGroup = null;
     thermalSimRuntime.sourceGroup = null;
+    thermalSimRuntime.atmosphereSurfaceGroup = null;
 }
 
 
@@ -281,6 +290,8 @@ export function clearThermalSimulationLayer() {
     thermalSimRuntime.radiationScores = null;
     thermalSimRuntime.airflowScores = null;
     thermalSimRuntime.atmosphereScores = null;
+    thermalSimRuntime.atmosphereSurfaceGroup = null;
+    thermalSimRuntime.atmosphereAnimationStartedAt = 0;
     thermalSimRuntime.selectedAirflowDirection = 'z+';
     thermalSimRuntime.selectedThermalHeatmapView = 'middle';
     thermalSimRuntime.selectedThermalDisplayMode = 'balanced';
@@ -288,7 +299,9 @@ export function clearThermalSimulationLayer() {
     thermalSimRuntime.selectedThermalSectionOffset = 0;
     thermalSimRuntime.selectedAirflowDirections = ['z+'];
     thermalSimRuntime.selectedAirflowGasType = 'n2';
+    thermalSimRuntime.airflowCycleMs = 3600;
     thermalSimRuntime.selectedAtmosphereMediumType = 'nitriding';
+    thermalSimRuntime.selectedAtmosphereInletDirections = null;
     thermalSimRuntime.airflowParticles = null;
     thermalSimRuntime.airflowStreamGroup = null;
     thermalSimRuntime.selectedRadiationItemId = null;
@@ -297,6 +310,10 @@ export function clearThermalSimulationLayer() {
     thermalSimRuntime.selectedRadiationSection = null;
     thermalSimRuntime.onUpdate = null;
     thermalSimRuntime.onFinish = null;
+    thermalSimRuntime.lastThermalHeavyUpdateAt = 0;
+    thermalSimRuntime.lastAirflowParticleUpdateAt = 0;
+    thermalSimRuntime.lastAtmosphereVisualUpdateAt = 0;
+    thermalSimRuntime.lastAtmosphereUiUpdateAt = 0;
 }
 
 function getMeshMaterials(mesh) {
@@ -2448,6 +2465,8 @@ function calculateAirflowCoolingMetrics(furnace, scoreMap, directionMetas) {
         inletLabel,
         outletLabel,
         airflowModeLabel: directions.length > 1 ? `多入口环流 · ${directions.length} 个入口` : '单向进出',
+        animationSemantics: 'loop',
+        flowCycleLabel: '循环流线，不代表冷却完成度',
         coolingReachability: Math.round(avgScore * 100),
         minCoolingReachability: Math.round(minScore * 100),
         leewardItemCount: leewardItems,
@@ -2748,7 +2767,7 @@ function buildAirflowStreamlineField(furnace, directionMetas) {
                 lineColors.push(colorA.r, colorA.g, colorA.b, colorB.r, colorB.g, colorB.b);
             }
             paths.push({
-                points: path.points.map(p => p.clone()),
+                ...prepareAirflowPath(path.points),
                 blocked: path.blocked,
                 directionKey: meta.key,
                 speed: (path.speedFactor != null ? path.speedFactor : (path.blocked ? 0.55 : 1)) * getAirflowGasMeta(thermalSimRuntime.selectedAirflowGasType || 'n2').speedScale,
@@ -2802,6 +2821,41 @@ function buildAirflowStreamlineField(furnace, directionMetas) {
     return group;
 }
 
+function prepareAirflowPath(points) {
+    const cloned = (points || []).map(p => p.clone());
+    const cumulativeLengths = [0];
+    let totalLength = 0;
+    for (let i = 0; i < cloned.length - 1; i++) {
+        totalLength += cloned[i].distanceTo(cloned[i + 1]);
+        cumulativeLengths.push(totalLength);
+    }
+    return { points: cloned, cumulativeLengths, totalLength };
+}
+
+function sampleAirflowPathInto(pathOrPoints, t, target) {
+    const points = pathOrPoints?.points || pathOrPoints || [];
+    if (!points.length) return target.set(0, 0, 0);
+    if (points.length === 1) return target.copy(points[0]);
+
+    const cumulative = pathOrPoints?.cumulativeLengths;
+    const total = Number(pathOrPoints?.totalLength || 0);
+    if (Array.isArray(cumulative) && cumulative.length === points.length && total > 1e-6) {
+        const wrapped = ((t % 1) + 1) % 1;
+        const targetDistance = wrapped * total;
+        for (let i = 0; i < cumulative.length - 1; i++) {
+            const a = cumulative[i];
+            const b = cumulative[i + 1];
+            if (targetDistance <= b) {
+                const local = b - a <= 1e-6 ? 0 : (targetDistance - a) / (b - a);
+                return target.copy(points[i]).lerp(points[i + 1], local);
+            }
+        }
+        return target.copy(points[points.length - 1]);
+    }
+
+    return target.copy(sampleAirflowPath(points, t));
+}
+
 function sampleAirflowPath(points, t) {
     if (!points || points.length === 0) return new THREE.Vector3();
     if (points.length === 1) return points[0].clone();
@@ -2831,17 +2885,25 @@ function updateAirflowParticles(now, force = false) {
     if (!paths.length) return;
     if (!force && (!thermalSimRuntime.isPlaying || thermalSimRuntime.paused || thermalSimRuntime.activeMode !== 'airflow')) return;
 
+    // UX V2.4：粒子层恢复接近 RAF 的顺滑更新；路径采样已预计算，避免每帧分配大量 Vector3。
+    if (!force && thermalSimRuntime.lastAirflowParticleUpdateAt && now - thermalSimRuntime.lastAirflowParticleUpdateAt < 16) {
+        return;
+    }
+    thermalSimRuntime.lastAirflowParticleUpdateAt = now;
+
     if (!thermalSimRuntime.startedAt || force) thermalSimRuntime.startedAt = now;
     const elapsed = now - thermalSimRuntime.startedAt;
-    const base = ((elapsed / 3600) % 1 + 1) % 1;
+    const cycleMs = Math.max(800, Number(thermalSimRuntime.airflowCycleMs || 3600));
+    const base = ((elapsed / cycleMs) % 1 + 1) % 1;
     thermalSimRuntime.progress = base;
 
     const pos = particles.geometry.getAttribute('position');
+    const tmp = updateAirflowParticles._tmpVec || (updateAirflowParticles._tmpVec = new THREE.Vector3());
     for (let i = 0; i < particles.userData.particleCount; i++) {
         const path = paths[i % paths.length];
         const laneOffset = ((i / Math.max(1, particles.userData.particleCount)) * 0.93) % 1;
         const t = (base * (path.speed || 1) + (path.phase || 0) + laneOffset) % 1;
-        const p = sampleAirflowPath(path.points, t);
+        const p = sampleAirflowPathInto(path, t, tmp);
         pos.setXYZ(i, p.x, p.y, p.z);
     }
     pos.needsUpdate = true;
@@ -3054,14 +3116,25 @@ export function toggleAirflowCoolingDirection(directionKey = 'z+') {
     return setAirflowCoolingDirections(next.length ? next : [key]);
 }
 
-export function playAirflowCoolingAnimation() {
-    if (thermalSimRuntime.activeMode !== 'airflow' || !thermalSimRuntime.visible) {
-        renderAirflowCoolingSimulation({ directionKeys: thermalSimRuntime.selectedAirflowDirections || ['z+'] });
+export function playAirflowCoolingAnimation(options = {}) {
+    if (options && options.cycleMs) {
+        thermalSimRuntime.airflowCycleMs = Math.max(800, Number(options.cycleMs) || 3600);
     }
+    if (thermalSimRuntime.activeMode !== 'airflow' || !thermalSimRuntime.visible) {
+        renderAirflowCoolingSimulation({
+            directionKeys: thermalSimRuntime.selectedAirflowDirections || ['z+'],
+            gasType: thermalSimRuntime.selectedAirflowGasType || 'n2'
+        });
+    }
+    const cycleMs = Math.max(800, Number(thermalSimRuntime.airflowCycleMs || 3600));
     thermalSimRuntime.isPlaying = true;
     thermalSimRuntime.paused = false;
-    thermalSimRuntime.startedAt = performance.now() - (thermalSimRuntime.progress || 0) * 3600;
-    if (thermalSimRuntime.metrics) thermalSimRuntime.metrics.animationPlaying = true;
+    thermalSimRuntime.startedAt = performance.now() - (thermalSimRuntime.progress || 0) * cycleMs;
+    thermalSimRuntime.lastAirflowParticleUpdateAt = 0;
+    if (thermalSimRuntime.metrics) {
+        thermalSimRuntime.metrics.animationPlaying = true;
+        thermalSimRuntime.metrics.progress = Math.round((thermalSimRuntime.progress || 0) * 100);
+    }
     return thermalSimRuntime.metrics;
 }
 
@@ -3097,12 +3170,13 @@ export function getAirflowCoolingRuntime() {
         gasMeta: getAirflowGasMeta(thermalSimRuntime.selectedAirflowGasType || 'n2'),
         isPlaying: thermalSimRuntime.activeMode === 'airflow' && thermalSimRuntime.isPlaying,
         paused: thermalSimRuntime.activeMode === 'airflow' && thermalSimRuntime.paused,
-        progress: thermalSimRuntime.activeMode === 'airflow' ? thermalSimRuntime.progress : 0
+        progress: thermalSimRuntime.activeMode === 'airflow' ? thermalSimRuntime.progress : 0,
+        cycleMs: thermalSimRuntime.airflowCycleMs || 3600
     };
 }
 
 
-// ---------- 介质场：气氛覆盖 v1 ----------
+// ---------- 介质场：气氛覆盖 v1.5 ----------
 function getAtmosphereMediumMeta(mediumType = 'nitriding') {
     const key = String(mediumType || 'nitriding').toLowerCase().trim();
     const table = {
@@ -3120,7 +3194,9 @@ function getAtmosphereMediumMeta(mediumType = 'nitriding') {
             colorLow: 0xf97316,
             backgroundColor: 0x0b1f1c,
             surfaceLayerColor: 0x5eead4,
-            fogOpacity: 0.46,
+            fogOpacity: 0.44,
+            particleDensityScale: 0.88,
+            surfaceLayerBoost: 1.10,
             visualTone: 'nitrogen'
         },
         carburizing: {
@@ -3137,7 +3213,9 @@ function getAtmosphereMediumMeta(mediumType = 'nitriding') {
             colorLow: 0x7f1d1d,
             backgroundColor: 0x160d06,
             surfaceLayerColor: 0xffd166,
-            fogOpacity: 0.58,
+            fogOpacity: 0.54,
+            particleDensityScale: 0.92,
+            surfaceLayerBoost: 1.28,
             visualTone: 'carbon'
         },
         protective: {
@@ -3154,7 +3232,9 @@ function getAtmosphereMediumMeta(mediumType = 'nitriding') {
             colorLow: 0xf59e0b,
             backgroundColor: 0x071827,
             surfaceLayerColor: 0xbae6fd,
-            fogOpacity: 0.38,
+            fogOpacity: 0.26,
+            particleDensityScale: 0.62,
+            surfaceLayerBoost: 1.22,
             visualTone: 'protective'
         },
         carbonitriding: {
@@ -3171,11 +3251,61 @@ function getAtmosphereMediumMeta(mediumType = 'nitriding') {
             colorLow: 0xdc2626,
             backgroundColor: 0x151106,
             surfaceLayerColor: 0xffe08a,
-            fogOpacity: 0.54,
+            fogOpacity: 0.50,
+            particleDensityScale: 0.86,
+            surfaceLayerBoost: 1.22,
             visualTone: 'carbonitriding'
         }
     };
     return table[key] || table.nitriding;
+}
+
+
+const ATMOSPHERE_INLET_DIRECTION_KEYS = ['x-', 'x+', 'z-', 'z+', 'y+', 'y-'];
+
+function getAtmosphereInletDirectionMeta(directionKey = 'z-') {
+    const key = String(directionKey || 'z-').toLowerCase().trim();
+    const table = {
+        'x-': { key: 'x-', label: '左侧入口', shortLabel: '-X 左侧', normal: new THREE.Vector3(1, 0, 0), axis: 'x', sign: -1 },
+        'x+': { key: 'x+', label: '右侧入口', shortLabel: '+X 右侧', normal: new THREE.Vector3(-1, 0, 0), axis: 'x', sign: 1 },
+        'z-': { key: 'z-', label: '前侧入口', shortLabel: '-Z 前侧', normal: new THREE.Vector3(0, 0, 1), axis: 'z', sign: -1 },
+        'z+': { key: 'z+', label: '后侧入口', shortLabel: '+Z 后侧', normal: new THREE.Vector3(0, 0, -1), axis: 'z', sign: 1 },
+        'y+': { key: 'y+', label: '顶部补给', shortLabel: '+Y 顶部', normal: new THREE.Vector3(0, -1, 0), axis: 'y', sign: 1 },
+        'y-': { key: 'y-', label: '底部补给', shortLabel: '-Y 底部', normal: new THREE.Vector3(0, 1, 0), axis: 'y', sign: -1 }
+    };
+    return table[key] || table['z-'];
+}
+
+function getDefaultAtmosphereInletsForMedium(mediumMeta = getAtmosphereMediumMeta('nitriding')) {
+    if (mediumMeta.visualTone === 'protective') return ['x-', 'x+', 'z-', 'z+', 'y+'];
+    if (mediumMeta.visualTone === 'carbon' || mediumMeta.visualTone === 'carbonitriding') return ['x-', 'x+', 'z-', 'z+'];
+    return ['x-', 'x+', 'z-', 'z+', 'y+'];
+}
+
+function normalizeAtmosphereInletDirections(value, mediumMeta = getAtmosphereMediumMeta('nitriding')) {
+    const fallback = getDefaultAtmosphereInletsForMedium(mediumMeta);
+    const raw = Array.isArray(value)
+        ? value
+        : (typeof value === 'string' ? value.split(',') : fallback);
+    const result = [];
+    raw.forEach(v => {
+        const meta = getAtmosphereInletDirectionMeta(v);
+        if (meta && ATMOSPHERE_INLET_DIRECTION_KEYS.includes(meta.key) && !result.includes(meta.key)) {
+            result.push(meta.key);
+        }
+    });
+    return result.length ? result : fallback;
+}
+
+function getSelectedAtmosphereInletDirections(mediumMeta = getAtmosphereMediumMeta('nitriding')) {
+    return normalizeAtmosphereInletDirections(thermalSimRuntime.selectedAtmosphereInletDirections, mediumMeta);
+}
+
+function getAtmosphereInletDirectionLabel(keys, compact = false) {
+    const list = normalizeAtmosphereInletDirections(keys || []);
+    const labels = list.map(k => compact ? getAtmosphereInletDirectionMeta(k).shortLabel : getAtmosphereInletDirectionMeta(k).label);
+    if (labels.length <= 2) return labels.join(' / ');
+    return `${labels.slice(0, 2).join(' / ')} 等 ${labels.length} 个入口`;
 }
 
 function getAtmosphereCoverageColor(score, mediumType = 'nitriding') {
@@ -3212,7 +3342,8 @@ function getAtmosphereModeCopy(mediumMeta) {
             modeName: '渗碳碳势覆盖',
             coverageLabel: '平均碳势覆盖',
             minLabel: '最低碳势工件',
-            deadLabel: '碳势死角件',
+            weakExchangeLabel: '碳势交换弱区',
+            deadLabel: '真实碳势死角',
             severeLabel: '严重碳势死角',
             uniformityLabel: '预计渗层均匀性',
             faceRateLabel: '有效吸碳表面',
@@ -3225,7 +3356,8 @@ function getAtmosphereModeCopy(mediumMeta) {
             modeName: '碳氮共渗覆盖',
             coverageLabel: '碳氮介质覆盖',
             minLabel: '最低共渗工件',
-            deadLabel: '共渗死角件',
+            weakExchangeLabel: '共渗交换弱区',
+            deadLabel: '真实共渗死角',
             severeLabel: '严重共渗死角',
             uniformityLabel: '共渗层均匀性',
             faceRateLabel: '有效反应表面',
@@ -3238,7 +3370,8 @@ function getAtmosphereModeCopy(mediumMeta) {
             modeName: '保护气氛覆盖',
             coverageLabel: '平均保护覆盖',
             minLabel: '最低保护工件',
-            deadLabel: '保护死角件',
+            weakExchangeLabel: '保护交换弱区',
+            deadLabel: '真实保护死角',
             severeLabel: '严重保护死角',
             uniformityLabel: '防氧化均匀性',
             faceRateLabel: '有效保护表面',
@@ -3250,7 +3383,8 @@ function getAtmosphereModeCopy(mediumMeta) {
         modeName: '氮化气氛覆盖',
         coverageLabel: '平均氮势覆盖',
         minLabel: '最低氮势工件',
-        deadLabel: '氮势死角件',
+        weakExchangeLabel: '氮势交换弱区',
+        deadLabel: '真实氮势死角',
         severeLabel: '严重氮势死角',
         uniformityLabel: '氮化层均匀性',
         faceRateLabel: '有效氮化表面',
@@ -3354,6 +3488,120 @@ function estimateAtmosphereLocalDensity(item, furnace) {
     return clamp01(density / 4.2);
 }
 
+function getAtmosphereInletPointForFace(face, furnace, inletKey = 'z-') {
+    const fw = Number(furnace?.w || 600);
+    const fh = Number(furnace?.h || 600);
+    const fd = Number(furnace?.d || 600);
+    const y0 = THERMAL_BASE_Y;
+    const p = face?.point || new THREE.Vector3();
+    const key = getAtmosphereInletDirectionMeta(inletKey).key;
+    const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+
+    if (key === 'x-') return new THREE.Vector3(-fw / 2, clamp(p.y, y0, y0 + fh), clamp(p.z, -fd / 2, fd / 2));
+    if (key === 'x+') return new THREE.Vector3(fw / 2, clamp(p.y, y0, y0 + fh), clamp(p.z, -fd / 2, fd / 2));
+    if (key === 'z-') return new THREE.Vector3(clamp(p.x, -fw / 2, fw / 2), clamp(p.y, y0, y0 + fh), -fd / 2);
+    if (key === 'z+') return new THREE.Vector3(clamp(p.x, -fw / 2, fw / 2), clamp(p.y, y0, y0 + fh), fd / 2);
+    if (key === 'y+') return new THREE.Vector3(clamp(p.x, -fw / 2, fw / 2), y0 + fh, clamp(p.z, -fd / 2, fd / 2));
+    return new THREE.Vector3(clamp(p.x, -fw / 2, fw / 2), y0, clamp(p.z, -fd / 2, fd / 2));
+}
+
+function estimateAtmosphereInletReachability(face, targetItem, allItems, furnace, mediumMeta) {
+    const selectedKeys = getSelectedAtmosphereInletDirections(mediumMeta);
+    const facePoint = face?.point || getItemCenterWorld(targetItem, furnace);
+    const maxDim = Math.max(Number(furnace?.w || 600), Number(furnace?.h || 600), Number(furnace?.d || 600), 1);
+    let best = {
+        score: 0,
+        inletKey: selectedKeys[0] || 'z-',
+        blockerCount: 0,
+        blockers: [],
+        distance: 0,
+        exposure: 0
+    };
+
+    selectedKeys.forEach(key => {
+        const inletPoint = getAtmosphereInletPointForFace(face, furnace, key);
+        const toInlet = inletPoint.clone().sub(facePoint);
+        const distance = Math.max(1, toInlet.length());
+        const inletDirection = toInlet.clone().normalize();
+        // face.normal points outward from the workpiece. If the inlet lies on that side,
+        // the face is directly exposed; otherwise it can still be reached by diffusion.
+        const directExposure = clamp01(face.normal.dot(inletDirection));
+        const diffusionExposure = 0.24 + directExposure * 0.76;
+        const distanceFactor = Math.max(0.36, clamp01(1.08 - distance / (maxDim * 1.58)));
+        const blockers = [];
+
+        for (const other of allItems) {
+            if (!other || other.id === targetItem.id) continue;
+            const box = getItemWorldBox(other, furnace);
+            if (segmentIntersectsBox(inletPoint, facePoint, box)) {
+                blockers.push(other);
+            }
+        }
+
+        const multiInletBonus = selectedKeys.length >= 4 ? 0.08 : (selectedKeys.length >= 2 ? 0.04 : 0);
+        const blockerPenalty = Math.max(0.24, 1 - blockers.length * 0.22);
+        const score = clamp01(
+            diffusionExposure * (0.42 + distanceFactor * 0.58) * blockerPenalty * (mediumMeta.diffusionFactor || 0.9)
+            + multiInletBonus
+        );
+
+        if (score > best.score) {
+            best = {
+                score,
+                inletKey: key,
+                blockerCount: blockers.length,
+                blockers,
+                distance,
+                exposure: directExposure
+            };
+        }
+    });
+
+    return best;
+}
+
+function getAtmosphereFaceRiskType(faceScore, info, inletInfo, localDensity, mediumMeta) {
+    const severe = mediumMeta.severeClearance || 28;
+    const target = mediumMeta.targetClearance || 100;
+    const contactLimit = Math.max(6, severe * 0.36);
+    const tightLimit = severe;
+    const pathBlocked = (inletInfo?.blockerCount || 0) >= 3 && (inletInfo?.score || 0) < 0.36 && info.clearance < target * 0.72;
+
+    if (info.clearance <= contactLimit) {
+        return {
+            type: 'dead',
+            level: 'severe',
+            label: '真实死角',
+            reason: '表面间隙接近贴靠，活性介质难以进入'
+        };
+    }
+    if (info.clearance < tightLimit || pathBlocked) {
+        return {
+            type: 'dead',
+            level: 'normal',
+            label: '真实死角',
+            reason: pathBlocked ? '入口路径被多件工件连续遮挡' : '表面间隙低于工艺安全阈值'
+        };
+    }
+    if (info.clearance < target || (inletInfo?.score || 0) < 0.52 || localDensity > 0.52 || faceScore < 0.64) {
+        return {
+            type: 'weak',
+            level: 'weak',
+            label: '低交换区',
+            reason: info.clearance < target
+                ? '表面间距偏小但未形成封闭死角'
+                : ((inletInfo?.score || 0) < 0.52 ? '入口路径较长或被遮挡，气氛刷新较慢' : '周边局部密集，气氛交换速度偏慢')
+        };
+    }
+    return {
+        type: 'ok',
+        level: 'ok',
+        label: '覆盖正常',
+        reason: '表面间距和入口路径均可接受'
+    };
+}
+
+
 function calculateAtmosphereCoverageScores(furnace, mediumType = 'nitriding') {
     const items = furnace.packedItems || [];
     const result = new Map();
@@ -3364,18 +3612,37 @@ function calculateAtmosphereCoverageScores(furnace, mediumType = 'nitriding') {
         const faces = getAtmosphereFaceSamples(item, furnace);
         const localDensity = estimateAtmosphereLocalDensity(item, furnace);
         const blockerMap = new Map();
+        const pathBlockerMap = new Map();
         const faceResults = [];
         let totalScore = 0;
         let deadFaceCount = 0;
+        let severeDeadFaceCount = 0;
+        let weakExchangeFaceCount = 0;
+        let totalInletReachability = 0;
+        let totalPathBlockers = 0;
 
         faces.forEach(face => {
             const info = estimateAtmosphereFaceClearance(face, item, items, furnace);
+            const inletInfo = estimateAtmosphereInletReachability(face, item, items, furnace, mediumMeta);
             const target = mediumMeta.targetClearance || 100;
             const severe = mediumMeta.severeClearance || 28;
-            let faceScore = clamp01((info.clearance - severe * 0.35) / Math.max(1, target - severe * 0.35));
-            if (info.wallClearance < 18) faceScore *= 0.86;
-            faceScore *= (1 - localDensity * 0.22);
-            faceScore *= mediumMeta.diffusionFactor || 0.9;
+            const clearanceScore = clamp01((info.clearance - severe * 0.20) / Math.max(1, target - severe * 0.20));
+            let faceScore = clamp01(
+                clearanceScore * 0.62
+                + (inletInfo.score || 0) * 0.30
+                + (1 - localDensity) * 0.08
+            );
+            if (info.wallClearance < 18) faceScore *= 0.90;
+
+            const risk = getAtmosphereFaceRiskType(faceScore, info, inletInfo, localDensity, mediumMeta);
+            if (risk.type === 'dead') {
+                faceScore *= risk.level === 'severe' ? 0.48 : 0.62;
+                deadFaceCount += 1;
+                if (risk.level === 'severe') severeDeadFaceCount += 1;
+            } else if (risk.type === 'weak') {
+                faceScore *= 0.88;
+                weakExchangeFaceCount += 1;
+            }
             faceScore = clamp01(faceScore);
 
             if (info.blocker && info.clearance < target) {
@@ -3384,37 +3651,75 @@ function calculateAtmosphereCoverageScores(furnace, mediumType = 'nitriding') {
                 existed.minClearance = Math.min(existed.minClearance, info.clearance);
                 blockerMap.set(info.blocker.id, existed);
             }
-            if (faceScore < 0.48 || info.clearance < severe) deadFaceCount += 1;
+            (inletInfo.blockers || []).forEach(blocker => {
+                if (!blocker) return;
+                const existed = pathBlockerMap.get(blocker.id) || { item: blocker, count: 0, minClearance: Infinity };
+                existed.count += 1;
+                existed.minClearance = Math.min(existed.minClearance, info.clearance);
+                pathBlockerMap.set(blocker.id, existed);
+            });
+
             totalScore += faceScore;
+            totalInletReachability += inletInfo.score || 0;
+            totalPathBlockers += inletInfo.blockerCount || 0;
             faceResults.push({
                 key: face.key,
                 label: face.label,
                 score: Math.round(faceScore * 100),
                 clearance: Math.round(info.clearance),
-                blockerName: info.blocker?.name || ''
+                blockerName: info.blocker?.name || '',
+                inletKey: inletInfo.inletKey,
+                inletLabel: getAtmosphereInletDirectionMeta(inletInfo.inletKey).shortLabel,
+                inletReachability: Math.round((inletInfo.score || 0) * 100),
+                pathBlockerCount: inletInfo.blockerCount || 0,
+                riskType: risk.type,
+                riskLevel: risk.level,
+                riskLabel: risk.label,
+                reason: risk.reason
             });
         });
 
         const score = clamp01(totalScore / Math.max(1, faces.length));
-        const blockers = [...blockerMap.values()].sort((a, b) => b.count - a.count || a.minClearance - b.minClearance);
-        const worstFace = [...faceResults].sort((a, b) => a.score - b.score)[0];
+        const blockers = [...blockerMap.values(), ...pathBlockerMap.values()]
+            .reduce((acc, cur) => {
+                if (!cur?.item?.id) return acc;
+                const existed = acc.get(cur.item.id) || { item: cur.item, count: 0, minClearance: Infinity };
+                existed.count += cur.count || 0;
+                existed.minClearance = Math.min(existed.minClearance, cur.minClearance || Infinity);
+                acc.set(cur.item.id, existed);
+                return acc;
+            }, new Map());
+        const blockerList = [...blockers.values()].sort((a, b) => b.count - a.count || a.minClearance - b.minClearance);
+        const worstFace = [...faceResults].sort((a, b) => {
+            const priority = { dead: 0, weak: 1, ok: 2 };
+            return (priority[a.riskType] ?? 2) - (priority[b.riskType] ?? 2) || a.score - b.score;
+        })[0];
+        const avgInletReachability = totalInletReachability / Math.max(1, faces.length);
         result.set(item.id, {
             item,
             score,
             coveragePercent: Math.round(score * 100),
             deadFaceCount,
+            trueDeadFaceCount: deadFaceCount,
+            severeDeadFaceCount,
+            weakExchangeFaceCount,
             localDensity,
+            inletReachability: avgInletReachability,
+            pathBlockerCount: totalPathBlockers,
             faceResults,
             worstFace,
-            blockers,
-            mediumType: mediumMeta.key
+            blockers: blockerList,
+            mediumType: mediumMeta.key,
+            riskType: deadFaceCount > 0 ? 'dead' : (weakExchangeFaceCount > 0 || score < 0.72 ? 'weak' : 'ok')
         });
 
         item.simulation = {
             ...(item.simulation || {}),
             atmosphereCoverageScore: Math.round(score * 100),
             atmosphereDeadFaceCount: deadFaceCount,
-            atmosphereBlockerCount: blockers.length,
+            atmosphereWeakExchangeFaceCount: weakExchangeFaceCount,
+            atmosphereInletReachability: Math.round(avgInletReachability * 100),
+            atmosphereBlockerCount: blockerList.length,
             atmosphereMediumType: mediumMeta.key
         };
     });
@@ -3426,27 +3731,74 @@ function calculateAtmosphereCoverageMetrics(furnace, scoreMap, mediumMeta) {
     const entries = [...scoreMap.values()];
     const avgScore = entries.length ? entries.reduce((s, v) => s + v.score, 0) / entries.length : 0;
     const minScore = entries.length ? Math.min(...entries.map(v => v.score)) : 0;
-    const deadCornerItems = entries.filter(v => v.score < 0.62 || v.deadFaceCount >= 2).length;
-    const severeDeadCornerItems = entries.filter(v => v.score < 0.44 || v.deadFaceCount >= 3).length;
+    const weakExchangeItems = entries.filter(v => (v.weakExchangeFaceCount || 0) > 0 || ((v.score || 0) < 0.72 && (v.deadFaceCount || 0) === 0)).length;
+    const deadCornerItems = entries.filter(v => (v.deadFaceCount || 0) > 0).length;
+    const severeDeadCornerItems = entries.filter(v => (v.severeDeadFaceCount || 0) > 0 || (v.deadFaceCount || 0) >= 2).length;
     const worst = [...entries].sort((a, b) => a.score - b.score)[0];
     const avgDensity = entries.length ? entries.reduce((s, v) => s + (v.localDensity || 0), 0) / entries.length : 0;
-    const coveredFaces = entries.reduce((s, v) => s + (v.faceResults || []).filter(f => f.score >= 65).length, 0);
+    const avgInletReachability = entries.length ? entries.reduce((s, v) => s + (v.inletReachability || 0), 0) / entries.length : 0;
+    const coveredFaces = entries.reduce((s, v) => s + (v.faceResults || []).filter(f => f.score >= 65 && f.riskType !== 'dead').length, 0);
     const totalFaces = entries.reduce((s, v) => s + (v.faceResults || []).length, 0) || 1;
-    const uniformity = Math.max(42, Math.round(96 - (1 - avgScore) * 42 - severeDeadCornerItems * 3.2 - avgDensity * 18));
+    const uniformity = Math.max(42, Math.round(96 - (1 - avgScore) * 36 - severeDeadCornerItems * 3.6 - weakExchangeItems * 0.18 - avgDensity * 12));
     const worstFaceLabel = worst?.worstFace?.label || '-';
     const worstBlocker = worst?.blockers?.[0]?.item?.name || '-';
 
     const modeCopy = getAtmosphereModeCopy(mediumMeta);
     const caseDepth = estimateCaseDepthRange(avgScore, mediumMeta.key);
     const carbonPotential = isCarbonAtmosphere(mediumMeta.key)
-        ? Math.round((0.72 + avgScore * 0.28 - avgDensity * 0.08) * 100) / 100
+        ? Math.round((0.72 + avgScore * 0.28 - avgDensity * 0.06 - Math.max(0, 0.72 - avgInletReachability) * 0.05) * 100) / 100
         : null;
-    const baseSuggestion = severeDeadCornerItems > 0
-        ? `存在明显${mediumMeta.key === 'carburizing' ? '碳势' : '气氛'}死角，建议优先复核 ${worst?.item?.name || '最低覆盖工件'} 的 ${worstFaceLabel}，增加相邻间距或调整到外圈通道。`
-        : (deadCornerItems > 0 ? '存在局部表面遮蔽，建议检查中心密集区、下表面贴靠和层间间距。' : '当前表面覆盖较均匀，未发现明显气氛死角高风险。');
+
+    const topRiskAreas = [...entries]
+        .filter(v => v && ((v.deadFaceCount || 0) > 0 || (v.weakExchangeFaceCount || 0) > 0 || (v.score || 0) < 0.72))
+        .sort((a, b) => {
+            const pa = (a.deadFaceCount || 0) > 0 ? 0 : 1;
+            const pb = (b.deadFaceCount || 0) > 0 ? 0 : 1;
+            return pa - pb || a.score - b.score || (b.pathBlockerCount || 0) - (a.pathBlockerCount || 0);
+        })
+        .slice(0, 3)
+        .map((entry, idx) => {
+            const isDead = (entry.deadFaceCount || 0) > 0;
+            const wf = entry.worstFace || {};
+            return {
+                rank: idx + 1,
+                itemName: entry.item?.name || '风险工件',
+                faceLabel: wf.label || '-',
+                score: Math.round((entry.score || 0) * 100),
+                blockerName: entry.blockers?.[0]?.item?.name || '-',
+                riskType: isDead ? 'dead' : 'weak',
+                riskTypeLabel: isDead ? '真实死角' : '低交换区',
+                inletLabel: wf.inletLabel || '-',
+                inletReachability: wf.inletReachability ?? Math.round((entry.inletReachability || 0) * 100),
+                reason: isDead
+                    ? (wf.reason || '表面间距过小或路径被连续遮挡，气氛难以进入')
+                    : (wf.reason || '入口路径较长或局部密集，属于气氛交换弱，不是封闭死角')
+            };
+        });
+    const primaryRisk = topRiskAreas[0] || null;
+    const primaryRiskReason = primaryRisk
+        ? `${primaryRisk.itemName} 的 ${primaryRisk.faceLabel} 为${primaryRisk.riskTypeLabel}，覆盖 ${primaryRisk.score}%；主要原因：${primaryRisk.reason}${primaryRisk.inletLabel && primaryRisk.inletLabel !== '-' ? `；最佳入口：${primaryRisk.inletLabel}` : ''}${primaryRisk.blockerName && primaryRisk.blockerName !== '-' ? `；邻近/路径遮蔽：${primaryRisk.blockerName}` : ''}。`
+        : '当前气氛覆盖较均匀，未发现真实死角或明显低交换区域。';
+    const primaryAdjustment = primaryRisk
+        ? (primaryRisk.riskType === 'dead'
+            ? (mediumMeta.key === 'carburizing'
+                ? '建议优先消除贴靠面，增加 15–25mm 间隙或移向外圈通道，避免碳势气氛无法刷新。'
+                : '建议优先检查贴靠面、下表面和搁板附近，打开局部间隙后再复核入口路径。')
+            : (mediumMeta.key === 'protective'
+                ? '该区域更像保护气氛交换慢，可通过增加入口方向、打开中心/下层通道或延长置换时间改善。'
+                : '该区域属于气氛交换弱，可优先调整入口方向或增加局部通道；若工艺时间足够，不一定等同于质量死角。'))
+        : '当前方案可作为基准方案，仅需在报告中保留气氛覆盖截图。';
+
+    const baseSuggestion = deadCornerItems > 0
+        ? `存在 ${deadCornerItems} 件真实气氛死角，建议优先复核 ${worst?.item?.name || '最低覆盖工件'} 的 ${worstFaceLabel}。`
+        : (weakExchangeItems > 0 ? `未发现明显真实死角，但有 ${weakExchangeItems} 件处于气氛交换弱区，可结合入口方向和工艺保温时间复核。` : '当前表面覆盖较均匀，未发现明显气氛覆盖风险。');
     const carbonSuggestion = mediumMeta.key === 'carburizing'
-        ? `${baseSuggestion} 渗碳模式下优先避免大面积贴靠，保证 CO/CH₄ 碳势气氛能进入中心层与下表面。`
+        ? `${baseSuggestion} 渗碳模式下重点区分“碳势交换慢”和“贴靠死角”，只有贴靠/小间隙才应判为高风险。`
         : baseSuggestion;
+
+    const inletDirections = getSelectedAtmosphereInletDirections(mediumMeta);
+    const inletDirectionLabel = getAtmosphereInletDirectionLabel(inletDirections);
+    const inletDirectionCompactLabel = getAtmosphereInletDirectionLabel(inletDirections, true);
 
     return {
         mode: 'atmosphere',
@@ -3460,6 +3812,7 @@ function calculateAtmosphereCoverageMetrics(furnace, scoreMap, mediumMeta) {
         modeName: modeCopy.modeName,
         coverageLabel: modeCopy.coverageLabel,
         minLabel: modeCopy.minLabel,
+        weakExchangeLabel: modeCopy.weakExchangeLabel || '气氛交换弱区',
         deadLabel: modeCopy.deadLabel,
         severeLabel: modeCopy.severeLabel,
         uniformityLabel: modeCopy.uniformityLabel,
@@ -3467,7 +3820,9 @@ function calculateAtmosphereCoverageMetrics(furnace, scoreMap, mediumMeta) {
         riskFaceLabel: modeCopy.riskFaceLabel,
         atmosphereCoverage: Math.round(avgScore * 100),
         minAtmosphereCoverage: Math.round(minScore * 100),
+        weakExchangeItemCount: weakExchangeItems,
         deadCornerItemCount: deadCornerItems,
+        trueDeadCornerItemCount: deadCornerItems,
         severeDeadCornerItemCount: severeDeadCornerItems,
         surfaceUniformityScore: uniformity,
         effectiveFaceRate: Math.round((coveredFaces / totalFaces) * 100),
@@ -3475,46 +3830,112 @@ function calculateAtmosphereCoverageMetrics(furnace, scoreMap, mediumMeta) {
         worstFaceLabel,
         worstBlocker,
         localDensityRate: Math.round(avgDensity * 100),
+        inletReachabilityRate: Math.round(avgInletReachability * 100),
         carbonPotential,
         estimatedCaseDepth: caseDepth ? `${caseDepth.min.toFixed(2)}–${caseDepth.max.toFixed(2)}mm` : null,
+        topRiskAreas,
+        primaryRiskReason,
+        primaryAdjustment,
+        inletDirections,
+        inletDirectionLabel,
+        inletDirectionCompactLabel,
+        inletModeLabel: inletDirections.length >= 4 ? '多面补给' : (inletDirections.length >= 2 ? '双向/多向补给' : '单侧补给'),
         suggestion: carbonSuggestion
     };
 }
 
-function buildAtmosphereFogField(furnace, scoreMap, mediumMeta) {
+function getAtmosphereInletPointForPosition(point, furnace, mediumMeta) {
     const fw = Number(furnace.w || 600);
     const fh = Number(furnace.h || 600);
     const fd = Number(furnace.d || 600);
-    const nx = Math.max(7, Math.min(11, Math.round(fw / 100)));
-    const ny = Math.max(4, Math.min(7, Math.round(fh / 150)));
-    const nz = Math.max(7, Math.min(11, Math.round(fd / 100)));
+    const y0 = THERMAL_BASE_Y;
+    const selectedKeys = getSelectedAtmosphereInletDirections(mediumMeta);
+    const candidateMap = {
+        'x-': { side: 'x-', d: Math.abs(point.x + fw / 2), p: new THREE.Vector3(-fw / 2, point.y, point.z) },
+        'x+': { side: 'x+', d: Math.abs(fw / 2 - point.x), p: new THREE.Vector3(fw / 2, point.y, point.z) },
+        'z-': { side: 'z-', d: Math.abs(point.z + fd / 2), p: new THREE.Vector3(point.x, point.y, -fd / 2) },
+        'z+': { side: 'z+', d: Math.abs(fd / 2 - point.z), p: new THREE.Vector3(point.x, point.y, fd / 2) },
+        'y+': { side: 'y+', d: Math.abs(y0 + fh - point.y) * 1.08, p: new THREE.Vector3(point.x, y0 + fh, point.z) },
+        'y-': { side: 'y-', d: Math.abs(point.y - y0) * 1.12, p: new THREE.Vector3(point.x, y0, point.z) }
+    };
+    const distances = selectedKeys.map(k => candidateMap[k]).filter(Boolean);
+    const chosen = (distances.length ? distances : Object.values(candidateMap)).sort((a, b) => a.d - b.d)[0];
+    const inlet = chosen.p.clone();
+    const wallJitter = Math.min(fw, fd) * 0.025;
+    inlet.x += (Math.random() - 0.5) * wallJitter;
+    inlet.y += (Math.random() - 0.5) * wallJitter;
+    inlet.z += (Math.random() - 0.5) * wallJitter;
+    inlet.x = Math.max(-fw / 2, Math.min(fw / 2, inlet.x));
+    inlet.y = Math.max(y0, Math.min(y0 + fh, inlet.y));
+    inlet.z = Math.max(-fd / 2, Math.min(fd / 2, inlet.z));
+    return inlet;
+}
+
+function getAtmosphereAnimationStage(progress = 1, mediumMeta = getAtmosphereMediumMeta('nitriding')) {
+    const p = clamp01(progress);
+    if (p < 0.32) return { key: 'fill', label: '气氛充入', desc: `${mediumMeta.activeSpecies} 从炉壁/入口边界进入装载空间` };
+    if (p < 0.72) return { key: 'diffuse', label: '浓度扩散', desc: '外圈先达到有效浓度，中心密集区逐步扩散' };
+    return { key: 'react', label: '表面反应', desc: '工件表面形成有效反应层，死角区域仍保持低覆盖' };
+}
+
+function buildAtmosphereFogField(furnace, scoreMap, mediumMeta, progress = 1) {
+    const fw = Number(furnace.w || 600);
+    const fh = Number(furnace.h || 600);
+    const fd = Number(furnace.d || 600);
+    const nx = Math.max(8, Math.min(13, Math.round(fw / 85)));
+    const ny = Math.max(5, Math.min(8, Math.round(fh / 125)));
+    const nz = Math.max(8, Math.min(13, Math.round(fd / 85)));
     const positions = [];
     const colors = [];
-    const jitter = Math.min(fw, fd) * 0.018;
+    const meta = [];
+    const jitter = Math.min(fw, fd) * 0.016;
+    const p = clamp01(progress);
 
     for (let ix = 0; ix < nx; ix++) {
-        const x = -fw / 2 + (nx === 1 ? 0.5 : ix / (nx - 1)) * fw;
+        const xNorm = nx === 1 ? 0.5 : ix / (nx - 1);
+        const x = -fw / 2 + xNorm * fw;
         for (let iy = 0; iy < ny; iy++) {
-            const y = THERMAL_BASE_Y + (ny === 1 ? 0.5 : iy / (ny - 1)) * fh;
+            const yNorm = ny === 1 ? 0.5 : iy / (ny - 1);
+            const y = THERMAL_BASE_Y + yNorm * fh;
             for (let iz = 0; iz < nz; iz++) {
-                const z = -fd / 2 + (nz === 1 ? 0.5 : iz / (nz - 1)) * fd;
+                const zNorm = nz === 1 ? 0.5 : iz / (nz - 1);
+                const z = -fd / 2 + zNorm * fd;
                 if (!isPointInsideThermalVolume(furnace, x, y, z)) continue;
                 const shadow = estimateShadowAndCoreLag(x, y, z, furnace);
-                const wallShape = getThermalShapeFactors(
-                    furnace,
-                    x, y, z,
-                    (x + fw / 2) / Math.max(1, fw),
-                    (y - THERMAL_BASE_Y) / Math.max(1, fh),
-                    (z + fd / 2) / Math.max(1, fd)
+                const wallShape = getThermalShapeFactors(furnace, x, y, z, xNorm, yNorm, zNorm);
+                const centerPenalty = clamp01(Math.sqrt((xNorm - 0.5) ** 2 + (zNorm - 0.5) ** 2) * -0.10 + 0.10);
+                const concentration = clamp01(
+                    0.88
+                    - shadow.nearMaterial * 0.42
+                    - shadow.shadow * 0.24
+                    + wallShape.wallFactor * 0.16
+                    - centerPenalty * 0.08
                 );
-                const concentration = clamp01(0.92 - shadow.nearMaterial * 0.44 - shadow.shadow * 0.26 + wallShape.wallFactor * 0.10);
-                const c = getAtmosphereCoverageColor(concentration, mediumMeta.key);
-                positions.push(
+                const densityScale = mediumMeta.particleDensityScale ?? 0.86;
+                const keepChance = clamp01(0.18 + concentration * 0.82) * densityScale;
+                if (Math.random() > keepChance) continue;
+                const base = new THREE.Vector3(
                     x + (Math.random() - 0.5) * jitter,
                     y + (Math.random() - 0.5) * jitter,
                     z + (Math.random() - 0.5) * jitter
                 );
+                const inlet = getAtmosphereInletPointForPosition(base, furnace, mediumMeta);
+                const phase = Math.random() * Math.PI * 2;
+                const delay = Math.random() * 0.20;
+                const fill = clamp01((p - delay) / Math.max(0.01, 1 - delay));
+                const ease = 1 - Math.pow(1 - fill, 3);
+                const pos = inlet.clone().lerp(base, ease);
+                const c = getAtmosphereCoverageColor(concentration * (0.42 + ease * 0.58), mediumMeta.key);
+                positions.push(pos.x, pos.y, pos.z);
                 colors.push(c.r, c.g, c.b);
+                meta.push({
+                    base: [base.x, base.y, base.z],
+                    inlet: [inlet.x, inlet.y, inlet.z],
+                    phase,
+                    delay,
+                    concentration,
+                    drift: 6 + (1 - concentration) * 18
+                });
             }
         }
     }
@@ -3522,42 +3943,134 @@ function buildAtmosphereFogField(furnace, scoreMap, mediumMeta) {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
     geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    geometry.userData.atmosphereMeta = meta;
+    const particleSize = Math.max(26, Math.min(62, Math.min(fw, fd) / (mediumMeta.visualTone === 'protective' ? 15 : 13)));
     const material = new THREE.PointsMaterial({
-        size: Math.max(34, Math.min(72, Math.min(fw, fd) / 12)),
+        size: particleSize,
         map: createThermalParticleTexture(),
         transparent: true,
-        opacity: mediumMeta.fogOpacity ?? 0.46,
+        opacity: (mediumMeta.fogOpacity ?? 0.46) * (0.30 + p * 0.70),
         vertexColors: true,
         depthWrite: false,
         depthTest: true,
         blending: THREE.AdditiveBlending
     });
+    material.userData = {
+        baseOpacity: mediumMeta.fogOpacity ?? 0.46,
+        baseSize: particleSize,
+        mediumType: mediumMeta.key
+    };
     const fog = new THREE.Points(geometry, material);
-    fog.name = 'atmosphereCoverageFogField';
+    fog.name = 'atmosphereConcentrationCloud';
     fog.renderOrder = 21;
-    fog.userData = { isAtmosphereFogField: true };
+    fog.userData = { isAtmosphereFogField: true, isAtmosphereConcentrationCloud: true };
     return fog;
+}
+
+
+function buildAtmosphereDiagnosticLabel(text, subText, position, options = {}) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 560;
+    canvas.height = 152;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const bg = options.bg || 'rgba(20, 9, 6, 0.80)';
+    const stroke = options.stroke || 'rgba(251, 146, 60, 0.86)';
+    const primary = options.primary || '#fff7ed';
+    const secondary = options.secondary || 'rgba(255, 237, 213, 0.86)';
+    ctx.fillStyle = bg;
+    roundRect(ctx, 14, 18, 532, 110, 24);
+    ctx.fill();
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.fillStyle = primary;
+    ctx.font = '800 32px sans-serif';
+    ctx.fillText(text, 36, 62);
+    ctx.fillStyle = secondary;
+    ctx.font = '500 22px sans-serif';
+    ctx.fillText(subText || '', 36, 98);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    if ('colorSpace' in texture && THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+    const material = new THREE.SpriteMaterial({ map: texture, transparent: true, opacity: 0.94, depthWrite: false, depthTest: false });
+    const sprite = new THREE.Sprite(material);
+    sprite.position.copy(position);
+    sprite.scale.set(options.width || 230, options.height || 62, 1);
+    sprite.renderOrder = options.renderOrder || 72;
+    sprite.userData = { isAtmosphereDiagnosticLabel: true };
+    return sprite;
 }
 
 function buildAtmosphereRiskMarkers(furnace, scoreMap) {
     const group = new THREE.Group();
-    group.name = 'atmosphereDeadCornerMarkers';
-    const sorted = [...scoreMap.values()].sort((a, b) => a.score - b.score).slice(0, 10);
-    sorted.forEach(entry => {
-        if (!entry || entry.score > 0.68 && entry.deadFaceCount < 2) return;
+    group.name = 'atmosphereRiskMarkersTop3';
+    const sorted = [...scoreMap.values()]
+        .filter(entry => entry && ((entry.deadFaceCount || 0) > 0 || (entry.weakExchangeFaceCount || 0) > 0 || entry.score <= 0.72))
+        .sort((a, b) => {
+            const pa = (a.deadFaceCount || 0) > 0 ? 0 : 1;
+            const pb = (b.deadFaceCount || 0) > 0 ? 0 : 1;
+            return pa - pb || a.score - b.score || (b.pathBlockerCount || 0) - (a.pathBlockerCount || 0);
+        })
+        .slice(0, 3);
+
+    sorted.forEach((entry, idx) => {
         const item = entry.item;
-        const geometry = new THREE.BoxGeometry((item.w || 1) + 18, (item.h || 1) + 18, (item.d || 1) + 18);
+        if (!item) return;
+        const center = getItemCenterWorld(item, furnace);
+        const isDead = (entry.deadFaceCount || 0) > 0;
+        const severe = (entry.severeDeadFaceCount || 0) > 0 || (entry.deadFaceCount || 0) >= 2;
+        const color = isDead ? (severe ? 0xef4444 : 0xf97316) : 0xfacc15;
+        const geometry = new THREE.BoxGeometry((item.w || 1) + 22, (item.h || 1) + 22, (item.d || 1) + 22);
         const edges = new THREE.EdgesGeometry(geometry);
         const mat = new THREE.LineBasicMaterial({
-            color: entry.score < 0.45 ? 0xef4444 : 0xf97316,
+            color,
             transparent: true,
-            opacity: entry.score < 0.45 ? 0.80 : 0.58,
+            opacity: isDead ? (severe ? 0.92 : 0.76) : 0.62,
             depthWrite: false
         });
         const marker = new THREE.LineSegments(edges, mat);
-        marker.position.copy(getItemCenterWorld(item, furnace));
-        marker.userData = { isAtmosphereRiskMarker: true, risk: 1 - entry.score };
+        marker.position.copy(center);
+        marker.renderOrder = 66;
+        marker.userData = { isAtmosphereRiskMarker: true, risk: 1 - entry.score, rank: idx + 1, riskType: isDead ? 'dead' : 'weak' };
         group.add(marker);
+
+        const planeAxis = entry.worstFace?.key?.[0] || 'z';
+        const planeGeo = planeAxis === 'y'
+            ? new THREE.PlaneGeometry((item.w || 1) + 28, (item.d || 1) + 28)
+            : (planeAxis === 'x'
+                ? new THREE.PlaneGeometry((item.d || 1) + 28, (item.h || 1) + 28)
+                : new THREE.PlaneGeometry((item.w || 1) + 28, (item.h || 1) + 28));
+        const planeMat = new THREE.MeshBasicMaterial({
+            color,
+            transparent: true,
+            opacity: isDead ? (severe ? 0.18 : 0.12) : 0.075,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending
+        });
+        const plane = new THREE.Mesh(planeGeo, planeMat);
+        plane.position.copy(center);
+        if (planeAxis === 'x') plane.rotation.y = Math.PI / 2;
+        if (planeAxis === 'y') plane.rotation.x = -Math.PI / 2;
+        plane.renderOrder = 65;
+        plane.userData = { isAtmosphereRiskMarker: true, isAtmosphereDeadCornerPatch: isDead, isAtmosphereWeakExchangePatch: !isDead, rank: idx + 1 };
+        group.add(plane);
+
+        const labelPos = center.clone().add(new THREE.Vector3(0, (item.h || 1) * 0.62 + 58 + idx * 18, 0));
+        const label = buildAtmosphereDiagnosticLabel(
+            `${isDead ? '真实死角' : '低交换区'} #${idx + 1}`,
+            `${entry.worstFace?.label || '风险表面'} · ${Math.round((entry.score || 0) * 100)}%`,
+            labelPos,
+            {
+                bg: isDead ? (severe ? 'rgba(69, 10, 10, 0.82)' : 'rgba(67, 20, 7, 0.80)') : 'rgba(63, 43, 8, 0.78)',
+                stroke: isDead ? (severe ? 'rgba(248, 113, 113, 0.9)' : 'rgba(251, 146, 60, 0.9)') : 'rgba(250, 204, 21, 0.86)',
+                width: isDead ? 210 : 218,
+                height: 58,
+                renderOrder: 74
+            }
+        );
+        group.add(label);
     });
     return group;
 }
@@ -3571,65 +4084,76 @@ function applyAtmosphereTintToItems(furnace, scoreMap, mediumMeta) {
         const entry = scoreMap.get(child.userData.itemId);
         const score = entry ? entry.score : 0.65;
         const tint = getAtmosphereCoverageColor(score, mediumMeta.key);
+        const protectiveMode = mediumMeta.key === 'protective';
         getMeshMaterials(child).forEach(mat => {
             if (!mat.color) return;
             saveOriginalMaterialIfNeeded(mat);
             if (carbonMode) {
                 const core = new THREE.Color(score > 0.62 ? 0x8a4b16 : 0x4a1710);
                 mat.color.copy(core.lerp(tint, 0.28 + score * 0.28));
+            } else if (protectiveMode) {
+                const base = new THREE.Color(0xbfd7e3);
+                mat.color.copy(base.lerp(tint, 0.34 + score * 0.18));
             } else {
                 mat.color.copy(tint);
             }
             if (mat.emissive) {
                 mat.emissive.copy(tint);
-                mat.emissive.multiplyScalar(carbonMode ? (score > 0.72 ? 0.72 : 0.42) : (score > 0.72 ? 0.52 : 0.28));
-                mat.emissiveIntensity = carbonMode ? (0.18 + score * 0.48) : (0.10 + score * 0.34);
+                mat.emissive.multiplyScalar(carbonMode ? (score > 0.72 ? 0.72 : 0.42) : (protectiveMode ? (score > 0.72 ? 0.38 : 0.20) : (score > 0.72 ? 0.52 : 0.28)));
+                mat.emissiveIntensity = carbonMode ? (0.18 + score * 0.48) : (protectiveMode ? (0.08 + score * 0.24) : (0.10 + score * 0.34));
             }
             mat.transparent = true;
-            mat.opacity = carbonMode ? (0.48 + score * 0.30) : (0.56 + score * 0.34);
+            mat.opacity = carbonMode ? (0.48 + score * 0.30) : (protectiveMode ? (0.50 + score * 0.24) : (0.56 + score * 0.34));
             mat.needsUpdate = true;
         });
     });
 }
 
-function buildAtmosphereSurfaceLayerVisual(furnace, scoreMap, mediumMeta) {
+function buildAtmosphereSurfaceLayerVisual(furnace, scoreMap, mediumMeta, progress = 1) {
     const group = new THREE.Group();
     group.name = 'atmosphereSurfaceReactionLayer';
-    if (!isCarbonAtmosphere(mediumMeta.key)) return group;
 
-    const entries = [...scoreMap.values()].sort((a, b) => b.score - a.score).slice(0, 80);
+    const entries = [...scoreMap.values()].sort((a, b) => b.score - a.score).slice(0, 90);
+    const p = clamp01(progress);
+    const carbonMode = isCarbonAtmosphere(mediumMeta.key);
     entries.forEach(entry => {
         const item = entry.item;
         if (!item) return;
         const score = clamp01(entry.score || 0);
-        const layerColor = getAtmosphereCoverageColor(Math.max(0.55, score), mediumMeta.key);
-        const pad = 4 + score * 8;
+        const reactionProgress = clamp01((p - 0.58 + score * 0.18) / 0.42);
+        const layerColor = getAtmosphereCoverageColor(Math.max(0.50, score), mediumMeta.key);
+        const pad = carbonMode ? (4 + score * 9) : (3 + score * 6);
         const geo = new THREE.BoxGeometry((item.w || 1) + pad, (item.h || 1) + pad, (item.d || 1) + pad);
+        const layerBoost = mediumMeta.surfaceLayerBoost ?? 1;
+        const baseOpacity = (carbonMode ? (0.062 + score * 0.13) : (0.048 + score * 0.095)) * layerBoost;
         const mat = new THREE.MeshBasicMaterial({
             color: layerColor,
             transparent: true,
-            opacity: 0.045 + score * 0.085,
+            opacity: baseOpacity * (0.18 + reactionProgress * 0.82),
             side: THREE.BackSide,
             depthWrite: false,
             blending: THREE.AdditiveBlending
         });
+        mat.userData = { baseOpacity, score, reactionDelay: 0.58 - score * 0.18 };
         const shell = new THREE.Mesh(geo, mat);
         shell.position.copy(getItemCenterWorld(item, furnace));
         shell.renderOrder = 31;
-        shell.userData = { isAtmosphereSurfaceLayer: true, itemId: item.id };
+        shell.userData = { isAtmosphereSurfaceLayer: true, itemId: item.id, score };
         group.add(shell);
 
         const edgeGeo = new THREE.EdgesGeometry(geo);
+        const edgeBaseOpacity = (carbonMode ? (0.24 + score * 0.55) : (0.20 + score * 0.42)) * layerBoost;
         const edgeMat = new THREE.LineBasicMaterial({
             color: mediumMeta.surfaceLayerColor || mediumMeta.colorHigh,
             transparent: true,
-            opacity: 0.16 + score * 0.42,
+            opacity: edgeBaseOpacity * (0.15 + reactionProgress * 0.85),
             depthWrite: false
         });
+        edgeMat.userData = { baseOpacity: edgeBaseOpacity, score, reactionDelay: 0.56 - score * 0.15 };
         const edge = new THREE.LineSegments(edgeGeo, edgeMat);
         edge.position.copy(shell.position);
         edge.renderOrder = 32;
-        edge.userData = { isAtmosphereSurfaceLayer: true, itemId: item.id };
+        edge.userData = { isAtmosphereSurfaceLayer: true, itemId: item.id, score };
         group.add(edge);
     });
     return group;
@@ -3642,48 +4166,206 @@ function buildAtmosphereBoundaryVisual(furnace, mediumMeta) {
     const fh = Number(furnace.h || 600);
     const fd = Number(furnace.d || 600);
     const y0 = THERMAL_BASE_Y;
+    const mainColor = mediumMeta.colorHigh;
+    const inletOpacity = mediumMeta.visualTone === 'protective' ? 0.055 : 0.085;
     const mat = new THREE.MeshBasicMaterial({
-        color: mediumMeta.colorHigh,
+        color: mainColor,
         transparent: true,
-        opacity: 0.055,
+        opacity: inletOpacity,
         side: THREE.DoubleSide,
         depthWrite: false,
         blending: THREE.AdditiveBlending
     });
+    const sideMat = mat.clone();
+    sideMat.opacity *= 0.45;
+
     const planes = [
-        { geo: new THREE.PlaneGeometry(fd, fh), pos: [-fw / 2, y0 + fh / 2, 0], rot: [0, Math.PI / 2, 0] },
-        { geo: new THREE.PlaneGeometry(fd, fh), pos: [fw / 2, y0 + fh / 2, 0], rot: [0, Math.PI / 2, 0] },
-        { geo: new THREE.PlaneGeometry(fw, fh), pos: [0, y0 + fh / 2, -fd / 2], rot: [0, 0, 0] },
-        { geo: new THREE.PlaneGeometry(fw, fh), pos: [0, y0 + fh / 2, fd / 2], rot: [0, 0, 0] },
-        { geo: new THREE.PlaneGeometry(fw, fd), pos: [0, y0 + fh, 0], rot: [-Math.PI / 2, 0, 0] }
+        { key: 'x-', geo: new THREE.PlaneGeometry(fd, fh), pos: [-fw / 2, y0 + fh / 2, 0], rot: [0, Math.PI / 2, 0], normal: new THREE.Vector3(1, 0, 0), label: '左侧入口' },
+        { key: 'x+', geo: new THREE.PlaneGeometry(fd, fh), pos: [fw / 2, y0 + fh / 2, 0], rot: [0, Math.PI / 2, 0], normal: new THREE.Vector3(-1, 0, 0), label: '右侧入口' },
+        { key: 'z-', geo: new THREE.PlaneGeometry(fw, fh), pos: [0, y0 + fh / 2, -fd / 2], rot: [0, 0, 0], normal: new THREE.Vector3(0, 0, 1), label: '前侧入口' },
+        { key: 'z+', geo: new THREE.PlaneGeometry(fw, fh), pos: [0, y0 + fh / 2, fd / 2], rot: [0, 0, 0], normal: new THREE.Vector3(0, 0, -1), label: '后侧入口' },
+        { key: 'y+', geo: new THREE.PlaneGeometry(fw, fd), pos: [0, y0 + fh, 0], rot: [-Math.PI / 2, 0, 0], normal: new THREE.Vector3(0, -1, 0), label: '顶部补给' },
+        { key: 'y-', geo: new THREE.PlaneGeometry(fw, fd), pos: [0, y0, 0], rot: [-Math.PI / 2, 0, 0], normal: new THREE.Vector3(0, 1, 0), label: '底部补给' }
     ];
+
+    const primaryKeys = getSelectedAtmosphereInletDirections(mediumMeta);
+
     planes.forEach(p => {
-        const mesh = new THREE.Mesh(p.geo, mat.clone());
+        const isPrimary = primaryKeys.includes(p.key);
+        const mesh = new THREE.Mesh(p.geo, isPrimary ? mat.clone() : sideMat.clone());
         mesh.position.set(p.pos[0], p.pos[1], p.pos[2]);
         mesh.rotation.set(p.rot[0], p.rot[1], p.rot[2]);
         mesh.renderOrder = 8;
+        mesh.userData = { isAtmosphereBoundary: true, side: p.key, isPrimaryInlet: isPrimary };
         group.add(mesh);
     });
+
+    const arrowLen = Math.max(90, Math.min(190, Math.max(fw, fh, fd) * 0.16));
+    const arrowColor = mediumMeta.surfaceLayerColor || mediumMeta.colorHigh;
+    const arrowOrigins = [];
+    primaryKeys.forEach(key => {
+        if (key === 'x-') arrowOrigins.push(new THREE.Vector3(-fw / 2, y0 + fh * 0.52, -fd * 0.22), new THREE.Vector3(-fw / 2, y0 + fh * 0.35, fd * 0.22));
+        if (key === 'x+') arrowOrigins.push(new THREE.Vector3(fw / 2, y0 + fh * 0.52, fd * 0.22), new THREE.Vector3(fw / 2, y0 + fh * 0.35, -fd * 0.22));
+        if (key === 'z-') arrowOrigins.push(new THREE.Vector3(-fw * 0.22, y0 + fh * 0.66, -fd / 2), new THREE.Vector3(fw * 0.22, y0 + fh * 0.42, -fd / 2));
+        if (key === 'z+') arrowOrigins.push(new THREE.Vector3(fw * 0.22, y0 + fh * 0.66, fd / 2), new THREE.Vector3(-fw * 0.22, y0 + fh * 0.42, fd / 2));
+        if (key === 'y+') arrowOrigins.push(new THREE.Vector3(-fw * 0.24, y0 + fh, 0), new THREE.Vector3(fw * 0.24, y0 + fh, 0));
+        if (key === 'y-') arrowOrigins.push(new THREE.Vector3(-fw * 0.24, y0, 0), new THREE.Vector3(fw * 0.24, y0, 0));
+    });
+    arrowOrigins.slice(0, mediumMeta.visualTone === 'protective' ? 8 : 6).forEach(origin => {
+        const dir = new THREE.Vector3(-origin.x * 0.65, (y0 + fh * 0.50) - origin.y, -origin.z * 0.65).normalize();
+        if (dir.lengthSq() < 0.001) dir.set(0, -1, 0);
+        const arrow = new THREE.ArrowHelper(dir, origin, arrowLen, arrowColor, arrowLen * 0.24, arrowLen * 0.12);
+        arrow.renderOrder = 40;
+        arrow.userData = { isAtmosphereBoundary: true, isAtmosphereInletArrow: true };
+        group.add(arrow);
+    });
+
+    const label = buildAtmosphereDiagnosticLabel(
+        '气氛入口 / 扩散方向',
+        `${mediumMeta.activeSpecies} · ${getAtmosphereInletDirectionLabel(primaryKeys, true)}`,
+        new THREE.Vector3(-fw * 0.42, y0 + fh + 70, -fd * 0.42),
+        {
+            bg: 'rgba(6, 24, 28, 0.72)',
+            stroke: `rgba(${new THREE.Color(arrowColor).r * 255}, ${new THREE.Color(arrowColor).g * 255}, ${new THREE.Color(arrowColor).b * 255}, 0.78)`,
+            primary: '#ecfeff',
+            secondary: 'rgba(207, 250, 254, 0.86)',
+            width: 250,
+            height: 64,
+            renderOrder: 75
+        }
+    );
+    group.add(label);
     return group;
+}
+
+function updateAtmosphereConcentrationCloud(now, progress = 1) {
+    const cloud = thermalSimRuntime.pointCloud;
+    if (!cloud || !cloud.geometry || !cloud.geometry.userData.atmosphereMeta) return;
+    const meta = cloud.geometry.userData.atmosphereMeta || [];
+    const posAttr = cloud.geometry.getAttribute('position');
+    const colorAttr = cloud.geometry.getAttribute('color');
+    const mediumType = thermalSimRuntime.selectedAtmosphereMediumType || cloud.material?.userData?.mediumType || 'nitriding';
+    const p = clamp01(progress);
+    const time = now * 0.001;
+    for (let i = 0; i < meta.length; i++) {
+        const m = meta[i];
+        const delay = typeof m.delay === 'number' ? m.delay : 0;
+        const fill = clamp01((p - delay) / Math.max(0.01, 1 - delay));
+        const ease = 1 - Math.pow(1 - fill, 3);
+        const inlet = m.inlet || [0, 0, 0];
+        const base = m.base || [0, 0, 0];
+        const drift = (m.drift || 10) * (0.35 + ease * 0.65);
+        const phase = m.phase || 0;
+        const x = inlet[0] + (base[0] - inlet[0]) * ease + Math.sin(time * 0.75 + phase) * drift * 0.45;
+        const y = inlet[1] + (base[1] - inlet[1]) * ease + Math.sin(time * 0.55 + phase * 1.31) * drift * 0.30;
+        const z = inlet[2] + (base[2] - inlet[2]) * ease + Math.cos(time * 0.70 + phase * 0.77) * drift * 0.45;
+        posAttr.setXYZ(i, x, y, z);
+        if (colorAttr) {
+            const concentration = clamp01((m.concentration || 0.7) * (0.35 + ease * 0.65));
+            const c = getAtmosphereCoverageColor(concentration, mediumType);
+            colorAttr.setXYZ(i, c.r, c.g, c.b);
+        }
+    }
+    posAttr.needsUpdate = true;
+    if (colorAttr) colorAttr.needsUpdate = true;
+    if (cloud.material) {
+        const baseOpacity = cloud.material.userData?.baseOpacity ?? 0.46;
+        const baseSize = cloud.material.userData?.baseSize || cloud.material.size || 42;
+        cloud.material.opacity = baseOpacity * (0.28 + p * 0.72) * (0.92 + Math.sin(time * 1.4) * 0.08);
+        cloud.material.size = baseSize * (0.82 + p * 0.20 + Math.sin(time * 1.2) * 0.025);
+        cloud.material.needsUpdate = true;
+    }
+}
+
+function updateAtmosphereSurfaceReactionLayer(now, progress = 1) {
+    const group = thermalSimRuntime.atmosphereSurfaceGroup;
+    if (!group) return;
+    const p = clamp01(progress);
+    const pulse = 0.88 + (Math.sin(now * 0.003) + 1) * 0.06;
+    group.traverse(child => {
+        if (!child.material || !child.userData?.isAtmosphereSurfaceLayer) return;
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        materials.forEach(mat => {
+            const baseOpacity = mat.userData?.baseOpacity ?? mat.opacity ?? 0.2;
+            const delay = mat.userData?.reactionDelay ?? 0.55;
+            const reaction = clamp01((p - delay) / Math.max(0.01, 1 - delay));
+            mat.opacity = baseOpacity * (0.14 + reaction * 0.86) * pulse;
+            mat.needsUpdate = true;
+        });
+    });
+}
+
+function updateAtmosphereCoverageAnimation(now) {
+    if (thermalSimRuntime.activeMode !== 'atmosphere') return;
+    if (thermalSimRuntime.isPlaying && !thermalSimRuntime.paused) {
+        const elapsed = now - (thermalSimRuntime.atmosphereAnimationStartedAt || thermalSimRuntime.startedAt || now);
+        const duration = thermalSimRuntime.durationMs || 8500;
+        thermalSimRuntime.progress = clamp01(elapsed / duration);
+        if (thermalSimRuntime.progress >= 1) {
+            thermalSimRuntime.isPlaying = false;
+            thermalSimRuntime.paused = false;
+        }
+    }
+    const progress = typeof thermalSimRuntime.progress === 'number' ? thermalSimRuntime.progress : 1;
+
+    // UX V2.3：气氛动画恢复较顺滑的视觉，但限制到约 30fps；UI 回调限制到约 180ms。
+    const shouldUpdateVisual = !thermalSimRuntime.lastAtmosphereVisualUpdateAt ||
+        now - thermalSimRuntime.lastAtmosphereVisualUpdateAt >= 33 ||
+        progress >= 1 ||
+        !thermalSimRuntime.isPlaying;
+    if (shouldUpdateVisual) {
+        thermalSimRuntime.lastAtmosphereVisualUpdateAt = now;
+        updateAtmosphereConcentrationCloud(now, progress);
+        updateAtmosphereSurfaceReactionLayer(now, progress);
+    }
+
+    if (thermalSimRuntime.metrics) {
+        const mediumMeta = getAtmosphereMediumMeta(thermalSimRuntime.selectedAtmosphereMediumType || 'nitriding');
+        const stage = getAtmosphereAnimationStage(progress, mediumMeta);
+        thermalSimRuntime.metrics.animationPlaying = !!thermalSimRuntime.isPlaying && !thermalSimRuntime.paused;
+        thermalSimRuntime.metrics.progress = Math.round(progress * 100);
+        thermalSimRuntime.metrics.atmosphereStageLabel = stage.label;
+        thermalSimRuntime.metrics.atmosphereStageDesc = stage.desc;
+        const shouldUpdateUi = !thermalSimRuntime.lastAtmosphereUiUpdateAt ||
+            now - thermalSimRuntime.lastAtmosphereUiUpdateAt >= 180 ||
+            progress >= 1 ||
+            !thermalSimRuntime.isPlaying;
+        if (shouldUpdateUi && thermalSimRuntime.isPlaying && !thermalSimRuntime.paused && typeof thermalSimRuntime.onUpdate === 'function') {
+            thermalSimRuntime.lastAtmosphereUiUpdateAt = now;
+            thermalSimRuntime.onUpdate(thermalSimRuntime.metrics);
+        }
+        if (!thermalSimRuntime.isPlaying && progress >= 1 && typeof thermalSimRuntime.onFinish === 'function') {
+            const finish = thermalSimRuntime.onFinish;
+            thermalSimRuntime.onFinish = null;
+            finish(thermalSimRuntime.metrics);
+        }
+    }
 }
 
 export function renderAtmosphereCoverageSimulation(options = {}) {
     const furnace = getCurrentThermalFurnace();
     if (!furnace) return null;
 
+    const wasAtmosphere = thermalSimRuntime.activeMode === 'atmosphere';
+    const keepPlaying = !!options.keepPlaying && wasAtmosphere && thermalSimRuntime.isPlaying && !thermalSimRuntime.paused;
+    const previousProgress = wasAtmosphere && typeof thermalSimRuntime.progress === 'number' ? thermalSimRuntime.progress : 1;
+    const progress = typeof options.progress === 'number' ? clamp01(options.progress) : (keepPlaying ? previousProgress : 1);
+
     clearThermalGroupChildren();
     restoreThermalItemMaterials();
     setThermalSceneTheme(true, 'atmosphere');
 
     const mediumMeta = getAtmosphereMediumMeta(options.mediumType || thermalSimRuntime.selectedAtmosphereMediumType || 'nitriding');
+    const inletDirections = normalizeAtmosphereInletDirections(options.inletDirections || thermalSimRuntime.selectedAtmosphereInletDirections, mediumMeta);
+    thermalSimRuntime.selectedAtmosphereInletDirections = inletDirections;
     if (scene && mediumMeta.backgroundColor) {
         scene.background = new THREE.Color(mediumMeta.backgroundColor);
     }
     const { scores } = calculateAtmosphereCoverageScores(furnace, mediumMeta.key);
     const group = ensureThermalSimulationGroup();
     const boundary = buildAtmosphereBoundaryVisual(furnace, mediumMeta);
-    const fog = buildAtmosphereFogField(furnace, scores, mediumMeta);
-    const surfaceLayer = buildAtmosphereSurfaceLayerVisual(furnace, scores, mediumMeta);
+    const fog = buildAtmosphereFogField(furnace, scores, mediumMeta, progress);
+    const surfaceLayer = buildAtmosphereSurfaceLayerVisual(furnace, scores, mediumMeta, progress);
     const risks = buildAtmosphereRiskMarkers(furnace, scores);
     const ringBoundary = buildRingThermalBoundary(furnace);
 
@@ -3698,26 +4380,114 @@ export function renderAtmosphereCoverageSimulation(options = {}) {
 
     thermalSimRuntime.visible = true;
     thermalSimRuntime.activeMode = 'atmosphere';
-    thermalSimRuntime.isPlaying = false;
+    thermalSimRuntime.isPlaying = keepPlaying;
     thermalSimRuntime.paused = false;
-    thermalSimRuntime.progress = 0;
+    thermalSimRuntime.progress = progress;
+    thermalSimRuntime.durationMs = options.durationMs || thermalSimRuntime.durationMs || 8500;
     thermalSimRuntime.pointCloud = fog;
     thermalSimRuntime.sourceGroup = boundary;
     thermalSimRuntime.riskGroup = risks;
+    thermalSimRuntime.atmosphereSurfaceGroup = surfaceLayer;
     thermalSimRuntime.atmosphereScores = scores;
     thermalSimRuntime.selectedAtmosphereMediumType = mediumMeta.key;
+    thermalSimRuntime.selectedAtmosphereInletDirections = inletDirections;
     thermalSimRuntime.selectedRadiationItemId = null;
     thermalSimRuntime.selectedRadiationEntry = null;
     thermalSimRuntime.selectedRadiationBatch = null;
     thermalSimRuntime.selectedRadiationSection = null;
     thermalSimRuntime.metrics = calculateAtmosphereCoverageMetrics(furnace, scores, mediumMeta);
+    const stage = getAtmosphereAnimationStage(progress, mediumMeta);
+    thermalSimRuntime.metrics.progress = Math.round(progress * 100);
+    thermalSimRuntime.metrics.animationPlaying = keepPlaying;
+    thermalSimRuntime.metrics.atmosphereStageLabel = stage.label;
+    thermalSimRuntime.metrics.atmosphereStageDesc = stage.desc;
     return thermalSimRuntime.metrics;
 }
 
 export function setAtmosphereMediumType(mediumType = 'nitriding') {
     const meta = getAtmosphereMediumMeta(mediumType);
     thermalSimRuntime.selectedAtmosphereMediumType = meta.key;
-    return renderAtmosphereCoverageSimulation({ mediumType: meta.key });
+    return renderAtmosphereCoverageSimulation({ mediumType: meta.key, progress: 1 });
+}
+
+export function setAtmosphereInletDirections(directions = null) {
+    const mediumMeta = getAtmosphereMediumMeta(thermalSimRuntime.selectedAtmosphereMediumType || 'nitriding');
+    thermalSimRuntime.selectedAtmosphereInletDirections = normalizeAtmosphereInletDirections(directions, mediumMeta);
+    return renderAtmosphereCoverageSimulation({
+        mediumType: mediumMeta.key,
+        inletDirections: thermalSimRuntime.selectedAtmosphereInletDirections,
+        progress: thermalSimRuntime.activeMode === 'atmosphere' ? (thermalSimRuntime.progress || 1) : 1,
+        keepPlaying: thermalSimRuntime.isPlaying && !thermalSimRuntime.paused
+    });
+}
+
+export function toggleAtmosphereInletDirection(directionKey = 'z-') {
+    const mediumMeta = getAtmosphereMediumMeta(thermalSimRuntime.selectedAtmosphereMediumType || 'nitriding');
+    const key = getAtmosphereInletDirectionMeta(directionKey).key;
+    const current = getSelectedAtmosphereInletDirections(mediumMeta);
+    let next = current.includes(key) ? current.filter(k => k !== key) : [...current, key];
+    if (!next.length) next = [key];
+    thermalSimRuntime.selectedAtmosphereInletDirections = normalizeAtmosphereInletDirections(next, mediumMeta);
+    return renderAtmosphereCoverageSimulation({
+        mediumType: mediumMeta.key,
+        inletDirections: thermalSimRuntime.selectedAtmosphereInletDirections,
+        progress: thermalSimRuntime.activeMode === 'atmosphere' ? (thermalSimRuntime.progress || 1) : 1,
+        keepPlaying: thermalSimRuntime.isPlaying && !thermalSimRuntime.paused
+    });
+}
+
+export function resetAtmosphereInletDirections() {
+    const mediumMeta = getAtmosphereMediumMeta(thermalSimRuntime.selectedAtmosphereMediumType || 'nitriding');
+    thermalSimRuntime.selectedAtmosphereInletDirections = getDefaultAtmosphereInletsForMedium(mediumMeta);
+    return renderAtmosphereCoverageSimulation({ mediumType: mediumMeta.key, inletDirections: thermalSimRuntime.selectedAtmosphereInletDirections, progress: 1 });
+}
+
+
+export function playAtmosphereCoverageAnimation(options = {}) {
+    const furnace = getCurrentThermalFurnace();
+    if (!furnace) return null;
+    if (thermalSimRuntime.activeMode !== 'atmosphere') {
+        renderAtmosphereCoverageSimulation({ mediumType: thermalSimRuntime.selectedAtmosphereMediumType || 'nitriding', progress: 0 });
+    }
+    const duration = options.durationMs || thermalSimRuntime.durationMs || 8500;
+    const startProgress = typeof options.startProgress === 'number'
+        ? clamp01(options.startProgress)
+        : (thermalSimRuntime.activeMode === 'atmosphere' && thermalSimRuntime.paused ? clamp01(thermalSimRuntime.progress || 0) : 0);
+    thermalSimRuntime.activeMode = 'atmosphere';
+    thermalSimRuntime.visible = true;
+    thermalSimRuntime.isPlaying = true;
+    thermalSimRuntime.paused = false;
+    thermalSimRuntime.progress = startProgress;
+    thermalSimRuntime.durationMs = duration;
+    thermalSimRuntime.atmosphereAnimationStartedAt = performance.now() - startProgress * duration;
+    thermalSimRuntime.lastAtmosphereVisualUpdateAt = 0;
+    thermalSimRuntime.lastAtmosphereUiUpdateAt = 0;
+    thermalSimRuntime.onUpdate = typeof options.onUpdate === 'function' ? options.onUpdate : thermalSimRuntime.onUpdate;
+    thermalSimRuntime.onFinish = typeof options.onFinish === 'function' ? options.onFinish : thermalSimRuntime.onFinish;
+    updateAtmosphereCoverageAnimation(performance.now());
+    return thermalSimRuntime.metrics;
+}
+
+export function pauseAtmosphereCoverageAnimation() {
+    if (thermalSimRuntime.activeMode !== 'atmosphere') return thermalSimRuntime.metrics;
+    thermalSimRuntime.paused = true;
+    thermalSimRuntime.isPlaying = false;
+    if (thermalSimRuntime.metrics) {
+        thermalSimRuntime.metrics.animationPlaying = false;
+        thermalSimRuntime.metrics.progress = Math.round((thermalSimRuntime.progress || 0) * 100);
+    }
+    return thermalSimRuntime.metrics;
+}
+
+export function resetAtmosphereCoverageAnimation() {
+    if (thermalSimRuntime.activeMode !== 'atmosphere') {
+        return renderAtmosphereCoverageSimulation({ mediumType: thermalSimRuntime.selectedAtmosphereMediumType || 'nitriding', progress: 0 });
+    }
+    thermalSimRuntime.isPlaying = false;
+    thermalSimRuntime.paused = false;
+    thermalSimRuntime.progress = 0;
+    updateAtmosphereCoverageAnimation(performance.now());
+    return thermalSimRuntime.metrics;
 }
 
 export function getAtmosphereCoverageRuntime() {
@@ -3728,7 +4498,10 @@ export function getAtmosphereCoverageRuntime() {
         scores: thermalSimRuntime.atmosphereScores,
         mediumType: meta.key,
         mediumMeta: meta,
-        progress: thermalSimRuntime.activeMode === 'atmosphere' ? thermalSimRuntime.progress : 0
+        inletDirections: getSelectedAtmosphereInletDirections(meta),
+        inletDirectionLabel: getAtmosphereInletDirectionLabel(getSelectedAtmosphereInletDirections(meta)),
+        progress: thermalSimRuntime.activeMode === 'atmosphere' ? thermalSimRuntime.progress : 0,
+        animationPlaying: thermalSimRuntime.activeMode === 'atmosphere' ? !!thermalSimRuntime.isPlaying && !thermalSimRuntime.paused : false
     };
 }
 
@@ -4279,6 +5052,7 @@ export function playVacuumQuenchThermalSimulation(options = {}) {
     thermalSimRuntime.paused = false;
     thermalSimRuntime.durationMs = options.durationMs || thermalSimRuntime.durationMs || 9000;
     thermalSimRuntime.startedAt = performance.now() - startProgress * thermalSimRuntime.durationMs;
+    thermalSimRuntime.lastThermalHeavyUpdateAt = 0;
     thermalSimRuntime.onUpdate = typeof options.onUpdate === 'function' ? options.onUpdate : thermalSimRuntime.onUpdate;
     thermalSimRuntime.onFinish = typeof options.onFinish === 'function' ? options.onFinish : thermalSimRuntime.onFinish;
     if (thermalSimRuntime.onUpdate) thermalSimRuntime.onUpdate(initialMetrics);
@@ -4414,12 +5188,16 @@ function updateThermalSimulationFrame(now) {
         const progress = clamp01(elapsed / thermalSimRuntime.durationMs);
         thermalSimRuntime.progress = progress;
         const furnace = getCurrentThermalFurnace();
-        if (furnace) {
+        const shouldHeavyUpdate = !thermalSimRuntime.lastThermalHeavyUpdateAt ||
+            now - thermalSimRuntime.lastThermalHeavyUpdateAt >= 220 ||
+            progress >= 1;
+        if (furnace && shouldHeavyUpdate) {
+            thermalSimRuntime.lastThermalHeavyUpdateAt = now;
             updateThermalHeatmapField(furnace, progress);
             thermalSimRuntime.metrics = calculateThermalMetrics(furnace, progress);
             applyThermalTintToItems(furnace, progress);
+            if (thermalSimRuntime.onUpdate && thermalSimRuntime.metrics) thermalSimRuntime.onUpdate(thermalSimRuntime.metrics);
         }
-        if (thermalSimRuntime.onUpdate && thermalSimRuntime.metrics) thermalSimRuntime.onUpdate(thermalSimRuntime.metrics);
         if (progress >= 1) {
             thermalSimRuntime.isPlaying = false;
             thermalSimRuntime.paused = false;
@@ -4433,6 +5211,10 @@ function updateThermalSimulationFrame(now) {
             thermalSimRuntime.metrics.animationPlaying = !!thermalSimRuntime.isPlaying && !thermalSimRuntime.paused;
             thermalSimRuntime.metrics.progress = Math.round((thermalSimRuntime.progress || 0) * 100);
         }
+    }
+
+    if (thermalSimRuntime.activeMode === 'atmosphere') {
+        updateAtmosphereCoverageAnimation(now);
     }
 
     updateThermalRayPulse(now);
@@ -5828,7 +6610,7 @@ export function renderSingleFurnace(index, filterMaterialName) {
         } else if (thermalSimRuntime.activeMode === 'airflow') {
             renderAirflowCoolingSimulation({ directionKeys: thermalSimRuntime.selectedAirflowDirections || thermalSimRuntime.selectedAirflowDirection || 'z+', keepPlaying: thermalSimRuntime.isPlaying && !thermalSimRuntime.paused });
         } else if (thermalSimRuntime.activeMode === 'atmosphere') {
-            renderAtmosphereCoverageSimulation({ mediumType: thermalSimRuntime.selectedAtmosphereMediumType || 'nitriding' });
+            renderAtmosphereCoverageSimulation({ mediumType: thermalSimRuntime.selectedAtmosphereMediumType || 'nitriding', keepPlaying: thermalSimRuntime.isPlaying && !thermalSimRuntime.paused });
         } else {
             renderVacuumQuenchThermalSimulation(thermalSimRuntime.progress || 0.12);
         }
