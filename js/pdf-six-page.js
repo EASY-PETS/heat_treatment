@@ -1,5 +1,5 @@
 /**
- * pdf-six-page.js - PDF V2.7 简洁细线框现场摆料施工单模板
+ * pdf-six-page.js - PDF V2.8 现场试用小修版施工单模板
  *
  * 设计目标：
  * 1. A4 横版专用模板，不再把竖版内容压缩到横版；
@@ -12,7 +12,8 @@
  * 8. V2.5 修复：按参考效果图重构步骤页空间比例；立放圆盘按侧放足迹绘制为长胶囊/竖向圆盘，不再误画成平放圆。
  * 9. V2.6 修复：步骤页改为“纵向信息栏 + 最大化主图 + 底部统一状态条”，删除主图周围重复信息。
  * 10. V2.7 修复：去除 LEGO 文案，改为网站一致的蓝白细线框；重排封面，避免 KPI 与任务总览/现场确认重叠。
- * 11. 保持旧入口 generateSixPagePDF(selectedIds) 不变。
+ * 11. V2.8 小修：KPI 主次分级；环形工装强制正投影；小件编号自动简化；摆放要求按工装类型变化；增加现场微调记录。
+ * 12. 保持旧入口 generateSixPagePDF(selectedIds) 不变。
  *
  * 依赖：html2canvas + jsPDF。furnace.html 需要引入：
  * - https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js
@@ -508,31 +509,33 @@ function isSideStandingCylinder(item) {
 }
 
 function getItemFootprint(item) {
+    // V2.8：优先使用算法输出的 PDF/最终落位足迹字段。
+    // 这些字段一旦存在，就不再由 PDF 端猜测圆柱姿态。
+    const explicitW = Number(item?.pdfFootprintW ?? item?.footprintW ?? item?.packedW ?? item?.placedW ?? item?.actualW);
+    const explicitD = Number(item?.pdfFootprintD ?? item?.footprintD ?? item?.packedD ?? item?.placedD ?? item?.actualD);
+    if (Number.isFinite(explicitW) && explicitW > 0 && Number.isFinite(explicitD) && explicitD > 0) {
+        return { w: explicitW, d: explicitD };
+    }
+
     // PDF 俯视图必须使用装炉算法最终落位后的 X/Z 足迹，不能把圆柱/圆盘强制画成等直径圆。
     // 对“立放/侧放圆盘”，3D 场景中 CylinderGeometry 的半径来自 item.h，轴向厚度来自 item.w。
     // 因此俯视图足迹应为 X = item.w（厚度/轴向），Z = item.h（直径），不能继续使用 item.d。
     if (isSideStandingCylinder(item)) {
-        const w = Number(item?.footprintW ?? item?.packedW ?? item?.placedW ?? item?.actualW ?? item?.w);
-        const d = Number(item?.footprintD ?? item?.packedD ?? item?.placedD ?? item?.actualD ?? item?.h ?? item?.d);
-        return { w: Math.max(1, Number.isFinite(w) ? w : 1), d: Math.max(1, Number.isFinite(d) ? d : 1) };
+        const axis = String(item?.pdfRotationAxis || item?.rotationAxis || '').toLowerCase();
+        const thickness = Number(item?.thickness ?? item?.w ?? item?.d ?? 1);
+        const dia = Number(item?.diameter ?? Math.max(toNumber(item?.h), toNumber(item?.w), toNumber(item?.d)));
+        if (axis === 'z') return { w: Math.max(1, dia), d: Math.max(1, thickness) };
+        return { w: Math.max(1, thickness), d: Math.max(1, dia) };
     }
 
-    const wCandidates = [
-        item?.footprintW, item?.packedW, item?.placedW, item?.actualW,
-        item?.layoutW, item?.drawW, item?.baseW, item?.orientedW, item?.w
-    ];
-    const dCandidates = [
-        item?.footprintD, item?.packedD, item?.placedD, item?.actualD,
-        item?.layoutD, item?.drawD, item?.baseD, item?.orientedD, item?.d
-    ];
+    const wCandidates = [item?.layoutW, item?.drawW, item?.baseW, item?.orientedW, item?.w];
+    const dCandidates = [item?.layoutD, item?.drawD, item?.baseD, item?.orientedD, item?.d];
     let w = wCandidates.map(v => Number(v)).find(v => Number.isFinite(v) && v > 0) || 1;
     let d = dCandidates.map(v => Number(v)).find(v => Number.isFinite(v) && v > 0) || 1;
 
     const rotation = Number(item?.rotation ?? item?.rotationY ?? item?.angle ?? 0);
     const rotated = item?.rotated === true || item?.isRotated === true || Math.abs(rotation % 180) === 90;
-    if (rotated && !item?.footprintW && !item?.packedW && !item?.placedW && !item?.actualW) {
-        [w, d] = [d, w];
-    }
+    if (rotated) [w, d] = [d, w];
     return { w: Math.max(1, w), d: Math.max(1, d) };
 }
 
@@ -556,8 +559,11 @@ function renderItemSvg(item, layout, state = 'current') {
     const stroke = state === 'previous' ? '#94a3b8' : '#0f172a';
     const opacity = state === 'previous' ? 0.24 : 0.98;
     const no = escapeHtml(item._pdfNo);
-    const labelSize = state === 'previous' ? clamp(Math.min(w, h) * 0.28, 8, 18) : clamp(Math.min(w, h) * 0.42, 11, 25);
+    const minDim = Math.min(w, h);
+    const compactLabel = state === 'current' && minDim < 16;
+    const labelSize = state === 'previous' ? clamp(minDim * 0.28, 8, 18) : clamp(minDim * 0.42, 10, 25);
     const isCylinder = item.shape === 'cylinder';
+    const labelText = compactLabel ? '' : no;
 
     if (isCylinder && isSideStandingCylinder(item)) {
         // V2.5: 立放/侧放圆盘在俯视图中不是“倒下的圆”，而是窄厚度 × 大直径的胶囊足迹。
@@ -569,7 +575,7 @@ function renderItemSvg(item, layout, state = 'current') {
                 <rect x="${x + Math.min(4, w * 0.18)}" y="${y + Math.min(4, h * 0.06)}" width="${w}" height="${h}" rx="${r}" fill="${side}" />
                 <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" fill="${base}" stroke="${stroke}" stroke-width="${state === 'previous' ? 1.1 : 2.4}" />
                 ${h > 28 ? `<line x1="${cx}" y1="${y + h * 0.10}" x2="${cx}" y2="${y + h * 0.90}" stroke="rgba(255,255,255,.32)" stroke-width="${Math.max(1.4, Math.min(w, h) * 0.16)}" stroke-linecap="round" />` : ''}
-                ${labelVisible ? `<text x="${cx}" y="${cy + labelSize * 0.35}" font-size="${labelSize}" class="pdfv22-item-label ${state === 'previous' ? 'muted' : 'strong'}">${no}</text>` : ''}
+                ${labelVisible ? `<text x="${cx}" y="${cy + labelSize * 0.35}" font-size="${labelSize}" class="pdfv22-item-label ${state === 'previous' ? 'muted' : 'strong'}">${labelText}</text>` : ''}
             </g>
         `;
     }
@@ -586,7 +592,7 @@ function renderItemSvg(item, layout, state = 'current') {
                 <ellipse cx="${cx + Math.min(4, rx * 0.12)}" cy="${cy + Math.min(4, ry * 0.18)}" rx="${rx}" ry="${ry}" fill="${side}" />
                 <ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="${base}" stroke="${stroke}" stroke-width="${state === 'previous' ? 1.2 : 2.2}" />
                 ${Math.min(rx, ry) > 8 ? `<ellipse cx="${cx}" cy="${cy}" rx="${innerRx}" ry="${innerRy}" fill="rgba(255,255,255,.22)" stroke="${stroke}" stroke-width="${state === 'previous' ? 0.8 : 1.2}" />` : ''}
-                ${labelVisible ? `<text x="${cx}" y="${cy + labelSize * 0.35}" font-size="${labelSize}" class="pdfv22-item-label ${state === 'previous' ? 'muted' : 'strong'}">${no}</text>` : ''}
+                ${labelVisible ? `<text x="${cx}" y="${cy + labelSize * 0.35}" font-size="${labelSize}" class="pdfv22-item-label ${state === 'previous' ? 'muted' : 'strong'}">${labelText}</text>` : ''}
             </g>
         `;
     }
@@ -599,7 +605,7 @@ function renderItemSvg(item, layout, state = 'current') {
             <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4" fill="${base}" stroke="${stroke}" stroke-width="${state === 'previous' ? 1.1 : 2.2}" />
             ${w > 20 && h > 18 ? `<circle cx="${x + w * 0.24}" cy="${y + h * 0.28}" r="${Math.max(1.5, Math.min(w, h) * 0.08)}" fill="rgba(255,255,255,.28)" stroke="${stroke}" stroke-width=".7" />` : ''}
             ${w > 32 && h > 22 ? `<circle cx="${x + w * 0.74}" cy="${y + h * 0.28}" r="${Math.max(1.5, Math.min(w, h) * 0.08)}" fill="rgba(255,255,255,.28)" stroke="${stroke}" stroke-width=".7" />` : ''}
-            ${state === 'previous' && w < 18 ? '' : `<text x="${cx}" y="${cy + labelSize * 0.35}" font-size="${labelSize}" class="pdfv22-item-label ${state === 'previous' ? 'muted' : 'strong'}">${no}</text>`}
+            ${state === 'previous' && w < 18 ? '' : `<text x="${cx}" y="${cy + labelSize * 0.35}" font-size="${labelSize}" class="pdfv22-item-label ${state === 'previous' ? 'muted' : 'strong'}">${labelText}</text>`}
         </g>
     `;
 }
@@ -834,16 +840,16 @@ function buildPage({ className = '', title, subtitle, tag, body, footerLeft = 'W
             <main class="pdfv22-body">${body}</main>
             <footer class="pdfv22-page-footer">
                 <span>${escapeHtml(footerLeft)}</span>
-                <span>PDF V2.7 · 现场摆料施工单</span>
+                <span>PDF V2.8 · 现场摆料施工单</span>
                 <span>第 ${pageIndex} 页 / 共 ${pageTotal} 页</span>
             </footer>
         </section>
     `;
 }
 
-function kpiCard(icon, label, value, hint = '') {
+function kpiCard(icon, label, value, hint = '', tone = '') {
     return `
-        <div class="pdfv22-kpi">
+        <div class="pdfv22-kpi ${tone ? `kpi-${tone}` : ''}">
             <div class="pdfv22-kpi-icon">${icon}</div>
             <div>
                 <div class="pdfv22-kpi-label">${escapeHtml(label)}</div>
@@ -887,12 +893,12 @@ function buildCoverPageConfig(furnace, index, numberedItems) {
             </section>
         </div>
         <div class="kpi-grid">
-            ${kpiCard('▦', '已装工件', `${stats.itemCount} 件`)}
-            ${kpiCard('KG', '装载重量', formatWeight(stats.totalWeight), `承重 ${formatWeight(stats.maxWeight)}`)}
-            ${kpiCard('◔', '重量利用率', formatPercent(stats.weightRate))}
-            ${kpiCard('▩', '空间利用率', formatPercent(stats.spaceRate))}
-            ${kpiCard('≡', '层数', `${stats.layerCount} 层`)}
-            ${kpiCard('◷', '生成时间', getDateStamp())}
+            ${kpiCard('▦', '已装工件', `${stats.itemCount} 件`, '', 'primary')}
+            ${kpiCard('≡', '层数', `${stats.layerCount} 层`, '', 'primary')}
+            ${kpiCard('↔', '安全间距', `${escapeHtml(placementRules?.minSpacing ?? 5)} mm`, '', 'primary')}
+            ${kpiCard('KG', '装载重量', formatWeight(stats.totalWeight), `承重 ${formatWeight(stats.maxWeight)}`, 'secondary')}
+            ${kpiCard('◔', '重量利用率', formatPercent(stats.weightRate), '', 'secondary')}
+            ${kpiCard('▩', '空间利用率', formatPercent(stats.spaceRate), '', 'secondary')}
         </div>
         <div class="cover-alert ${hasUnpacked ? 'danger' : 'ok'}">⚠ ${escapeHtml(warning)}</div>
         <section class="pdfv22-card cover-table-card">
@@ -914,6 +920,11 @@ function buildCoverPageConfig(furnace, index, numberedItems) {
                 </tbody>
             </table>
         </section>
+        <div class="cover-field-row">
+            <span>现场微调记录：</span><b></b>
+            <label>□ 完全按图摆放</label>
+            <label>□ 有微调，已备注并回写系统</label>
+        </div>
         <div class="cover-sign-row">
             <div>摆料人：<span></span></div>
             <div>复核人：<span></span></div>
@@ -924,7 +935,7 @@ function buildCoverPageConfig(furnace, index, numberedItems) {
     return {
         className: 'cover-page',
         title: '装炉摆料作业指导书',
-        subtitle: `${name} · ${getFurnaceTypeLabel(furnace)} · 现场摆料施工单 V2.7`,
+        subtitle: `${name} · ${getFurnaceTypeLabel(furnace)} · 现场摆料施工单 V2.8`,
         tag: `炉次 ${index + 1}`,
         body,
         footerLeft: `炉次#${index + 1}`
@@ -955,6 +966,30 @@ function renderPartIcon(g, large = false) {
             <circle cx="${width * 0.62}" cy="${height * 0.31}" r="${height * 0.055}" fill="rgba(255,255,255,.35)" stroke="${stroke}" stroke-width="1.5" />
         </svg>
     `;
+}
+
+
+function isRingTooling(furnace) {
+    const type = String(furnace?.toolingType || furnace?.basketType || furnace?.type || '').toLowerCase();
+    const name = String(furnace?.name || furnace?.furnaceName || '').toLowerCase();
+    return type.includes('ring') || type.includes('ringnode') || name.includes('环形');
+}
+
+function getStepRequirementBullets(furnace, stepMode) {
+    if (isRingTooling(furnace)) {
+        return [
+            '优先确认圆心/外圈基准，避免局部集中。',
+            '沿圆周均匀摆放，保持径向和周向间距。',
+            `保持 ${escapeHtml(placementRules?.minSpacing ?? 5)}mm 安全间距。`,
+            '放置后复核层号、炉门方向和搁板位置。'
+        ];
+    }
+    return [
+        stepMode === 'region' ? '先看全局定位，再按局部放大图摆放。' : '只摆放图中彩色编号件，灰色件不要移动。',
+        '按编号顺序摆放，优先靠边/靠定位基准。',
+        `保持 ${escapeHtml(placementRules?.minSpacing ?? 5)}mm 安全间距。`,
+        '放置后核对方向、层号和搁板位置。'
+    ];
 }
 
 function buildPartsLegendPageConfig(furnace, index, numberedItems) {
@@ -1142,12 +1177,7 @@ function buildLayerStepPageConfigs(furnace, index, numberedItems, layer, options
                     </section>
                     <section class="pdfv22-card requirement-card">
                         <div class="card-title navy">☑ 摆放要求</div>
-                        <ul>
-                            <li>${step.stepMode === 'region' ? '先看右上全局定位，再按局部放大图摆放。' : '只摆放图中彩色编号件，灰色件不要移动。'}</li>
-                            <li>按编号顺序摆放，优先靠边/靠定位基准。</li>
-                            <li>保持 ${escapeHtml(placementRules?.minSpacing ?? 5)}mm 安全间距。</li>
-                            <li>放置后核对方向、层号和搁板位置。</li>
-                        </ul>
+                        <ul>${getStepRequirementBullets(furnace, step.stepMode).map(text => `<li>${text}</li>`).join('')}</ul>
                     </section>
                 </aside>
             </div>
@@ -1275,16 +1305,20 @@ function getPdfV22Css() {
         .check-row { display:grid; grid-template-columns:20px 1fr; gap:9px; align-items:start; padding:6px 0; border-bottom:1px solid #e2e8f0; font-size:12px; color:#334155; line-height:1.35; font-weight:650; }
         .check-row:last-child { border-bottom:0; }
         .check-row i { width:16px; height:16px; border:1.5px solid #94a3b8; border-radius:4px; display:block; background:#fff; }
-        .kpi-grid { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:8px; margin-top:8px; height:62px; position:relative; z-index:1; }
+        .kpi-grid { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:8px; margin-top:8px; height:58px; position:relative; z-index:1; }
         .pdfv22-kpi { display:grid; grid-template-columns:26px 1fr; gap:6px; align-items:center; background:#fff; border:1px solid #dbeafe; border-radius:10px; padding:7px 8px; box-shadow:none; box-sizing:border-box; }
         .pdfv22-kpi-icon { color:#2563eb; font-size:16px; font-weight:850; display:flex; align-items:center; justify-content:center; }
         .pdfv22-kpi-label { font-size:9.5px; color:#64748b; font-weight:700; }
-        .pdfv22-kpi-value { margin-top:2px; font-size:17px; line-height:1; color:#2563eb; font-weight:850; }
+        .pdfv22-kpi-value { margin-top:2px; font-size:15px; line-height:1; color:#2563eb; font-weight:850; }
+        .pdfv22-kpi.kpi-primary { border-color:#bfdbfe; background:#f8fbff; }
+        .pdfv22-kpi.kpi-primary .pdfv22-kpi-value { font-size:18px; font-weight:900; }
+        .pdfv22-kpi.kpi-secondary { background:#fff; }
+        .pdfv22-kpi.kpi-secondary .pdfv22-kpi-value { color:#334155; font-size:14px; }
         .pdfv22-kpi-hint { margin-top:2px; font-size:8.5px; color:#94a3b8; }
         .cover-alert { margin-top:8px; height:30px; border-radius:8px; display:flex; align-items:center; padding:0 12px; font-size:12px; font-weight:750; box-sizing:border-box; }
         .cover-alert.danger { background:#fff7ed; border:1px solid #fed7aa; color:#9a3412; }
         .cover-alert.ok { background:#f0fdf4; border:1px solid #bbf7d0; color:#166534; }
-        .cover-table-card { margin-top:8px; height:156px; padding:10px 12px; border-color:#dbeafe; overflow:hidden; }
+        .cover-table-card { margin-top:8px; height:136px; padding:10px 12px; border-color:#dbeafe; overflow:hidden; }
         .pdfv22-table { width:100%; border-collapse:collapse; background:#fff; font-size:11.5px; }
         .pdfv22-table th { background:#2563eb; color:#fff; border:1px solid #bfdbfe; padding:5px 6px; text-align:left; font-weight:750; }
         .pdfv22-table td { border:1px solid #dbeafe; padding:4px 6px; vertical-align:middle; color:#1e293b; }
@@ -1292,7 +1326,10 @@ function getPdfV22Css() {
         .cover-table { font-size:10.5px; }
         .muted-cell { color:#64748b !important; font-weight:700; text-align:center; background:#f8fafc !important; }
         .color-dot { display:inline-block; width:10px; height:10px; border-radius:3px; border:1px solid rgba(15,23,42,.25); margin-right:6px; vertical-align:-1px; }
-        .cover-sign-row { height:31px; margin-top:7px; border-top:1px dashed #cbd5e1; display:grid; grid-template-columns:repeat(3,1fr); gap:22px; align-items:end; color:#334155; font-size:12px; font-weight:700; }
+        .cover-field-row { height:26px; margin-top:7px; display:grid; grid-template-columns:auto 1fr auto auto; gap:14px; align-items:center; color:#334155; font-size:11.5px; font-weight:750; }
+        .cover-field-row b { display:block; height:1px; border-bottom:1px solid #94a3b8; }
+        .cover-field-row label { white-space:nowrap; color:#475569; }
+        .cover-sign-row { height:27px; margin-top:2px; border-top:1px dashed #cbd5e1; display:grid; grid-template-columns:repeat(3,1fr); gap:22px; align-items:end; color:#334155; font-size:12px; font-weight:700; }
         .cover-sign-row span { display:inline-block; width:118px; border-bottom:1px solid #334155; }
         .parts-layout { height:612px; display:grid; grid-template-columns:1.65fr .75fr; gap:16px; }
         .parts-main { overflow:hidden; border-color:#bfdbfe; }
@@ -1393,7 +1430,7 @@ function getPdfV22Css() {
         .worklist-table .center { text-align:center; color:#0f56b3; font-weight:950; }
         .worklist-note { height:32px; margin-top:10px; display:flex; align-items:center; color:#475569; font-size:12px; font-weight:800; }
 
-        /* ==================== PDF V2.7: 横竖版/区域放大增强 ==================== */
+        /* ==================== PDF V2.8: 横竖版/区域放大增强 ==================== */
         .pdfv23-root.portrait { width:794px; }
         .pdfv23-root.portrait .pdfv22-page { width:794px; height:1122px; padding:28px 30px 54px; }
         .pdfv23-root.portrait .pdfv22-header { height:74px; margin-bottom:14px; }
@@ -1468,7 +1505,7 @@ function ensurePdfProgressOverlay() {
             <div style="height:10px;background:#e2e8f0;border-radius:999px;overflow:hidden;">
                 <div id="pdf-export-progress-bar" style="height:100%;width:3%;background:#2563eb;border-radius:999px;transition:width .18s ease;"></div>
             </div>
-            <div style="font-size:11px;color:#94a3b8;margin-top:12px;line-height:1.5;">PDF V2.7 使用逐页截图方式生成。页数较多时请等待，不要关闭页面。</div>
+            <div style="font-size:11px;color:#94a3b8;margin-top:12px;line-height:1.5;">PDF V2.8 使用逐页截图方式生成。页数较多时请等待，不要关闭页面。</div>
         </div>
     `;
     document.body.appendChild(overlay);
@@ -1558,7 +1595,7 @@ export async function generateSixPagePDF(selectedIds = []) {
         options.resolvedOrientation = resolvePdfOrientation(entries, options);
         currentPdfMetrics = getPageMetrics(options.resolvedOrientation);
 
-        updatePdfProgress(`正在构建 PDF V2.7 ${options.resolvedOrientation === 'portrait' ? '竖版归档单' : '横版施工图'}...`, 1, 10);
+        updatePdfProgress(`正在构建 PDF V2.8 ${options.resolvedOrientation === 'portrait' ? '竖版归档单' : '横版施工图'}...`, 1, 10);
         await nextFrame();
 
         const html = buildPdfDocument(entries, options);
@@ -1587,7 +1624,7 @@ export async function generateSixPagePDF(selectedIds = []) {
         await nextFrame();
         pdf.save(filename);
     } catch (err) {
-        console.error('[PDF V2.7] 导出失败:', err);
+        console.error('[PDF V2.8] 导出失败:', err);
         alert('PDF 导出失败：' + (err?.message || err));
     } finally {
         hidePdfProgressOverlay();
