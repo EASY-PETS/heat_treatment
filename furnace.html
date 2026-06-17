@@ -7,6 +7,8 @@
     <link rel="stylesheet" href="css/main.css">
     <link rel="stylesheet" href="css/pdf-template.css">
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
@@ -668,11 +670,6 @@
             <div class="rule-group">
                 <div class="rule-group-title">⚖️ 重量与安全规则</div>
                 <div class="rule-item">
-                    <label for="rule-min-spacing">工件安全间距 (mm)</label>
-                    <input type="number" id="rule-min-spacing" value="5" min="0" max="200" step="1">
-                    <span class="rule-desc">全局生效：所有工装统一读取该间距，不再按单个工装配置。</span>
-                </div>
-                <div class="rule-item">
                     <label for="rule-weight-margin">承重安全余量 (%)</label>
                     <input type="number" id="rule-weight-margin" value="10" min="0" max="50">
                 </div>
@@ -710,33 +707,86 @@
         </div>
     </div>
 
-    <!-- PDF Select Modal -->
+    <!-- PDF Select Modal - PDF V2.7 现场摆料施工单 / 横竖版设置 -->
     <div id="pdf-select-overlay">
-        <div id="pdf-select-modal">
-            <h3>📄 导出作业指导书</h3>
-            <p style="font-size:11px;color:#888;margin:0 0 14px 0;">选择需要交付的炉次。系统将生成三页式热处理装炉作业指导书：任务总览、分层步骤、AI评分与现场注意事项。</p>
+        <div id="pdf-select-modal" style="width:720px;max-width:94vw;">
+            <h3>📄 打印现场摆料施工单</h3>
+            <p style="font-size:11px;color:#888;margin:0 0 14px 0;line-height:1.6;">PDF V2.7 支持横版施工图、竖版归档单、区域局部放大与高密度装载自动拆分。建议现场摆料选择“自动推荐”或“横版施工图”。</p>
             <div id="pdf-unpacked-warning" class="pdf-unpacked-badge" style="display:none;"></div>
             <div id="pdf-furnace-list"></div>
+
             <div class="pdf-options-section">
-                <div class="opt-title">📋 附加交付物</div>
-                <div class="pdf-opt-item">
-                    <input type="checkbox" id="pdf-opt-json">
-                    <label for="pdf-opt-json">
-                        同时导出装炉方案 JSON
-                        <span class="opt-desc">用于系统备份、后续导入工作台或对接自动化设备。</span>
+                <div class="opt-title">🖨️ 打印版式</div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;">
+                    <label class="pdf-opt-item" style="align-items:flex-start;">
+                        <input type="radio" name="pdf-orientation" value="auto" checked>
+                        <span><b>自动推荐</b><span class="opt-desc">系统按件数、层数和是否导出步骤图自动选择。</span></span>
+                    </label>
+                    <label class="pdf-opt-item" style="align-items:flex-start;">
+                        <input type="radio" name="pdf-orientation" value="landscape">
+                        <span><b>横版施工图</b><span class="opt-desc">大图、分步骤，推荐现场照图摆料。</span></span>
+                    </label>
+                    <label class="pdf-opt-item" style="align-items:flex-start;">
+                        <input type="radio" name="pdf-orientation" value="portrait">
+                        <span><b>竖版归档单</b><span class="opt-desc">表格、签字、审核留档更方便。</span></span>
                     </label>
                 </div>
-                <div class="pdf-opt-item">
-                    <input type="checkbox" id="pdf-opt-worklist" checked>
-                    <label for="pdf-opt-worklist">
-                        PDF 内包含工件坐标清单
-                        <span class="opt-desc">在作业指导书中展示每件工件的 X / Y / Z 坐标，便于现场复核。</span>
+
+                <div class="opt-title">📦 输出模式</div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;">
+                    <label class="pdf-opt-item" style="align-items:flex-start;">
+                        <input type="radio" name="pdf-output-mode" value="standard" checked>
+                        <span><b>标准版</b><span class="opt-desc">封面、图例、步骤图和坐标清单。</span></span>
                     </label>
+                    <label class="pdf-opt-item" style="align-items:flex-start;">
+                        <input type="radio" name="pdf-output-mode" value="field">
+                        <span><b>精简现场版</b><span class="opt-desc">只输出封面 + 步骤图；默认关闭图例、坐标表和区域拆分，页数最少。</span></span>
+                    </label>
+                    <label class="pdf-opt-item" style="align-items:flex-start;">
+                        <input type="radio" name="pdf-output-mode" value="archive">
+                        <span><b>完整归档版</b><span class="opt-desc">偏向竖版和清单，方便签字留档。</span></span>
+                    </label>
+                </div>
+
+                <div class="opt-title">页面内容</div>
+                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;">
+                    <div class="pdf-opt-item">
+                        <input type="checkbox" id="pdf-opt-cover" checked>
+                        <label for="pdf-opt-cover">任务封面<span class="opt-desc">工装、工艺、KPI、签字确认。</span></label>
+                    </div>
+                    <div class="pdf-opt-item">
+                        <input type="checkbox" id="pdf-opt-legend" checked>
+                        <label for="pdf-opt-legend">工件图例 / 工件包<span class="opt-desc">颜色、尺寸、数量说明。</span></label>
+                    </div>
+                    <div class="pdf-opt-item">
+                        <input type="checkbox" id="pdf-opt-steps" checked>
+                        <label for="pdf-opt-steps">分步摆放图<span class="opt-desc">每步新增件高亮，已放置件灰化。</span></label>
+                    </div>
+                    <div class="pdf-opt-item">
+                        <input type="checkbox" id="pdf-opt-worklist" checked>
+                        <label for="pdf-opt-worklist">工件坐标清单<span class="opt-desc">X / Y / Z 坐标复核与归档。</span></label>
+                    </div>
+                    <div class="pdf-opt-item">
+                        <input type="checkbox" id="pdf-opt-region-zoom" checked>
+                        <label for="pdf-opt-region-zoom">高密度区域放大<span class="opt-desc">单层件数过多时自动拆 A/B/C/D 区。</span></label>
+                    </div>
+                    <div class="pdf-opt-item">
+                        <input type="checkbox" id="pdf-opt-json">
+                        <label for="pdf-opt-json">同时导出 JSON<span class="opt-desc">用于备份、回写或后续导入。</span></label>
+                    </div>
+                </div>
+
+                <div class="opt-title" style="margin-top:10px;">🔍 图纸密度</div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
+                    <label class="pdf-opt-item"><input type="radio" name="pdf-density" value="auto" checked><span><b>自动</b><span class="opt-desc">按复杂度拆分步骤。</span></span></label>
+                    <label class="pdf-opt-item"><input type="radio" name="pdf-density" value="large"><span><b>大图优先</b><span class="opt-desc">每步件数更少，更清楚。</span></span></label>
+                    <label class="pdf-opt-item"><input type="radio" name="pdf-density" value="compact"><span><b>节省纸张</b><span class="opt-desc">每页放更多件，页数更少。</span></span></label>
                 </div>
             </div>
+
             <div style="display:flex;gap:10px;margin-top:16px;">
                 <button style="flex:1;padding:9px;background:#3e3e52;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px;font-weight:700;" id="btn-pdf-cancel">取消</button>
-                <button style="flex:2;padding:9px;background:linear-gradient(135deg,#1f7a3a,#165c2b);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px;font-weight:700;" id="btn-pdf-confirm">📄 导出 PDF</button>
+                <button style="flex:2;padding:9px;background:linear-gradient(135deg,#1f7a3a,#165c2b);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px;font-weight:700;" id="btn-pdf-confirm">📄 生成 PDF V2.7</button>
             </div>
         </div>
     </div>
@@ -811,44 +861,50 @@
     <!-- Tooling Add Overlay - 装载工装参数配置 -->
     <div id="tooling-add-overlay">
         <div id="tooling-add-modal">
-            <div class="tooling-add-header">
-                <div>
-                    <h3>增加装载工装</h3>
-                    <div class="tooling-add-kicker">选择工装类型，填写基础参数后添加到左侧工装列表</div>
-                </div>
-            </div>
-
-            <div class="tooling-add-body compact">
-                <!-- 工装类型：保留 id，避免 tooling-modal.js 失效 -->
+            <h3>增加装载工装</h3>
+            <p class="tooling-add-subtitle">当前阶段只维护装载工装：工装名称、类型、装载空间尺寸、承重、数量、适用工艺与安全间距。真实炉膛/设备/车间关系后续再链接。</p>
+            <div class="tooling-add-body">
+                <!-- 左侧：工装类型说明 -->
                 <div class="tooling-add-left">
                     <div class="tooling-type-label">工装类型</div>
                     <div class="tooling-type-cards" id="tooling-type-cards">
-                        <div class="tooling-unlinked-placeholder">正在加载工装类型...</div>
+                        <div class="tooling-unlinked-placeholder">标准料框 / 料盘 / 网篮 / 环形工装<br><b>当前未链接真实设备</b></div>
                     </div>
                 </div>
-
+                <!-- 右侧：尺寸配置 -->
                 <div class="tooling-add-right">
-                    <div class="tooling-add-section tooling-basic-section">
-                        <div class="tooling-add-section-title">基础信息</div>
-
+                    <div class="tooling-add-section">
+                        <div class="tooling-add-section-title"></div>
                         <div class="tooling-add-dim-row">
-                            <div class="tooling-add-field tooling-field-wide">
+                            <div class="tooling-add-field">
                                 <label>工装名称</label>
                                 <input type="text" id="ta-name" value="">
                             </div>
                         </div>
-
                         <div class="tooling-add-dim-row">
+                            <div class="tooling-add-field">
+                                <label>工装宽度 X (mm)</label>
+                                <input type="number" id="ta-width" value="900" min="100" max="5000">
+                            </div>
+                            <div class="tooling-add-field">
+                                <label>工装高度 Y (mm)</label>
+                                <input type="number" id="ta-height" value="1200" min="100" max="5000">
+                            </div>
+                            <div class="tooling-add-field">
+                                <label>工装纵深 Z (mm)</label>
+                                <input type="number" id="ta-depth" value="900" min="100" max="5000">
+                            </div>
+                        </div>
+                        <div class="tooling-add-dim-row">
+                            <div class="tooling-add-field">
+                                <label>工装承重上限 (kg)</label>
+                                <input type="number" id="ta-weight" value="1000" min="1" max="50000">
+                            </div>
                             <div class="tooling-add-field">
                                 <label>可用数量</label>
                                 <input type="number" id="ta-count" value="1" min="1" max="100">
                             </div>
-                            <div class="tooling-add-field">
-                                <label>承重上限 kg</label>
-                                <input type="number" id="ta-weight" value="500" min="1" max="50000">
-                            </div>
                         </div>
-
                         <div class="tooling-add-dim-row">
                             <div class="tooling-add-field">
                                 <label>适用加工工艺</label>
@@ -864,43 +920,33 @@
                                 </select>
                             </div>
                         </div>
-                    </div>
-
-                    <details class="tooling-add-section tooling-advanced-section">
-                        <summary>
-                            <span>高级参数</span>
-                            <em>尺寸 / 后续模型参数</em>
-                        </summary>
-
-                        <div class="tooling-add-dim-row tooling-dimension-row">
-                            <div class="tooling-add-field" id="ta-width-field">
-                                <label id="ta-width-label">宽度 X mm</label>
-                                <input type="number" id="ta-width" value="900" min="100" max="5000">
-                                <div class="tooling-field-hint tooling-ring-hint">环形工装使用外径作为 X/Z 等效装载直径</div>
-                            </div>
-                            <div class="tooling-add-field" id="ta-height-field">
-                                <label id="ta-height-label">高度 Y mm</label>
-                                <input type="number" id="ta-height" value="900" min="100" max="5000">
-                            </div>
-                            <div class="tooling-add-field" id="ta-depth-field">
-                                <label id="ta-depth-label">纵深 Z mm</label>
-                                <input type="number" id="ta-depth" value="900" min="100" max="5000">
+                        <div class="tooling-add-dim-row">
+                            <div class="tooling-add-field">
+                                <label>工装安全间距 (mm) <span style="color:#666;font-size:9px;">留空=默认</span></label>
+                                <input type="number" id="ta-spacing" value="" placeholder="默认5mm">
                             </div>
                         </div>
-
-                    </details>
-
-                    <!-- 安全间距已移到“摆放规则配置”的全局参数；保留隐藏字段兼容 tooling-modal.js 旧读取逻辑 -->
-                    <input type="hidden" id="ta-spacing" value="">
-
-                    <!-- 保留 id="ta-preview"，避免 tooling-modal.js 仍然写入时报错 -->
-                    <div class="tooling-add-summary tooling-add-preview" id="ta-preview"></div>
+                    </div>
+                    <!-- 工装预览信息 -->
+                    <div class="tooling-add-section">
+                        <div class="tooling-add-section-title">当前链接状态</div>
+                        <div class="tooling-add-preview" id="ta-preview">
+                            <span style="color:#666;">当前工装未链接真实热处理设备；系统会先按该工装尺寸进行装载测试。</span>
+                        </div>
+                    </div>
+                    <!-- 工装实拍图预览 -->
+                    <!-- <div class="tooling-add-section">
+                        <div class="tooling-add-section-title">🖼 工装实拍图</div>
+                        <div class="tooling-add-preview-img" id="ta-preview-img-container">
+                            <img id="ta-preview-img" src="" alt="工装实拍图" style="display:none; width:100%; height:auto; border-radius:6px;" />
+                            <span id="ta-preview-img-placeholder" style="color:#666;">请先在左侧选择工装类型</span>
+                        </div>
+                    </div> -->
                 </div>
             </div>
-
             <div class="tooling-add-actions">
                 <button class="tooling-add-btn-cancel" id="btn-ta-cancel">取消</button>
-                <button class="tooling-add-btn-confirm" id="btn-ta-confirm">确认添加</button>
+                <button class="tooling-add-btn-confirm" id="btn-ta-confirm">✅ 确认添加</button>
             </div>
         </div>
     </div>
@@ -916,78 +962,6 @@
             <div class="ai-loading-hint" id="ai-loading-hint">正在分析物料组合…</div>
         </div>
     </div>
-
-
-    <script>
-    // UI-only helper for the tooling add modal.
-    // It does not replace tooling-modal.js. It only changes labels/visibility for ring tooling
-    // and keeps the hidden Z depth synchronized with the visible diameter field.
-    (function () {
-        function getSelectedToolingCard() {
-            return document.querySelector('#tooling-type-cards .tooling-type-card.selected');
-        }
-
-        function selectedToolingLooksLikeRing() {
-            const card = getSelectedToolingCard();
-            if (!card) return false;
-            const dataText = Object.entries(card.dataset || {})
-                .map(([k, v]) => `${k}:${v}`)
-                .join(' ');
-            const text = `${dataText} ${card.getAttribute('data-tooling-type') || ''} ${card.getAttribute('data-type') || ''} ${card.textContent || ''}`;
-            return /ring-tooling|ringnode|ring|环形/i.test(text);
-        }
-
-        function setText(id, value) {
-            const el = document.getElementById(id);
-            if (el) el.textContent = value;
-        }
-
-        function syncRingDepth() {
-            if (!document.body.classList.contains('tooling-add-ring-mode')) return;
-            const width = document.getElementById('ta-width');
-            const depth = document.getElementById('ta-depth');
-            if (width && depth) depth.value = width.value;
-        }
-
-        function syncToolingAddModalMode() {
-            const isRing = selectedToolingLooksLikeRing();
-            document.body.classList.toggle('tooling-add-ring-mode', isRing);
-
-            if (isRing) {
-                setText('ta-width-label', '外径 D mm');
-                setText('ta-height-label', '高度 H mm');
-                setText('ta-depth-label', '等效外径 Z mm');
-                syncRingDepth();
-                const nameInput = document.getElementById('ta-name');
-                if (nameInput && !nameInput.value.trim()) nameInput.value = '环形工装';
-                return;
-            }
-
-            setText('ta-width-label', '宽度 X mm');
-            setText('ta-height-label', '高度 Y mm');
-            setText('ta-depth-label', '纵深 Z mm');
-        }
-
-        document.addEventListener('click', function (event) {
-            if (event.target.closest('#tooling-type-cards .tooling-type-card')) {
-                setTimeout(syncToolingAddModalMode, 0);
-            }
-        });
-
-        document.addEventListener('input', function (event) {
-            if (event.target && event.target.id === 'ta-width') syncRingDepth();
-        });
-
-        const observer = new MutationObserver(syncToolingAddModalMode);
-        document.addEventListener('DOMContentLoaded', function () {
-            const cards = document.getElementById('tooling-type-cards');
-            const overlay = document.getElementById('tooling-add-overlay');
-            if (cards) observer.observe(cards, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'data-tooling-type', 'data-type'] });
-            if (overlay) observer.observe(overlay, { attributes: true, attributeFilter: ['class', 'style'] });
-            syncToolingAddModalMode();
-        });
-    })();
-    </script>
 
     <script type="module" src="js/app.js"></script>
 </body>
