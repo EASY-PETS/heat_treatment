@@ -171,6 +171,17 @@ import {
     exitRadiationSectionView,
     clearRadiationExposureSelection,
     clearThermalSimulationLayer,
+    setPlacementEditMode,
+    selectPlacementEditItemAtClientPoint,
+    selectPlacementEditItem,
+    clearPlacementEditSelection,
+    refreshPlacementEditSelection,
+    updatePlacementEditItemVisual,
+    focusPlacementEditTopView,
+    getPlacementEditLayerState,
+    setPlacementEditActiveLayer,
+    stepPlacementEditActiveLayer,
+    setPlacementEditShowAllLayers,
     showAILoadingLoading, hideAILoadingLoading
 } from './three-scene.js';
 import {
@@ -441,11 +452,6 @@ function executeAndRender() {
     clearHistoryViewState();
     if (isAnimating) return;
 
-    // 全局工件安全间距：唯一来源来自“摆放规则配置”。
-    // 不再读取单个工装卡片上的 data-spacing / actualSpacing。
-    const spacing = Number(placementRules.minSpacing ?? 5) || 5;
-    setGlobalSpacingValue(spacing);
-
     let furnacePoolInput = [];
     document.querySelectorAll(".furnace-card").forEach(card => {
         const d = getFurnaceDataFromCard(card);
@@ -475,7 +481,7 @@ function executeAndRender() {
         furnacePoolInput.push({
             name: d.name, count: d.count,
             width: d.width, height: d.height, depth: d.depth,
-            maxWeight: d.maxWeight, actualSpacing: spacing,
+            maxWeight: d.maxWeight, actualSpacing: d.actualSpacing,
             basketType: d.basketType || "grid",
             /** V4.8: 工装类型字段透传 */
             toolingType: d.toolingType || defaultToolingType,
@@ -515,6 +521,11 @@ function executeAndRender() {
             remark: d.remark || "",
         });
     });
+
+    // 全局安全间距已取消，保留 5mm 作为系统兜底值。
+    // 实际装炉优先使用每个工装自己的 actualSpacing。
+    const spacing = 5;
+    setGlobalSpacingValue(spacing);
 
     /**
      * V2.7: 执行装炉算法
@@ -695,7 +706,7 @@ function collectToolingForRecord() {
 
             maxLoadKg: d.maxWeight,
             availableCount: d.count,
-            actualSpacingMm: Number(placementRules.minSpacing ?? 5) || 5,
+            actualSpacingMm: d.actualSpacing != null ? d.actualSpacing : 5,
             params: d.extras || {}
         };
     });
@@ -924,6 +935,9 @@ function updateCurrentToolingHud() {
             unpackedEl.textContent = '';
         }
     }
+
+    const editBtn = document.getElementById('btn-placement-edit');
+    if (editBtn) editBtn.style.display = 'inline-flex';
 
     syncCurrentToolingHudControls(globalFurnacesResult.length);
     hud.style.display = 'block';
@@ -4214,6 +4228,7 @@ function init() {
     bindLoadingSimulationStepClicks();
     bindCompareModeEvents();
     bindCurrentToolingHudControls();
+    bindPlacementEditMode();
     observePlanLibraryForCompareButtons();
     syncPanelCollapsedBodyClasses();
 
@@ -4995,6 +5010,795 @@ window._selectAddToolingType = toolingModal.selectAddToolingType;
 init();
 
 // ==================== 新增事件绑定 ====================
+
+// ==================== PLACEMENT EDIT MODE V1 ====================
+let placementEditModeActive = false;
+let placementEditSelectedItemId = null;
+let placementEditStepMm = 10;
+let placementEditPointerDown = null;
+let placementEditDirty = false;
+let placementEditControlsSnapshot = null;
+let placementEditSessionSnapshot = null;
+let placementEditSavedInSession = false;
+let placementEditOriginalStateByKey = new Map();
+
+function getPlacementSnapshotKey(furnaceIndex, itemId) {
+    return String(furnaceIndex) + '::' + String(itemId || '');
+}
+
+function getCurrentPlacementFurnace() {
+    if (!globalFurnacesResult || globalFurnacesResult.length === 0) return null;
+    const idx = Math.max(0, Math.min(currentFurnaceIndex || 0, globalFurnacesResult.length - 1));
+    return globalFurnacesResult[idx] || null;
+}
+
+function getPlacementItemById(itemId) {
+    const furnace = getCurrentPlacementFurnace();
+    if (!furnace || !itemId) return null;
+    return (furnace.packedItems || []).find(item => String(item.id || item.itemId) === String(itemId)) || null;
+}
+
+function getPlacementItemLayer(item, furnace) {
+    if (!item || !furnace) return 1;
+    if (typeof item.layer === 'number' && item.layer >= 1) return Math.round(item.layer);
+
+    const shelves = Array.isArray(furnace.shelvesUsed)
+        ? [...furnace.shelvesUsed].sort((a, b) => Number(a.y || 0) - Number(b.y || 0))
+        : [];
+    let layer = 1;
+    shelves.forEach(shelf => {
+        if (Number(item.y || 0) >= Number(shelf.y || 0)) layer += 1;
+    });
+    return layer;
+}
+
+
+function serializePlacementItemState(item) {
+    if (!item) return null;
+    return {
+        x: Number(item.x || 0),
+        y: Number(item.y || 0),
+        z: Number(item.z || 0),
+        w: Number(item.w || 0),
+        h: Number(item.h || 0),
+        d: Number(item.d || 0),
+        rotation: Number(item.rotation || item.manualRotation || 0),
+        manualRotation: Number(item.manualRotation || item.rotation || 0),
+        verticalRotation: Number(item.verticalRotation || 0),
+        needsRotation: !!item.needsRotation,
+        pdfFootprintW: item.pdfFootprintW,
+        pdfFootprintD: item.pdfFootprintD,
+        pdfPosture: item.pdfPosture,
+        pdfRotationAxis: item.pdfRotationAxis,
+        locked: !!item.locked,
+        manualMoved: !!item.manualMoved,
+        finalEdited: !!item.finalEdited
+    };
+}
+
+function applyPlacementItemState(item, state) {
+    if (!item || !state) return;
+    item.x = state.x;
+    item.y = state.y;
+    item.z = state.z;
+    item.w = state.w;
+    item.h = state.h;
+    item.d = state.d;
+    item.rotation = state.rotation;
+    item.manualRotation = state.manualRotation;
+    item.verticalRotation = state.verticalRotation;
+    item.needsRotation = state.needsRotation;
+    item.pdfFootprintW = state.pdfFootprintW;
+    item.pdfFootprintD = state.pdfFootprintD;
+    item.pdfPosture = state.pdfPosture;
+    item.pdfRotationAxis = state.pdfRotationAxis;
+    item.locked = state.locked;
+    item.manualMoved = state.manualMoved;
+    item.finalEdited = state.finalEdited;
+}
+
+function capturePlacementEditSessionSnapshot() {
+    const snapshot = [];
+    placementEditOriginalStateByKey = new Map();
+    (globalFurnacesResult || []).forEach((furnace, furnaceIndex) => {
+        (furnace.packedItems || []).forEach(item => {
+            const itemId = String(item.id || item.itemId || '');
+            if (!itemId) return;
+            const state = serializePlacementItemState(item);
+            const key = getPlacementSnapshotKey(furnaceIndex, itemId);
+            snapshot.push({ furnaceIndex, itemId, state: { ...state }, itemRef: item });
+            placementEditOriginalStateByKey.set(key, { ...state });
+            // 进入编辑时即记录当前 AI / 最终方案原始位置，供“恢复 AI 位置”和“不保存退出”使用。
+            item.aiOriginalPosition = { ...state };
+        });
+    });
+    return snapshot;
+}
+
+function restorePlacementEditSessionSnapshot() {
+    if (!placementEditSessionSnapshot || !Array.isArray(placementEditSessionSnapshot)) return false;
+    placementEditSessionSnapshot.forEach(entry => {
+        const target = entry.itemRef || (() => {
+            const furnace = globalFurnacesResult?.[entry.furnaceIndex];
+            if (!furnace) return null;
+            return (furnace.packedItems || []).find(it => String(it.id || it.itemId || '') === String(entry.itemId)) || null;
+        })();
+        if (target) applyPlacementItemState(target, entry.state);
+    });
+    return true;
+}
+
+function getPlacementOriginalStateForItem(item, furnaceIndex = currentFurnaceIndex) {
+    if (!item) return null;
+    const itemId = String(item.id || item.itemId || '');
+    const key = getPlacementSnapshotKey(furnaceIndex, itemId);
+    return placementEditOriginalStateByKey.get(key) || item.aiOriginalPosition || null;
+}
+
+function showPlacementEditStatus(level, message) {
+    const statusEl = document.getElementById('pep-status');
+    if (!statusEl) return;
+    statusEl.className = `pep-status ${level || ''}`;
+    statusEl.textContent = message || '';
+}
+
+function ensurePlacementOriginal(item) {
+    if (!item) return;
+    if (!item.aiOriginalPosition) {
+        item.aiOriginalPosition = serializePlacementItemState(item);
+    }
+}
+
+
+function getPlacementLayerVerticalLimit(item, furnace) {
+    const fh = Number(furnace?.h || 0);
+    const y = Number(item?.y || 0);
+    const shelves = Array.isArray(furnace?.shelvesUsed)
+        ? [...furnace.shelvesUsed].sort((a, b) => Number(a.y || 0) - Number(b.y || 0))
+        : [];
+    let lower = 0;
+    let upper = fh;
+    for (const shelf of shelves) {
+        const sy = Number(shelf.y || 0);
+        if (sy <= y + 0.5) {
+            lower = Math.max(lower, sy + Number(shelf.thickness || placementRules.shelfThickness || 20));
+        } else {
+            upper = Math.min(upper, sy);
+            break;
+        }
+    }
+    return { lower, upper, heightLimit: Math.max(0, upper - y) };
+}
+
+function getPlacementValidation(item, furnace) {
+
+    if (!item || !furnace) {
+        return { level: 'warn', message: '请选择一个工件。' };
+    }
+
+    const spacing = Number(placementRules.minSpacing ?? 5) || 5;
+    const issues = [];
+
+    const x = Number(item.x || 0);
+    const y = Number(item.y || 0);
+    const z = Number(item.z || 0);
+    const w = Number(item.w || 0);
+    const h = Number(item.h || 0);
+    const d = Number(item.d || 0);
+    const fw = Number(furnace.w || 0);
+    const fh = Number(furnace.h || 0);
+    const fd = Number(furnace.d || 0);
+
+    if (x < 0 || z < 0 || y < 0 || x + w > fw || z + d > fd || y + h > fh) {
+        issues.push('超出工装边界');
+    }
+
+    const verticalLimit = getPlacementLayerVerticalLimit(item, furnace);
+    if (verticalLimit.upper > 0 && y + h > verticalLimit.upper + 0.5) {
+        issues.push(`高度超出当前层限制，可用 ${Math.max(0, verticalLimit.heightLimit).toFixed(0)}mm`);
+    }
+
+    if ((furnace.toolingType === 'ring-tooling' || furnace.basketType === 'ringnode') && fw > 0 && fd > 0) {
+        const params = furnace.params || {};
+        const outerRadius = Number(params.outerRadius || params.radialRadius || Math.min(fw, fd) / 2);
+        const innerRadius = Number(params.centerVoidRadius || params.innerRadius || (params.innerDia ? params.innerDia / 2 : 0) || 0);
+        const cx = x + w / 2 - fw / 2;
+        const cz = z + d / 2 - fd / 2;
+        const itemRadius = Math.sqrt((w / 2) * (w / 2) + (d / 2) * (d / 2));
+        const centerDist = Math.sqrt(cx * cx + cz * cz);
+        if (centerDist + itemRadius > outerRadius + 0.5) issues.push('超出环形外圈');
+        if (innerRadius > 0 && centerDist - itemRadius < innerRadius - 0.5) issues.push('进入中心避让区');
+    }
+
+    const sameLayer = getPlacementItemLayer(item, furnace);
+    const expanded = {
+        x1: x - spacing,
+        x2: x + w + spacing,
+        z1: z - spacing,
+        z2: z + d + spacing,
+        y1: y - 1,
+        y2: y + h + 1
+    };
+
+    const collision = (furnace.packedItems || []).find(other => {
+        if (!other || other === item) return false;
+        if (String(other.id || other.itemId) === String(item.id || item.itemId)) return false;
+        if (getPlacementItemLayer(other, furnace) !== sameLayer) return false;
+
+        const ox = Number(other.x || 0);
+        const oy = Number(other.y || 0);
+        const oz = Number(other.z || 0);
+        const ow = Number(other.w || 0);
+        const oh = Number(other.h || 0);
+        const od = Number(other.d || 0);
+
+        const yOverlap = expanded.y1 < oy + oh && expanded.y2 > oy;
+        const xOverlap = expanded.x1 < ox + ow && expanded.x2 > ox;
+        const zOverlap = expanded.z1 < oz + od && expanded.z2 > oz;
+        return yOverlap && xOverlap && zOverlap;
+    });
+
+    if (collision) {
+        issues.push(`与 ${collision.name || collision.id || '其它工件'} 间距不足`);
+    }
+
+    if (issues.length > 0) {
+        return { level: 'danger', message: '存在风险：' + issues.join('；') };
+    }
+
+    return { level: 'ok', message: `可执行 · 已按全局安全间距 ${spacing}mm 校验` };
+}
+
+function formatPlacementCoord(item) {
+    if (!item) return '-';
+    return `X ${Number(item.x || 0).toFixed(0)} / Y ${Number(item.y || 0).toFixed(0)} / Z ${Number(item.z || 0).toFixed(0)} mm`;
+}
+
+function updatePlacementEditPanel(selection) {
+    updatePlacementLayerControls();
+    const empty = document.getElementById('pep-empty');
+    const body = document.getElementById('pep-body');
+    const nameEl = document.getElementById('pep-item-name');
+    const metaEl = document.getElementById('pep-item-meta');
+    const coordsEl = document.getElementById('pep-item-coords');
+    const statusEl = document.getElementById('pep-status');
+    const lockBtn = document.getElementById('pep-lock-btn');
+
+    const item = selection?.item || getPlacementItemById(placementEditSelectedItemId);
+    const furnace = getCurrentPlacementFurnace();
+
+    if (!item) {
+        if (empty) empty.style.display = 'block';
+        if (body) body.style.display = 'none';
+        if (statusEl) {
+            statusEl.className = 'pep-status';
+            statusEl.textContent = '等待选择工件';
+        }
+        return;
+    }
+
+    if (empty) empty.style.display = 'none';
+    if (body) body.style.display = 'block';
+
+    const layer = getPlacementItemLayer(item, furnace);
+    if (nameEl) nameEl.textContent = item.name || item.showName || item.id || '未命名工件';
+    if (metaEl) {
+        const size = `${Number(item.w || 0).toFixed(0)}×${Number(item.h || 0).toFixed(0)}×${Number(item.d || 0).toFixed(0)} mm`;
+        metaEl.textContent = `编号：${item.id || '-'} · 第 ${layer} 层 · 尺寸 ${size}`;
+    }
+    if (coordsEl) coordsEl.textContent = formatPlacementCoord(item);
+
+    const validation = getPlacementValidation(item, furnace);
+    if (statusEl) {
+        statusEl.className = `pep-status ${validation.level}`;
+        statusEl.textContent = validation.message + (item.locked ? ' · 已锁定' : '');
+    }
+    if (lockBtn) lockBtn.textContent = item.locked ? '解除锁定' : '锁定位置';
+}
+
+
+function updatePlacementLayerControls() {
+    const layerLabel = document.getElementById('pep-layer-label');
+    const layerMode = document.getElementById('pep-layer-mode');
+    const prevBtn = document.getElementById('pep-layer-prev');
+    const nextBtn = document.getElementById('pep-layer-next');
+    const currentBtn = document.getElementById('pep-layer-current');
+    const allBtn = document.getElementById('pep-layer-all');
+
+    const state = typeof getPlacementEditLayerState === 'function'
+        ? getPlacementEditLayerState()
+        : { layers: [1], activeLayer: 1, showAllLayers: false, activeIndex: 0, layerCount: 1 };
+
+    const layerCount = state.layerCount || state.layers?.length || 1;
+    const activeLayer = state.activeLayer || 1;
+    const activeIndex = Math.max(0, state.activeIndex || 0);
+
+    if (layerLabel) {
+        layerLabel.textContent = state.showAllLayers
+            ? `全层参考 · 共 ${layerCount} 层`
+            : `当前编辑：第 ${activeLayer} 层 / 共 ${layerCount} 层`;
+    }
+    if (layerMode) {
+        layerMode.textContent = state.showAllLayers
+            ? '当前显示全部层，仅建议查看；移动前请切回仅本层。'
+            : '仅显示当前层，避免上下层互相遮挡。';
+    }
+    if (prevBtn) prevBtn.disabled = state.showAllLayers || activeIndex <= 0;
+    if (nextBtn) nextBtn.disabled = state.showAllLayers || activeIndex >= layerCount - 1;
+    if (currentBtn) currentBtn.classList.toggle('active', !state.showAllLayers);
+    if (allBtn) allBtn.classList.toggle('active', !!state.showAllLayers);
+}
+
+function setPlacementPointerEventConsumed(event) {
+    if (!event) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+}
+
+function applyPlacementEditControlsLock() {
+    if (!controls) return;
+    if (!placementEditControlsSnapshot) {
+        placementEditControlsSnapshot = {
+            enabled: controls.enabled,
+            enableRotate: controls.enableRotate,
+            enablePan: controls.enablePan,
+            enableZoom: controls.enableZoom,
+            mouseButtons: controls.mouseButtons ? { ...controls.mouseButtons } : null,
+            touches: controls.touches ? { ...controls.touches } : null
+        };
+    }
+
+    // 编辑摆放是“图纸操作模式”：锁定旋转/平移，保留滚轮缩放。
+    controls.enabled = true;
+    controls.enableRotate = false;
+    controls.enablePan = false;
+    controls.enableZoom = true;
+    if (controls.mouseButtons && THREE?.MOUSE) {
+        controls.mouseButtons.LEFT = null;
+        controls.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY;
+        controls.mouseButtons.RIGHT = null;
+    }
+    if (controls.touches && THREE?.TOUCH) {
+        controls.touches.ONE = null;
+        controls.touches.TWO = THREE.TOUCH.DOLLY_PAN;
+    }
+    controls.update?.();
+}
+
+function restorePlacementEditControlsLock() {
+    if (!controls || !placementEditControlsSnapshot) return;
+    controls.enabled = placementEditControlsSnapshot.enabled;
+    controls.enableRotate = placementEditControlsSnapshot.enableRotate;
+    controls.enablePan = placementEditControlsSnapshot.enablePan;
+    controls.enableZoom = placementEditControlsSnapshot.enableZoom;
+    if (placementEditControlsSnapshot.mouseButtons && controls.mouseButtons) {
+        controls.mouseButtons = { ...placementEditControlsSnapshot.mouseButtons };
+    }
+    if (placementEditControlsSnapshot.touches && controls.touches) {
+        controls.touches = { ...placementEditControlsSnapshot.touches };
+    }
+    placementEditControlsSnapshot = null;
+    controls.update?.();
+}
+
+function setPlacementEditModeActive(active) {
+    const nextActive = !!active;
+    const wasActive = placementEditModeActive;
+
+    // 退出编辑模式：先关闭编辑态和视觉过滤，再根据是否保存决定还原。
+    if (wasActive && !nextActive) {
+        const shouldRestore = placementEditDirty && !placementEditSavedInSession;
+
+        placementEditModeActive = false;
+        document.body.classList.remove('placement-edit-mode');
+
+        const panel = document.getElementById('placement-edit-panel');
+        const btn = document.getElementById('btn-placement-edit');
+        if (panel) panel.style.display = 'none';
+        if (btn) {
+            btn.classList.remove('active');
+            btn.textContent = '编辑摆放';
+        }
+
+        setPlacementEditMode(false);
+        restorePlacementEditControlsLock();
+        placementEditPointerDown = null;
+        placementEditSelectedItemId = null;
+
+        if (shouldRestore) {
+            restorePlacementEditSessionSnapshot();
+            placementEditDirty = false;
+            // V1.6: 强制重建 3D 场景，避免直接移动过的 Mesh 保留旧位置。
+            forceRebuildPlacementVisualScene();
+            if (typeof showCapacityFeedback === 'function') {
+                showCapacityFeedback('success', '已退出编辑，未保存的移动/旋转已自动还原，3D 视图已同步。');
+            }
+        }
+
+        updatePlacementLayerControls();
+        updatePlacementEditPanel(null);
+        placementEditSessionSnapshot = null;
+        placementEditSavedInSession = false;
+        return;
+    }
+
+    placementEditModeActive = nextActive;
+    document.body.classList.toggle('placement-edit-mode', placementEditModeActive);
+    const panel = document.getElementById('placement-edit-panel');
+    const btn = document.getElementById('btn-placement-edit');
+    if (panel) panel.style.display = placementEditModeActive ? 'block' : 'none';
+    if (btn) {
+        btn.classList.toggle('active', placementEditModeActive);
+        btn.textContent = placementEditModeActive ? '退出编辑' : '编辑摆放';
+    }
+
+    if (placementEditModeActive) {
+        suspendProcessSimulationForPlacementEdit();
+    }
+
+    setPlacementEditMode(placementEditModeActive);
+    updatePlacementLayerControls();
+
+    if (placementEditModeActive) {
+        placementEditSessionSnapshot = capturePlacementEditSessionSnapshot();
+        placementEditDirty = false;
+        placementEditSavedInSession = false;
+        applyPlacementEditControlsLock();
+        if (typeof focusPlacementEditTopView === 'function') {
+            focusPlacementEditTopView();
+        } else if (typeof setTightFitCamera === 'function') {
+            setTightFitCamera(new THREE.Vector3(0, 1, 0), 0.08);
+        }
+        document.getElementById('dock-top-view')?.classList.add('active');
+    }
+
+    updatePlacementEditPanel(refreshPlacementEditSelection());
+}
+
+function selectPlacementEditSelection(selection) {
+    placementEditSelectedItemId = selection?.itemId || null;
+    if (selection?.item) ensurePlacementOriginal(selection.item);
+    updatePlacementLayerControls();
+    updatePlacementEditPanel(selection);
+}
+
+function forceRebuildPlacementVisualScene() {
+    // V1.6: 直接移动 3D Mesh 后，数据还原并不会自动把已移动的 Mesh 拉回。
+    // 因此需要清空 furnaceGroups，让 renderSingleFurnace 强制按 globalFurnacesResult 重建场景。
+    clearFurnaceGroups();
+    renderSingleFurnace(currentFurnaceIndex);
+}
+
+function rerenderPlacementEditScene() {
+    const selectedId = placementEditSelectedItemId;
+    forceRebuildPlacementVisualScene();
+    if (selectedId) {
+        const selection = selectPlacementEditItem(selectedId);
+        selectPlacementEditSelection(selection);
+    }
+    updateCurrentToolingHud();
+}
+
+function suspendProcessSimulationForPlacementEdit() {
+    // V1.6: 编辑摆放不能和热场/辐射/气流等仿真图层同时叠加。
+    // 否则会出现“数据已还原，但仿真/展示层仍停留在旧位置”的双数据视觉错觉。
+    try {
+        clearThermalSimulationLayer();
+        processSimulationActive = false;
+        processSimulationMode = 'idle';
+        renderThermalSimulationPanel(null, 'idle');
+        syncThermalControlState(null);
+        updateSimulationModeButtons();
+    } catch (err) {
+        console.warn('[placement-edit] failed to suspend process simulation', err);
+    }
+}
+
+function movePlacementSelectedItem(dxStep, dzStep) {
+    const item = getPlacementItemById(placementEditSelectedItemId);
+    if (!item) return;
+    if (item.locked) {
+        updatePlacementEditPanel({ itemId: placementEditSelectedItemId, item });
+        return;
+    }
+
+    ensurePlacementOriginal(item);
+    item.x = Number(item.x || 0) + Number(dxStep || 0) * placementEditStepMm;
+    item.z = Number(item.z || 0) + Number(dzStep || 0) * placementEditStepMm;
+    item.manualMoved = true;
+    item.finalEdited = true;
+    placementEditDirty = true;
+
+    // 直接更新当前 3D Mesh，避免整炉重建导致用户误以为按钮没有响应。
+    // 如果找不到可更新对象，再回退到完整重渲染。
+    if (typeof updatePlacementEditItemVisual === 'function' && updatePlacementEditItemVisual(placementEditSelectedItemId)) {
+        updatePlacementEditPanel({ itemId: placementEditSelectedItemId, item });
+    } else {
+        rerenderPlacementEditScene();
+    }
+}
+
+
+function rotatePlacementSelectedItem() {
+    rotatePlacementSelectedItemHorizontal();
+}
+
+function getPlacementOriginalDims(item) {
+    const raw = item?.originalDims || {};
+    const l = Number(raw.l ?? raw.length ?? raw.dim1 ?? item?.w ?? 0);
+    const w = Number(raw.w ?? raw.width ?? raw.dim2 ?? item?.d ?? 0);
+    const h = Number(raw.h ?? raw.height ?? raw.dim3 ?? item?.h ?? 0);
+    const vals = [l, w, h].filter(v => Number.isFinite(v) && v > 0);
+    return { l, w, h, max: Math.max(...vals, 0), min: Math.min(...vals, 0) };
+}
+
+function rotatePlacementSelectedItemHorizontal() {
+    const item = getPlacementItemById(placementEditSelectedItemId);
+    if (!item) return;
+    if (item.locked) {
+        updatePlacementEditPanel({ itemId: placementEditSelectedItemId, item });
+        return;
+    }
+
+    ensurePlacementOriginal(item);
+    const cx = Number(item.x || 0) + Number(item.w || 0) / 2;
+    const cz = Number(item.z || 0) + Number(item.d || 0) / 2;
+    const oldW = Number(item.w || 0);
+    const oldD = Number(item.d || 0);
+    const nextW = oldD;
+    const nextD = oldW;
+
+    item.w = nextW;
+    item.d = nextD;
+    item.x = cx - nextW / 2;
+    item.z = cz - nextD / 2;
+    item.manualRotation = ((Number(item.manualRotation || item.rotation || 0) + 90) % 360);
+    item.rotation = item.manualRotation;
+    item.rotationInfo = { ...(item.rotationInfo || {}), manualYawDeg: item.manualRotation };
+    item.pdfFootprintW = item.w;
+    item.pdfFootprintD = item.d;
+    item.manualMoved = true;
+    item.finalEdited = true;
+    placementEditDirty = true;
+    rerenderPlacementEditScene();
+    focusPlacementEditTopView?.();
+    if (Math.abs(oldW - oldD) < 0.5) {
+        showPlacementEditStatus('warn', '已执行水平旋转，但该工件 X/Z 占地相同，俯视外观可能无明显变化。');
+    }
+}
+
+function rotatePlacementSelectedItemVertical() {
+    const item = getPlacementItemById(placementEditSelectedItemId);
+    const furnace = getCurrentPlacementFurnace();
+    if (!item || !furnace) return;
+    if (item.locked) {
+        updatePlacementEditPanel({ itemId: placementEditSelectedItemId, item });
+        return;
+    }
+
+    ensurePlacementOriginal(item);
+
+    const cx = Number(item.x || 0) + Number(item.w || 0) / 2;
+    const cz = Number(item.z || 0) + Number(item.d || 0) / 2;
+    let nextW = Number(item.w || 0);
+    let nextH = Number(item.h || 0);
+    let nextD = Number(item.d || 0);
+    const dims = getPlacementOriginalDims(item);
+
+    if (item.shape === 'cylinder' && dims.max > 0 && dims.min > 0) {
+        const dia = dims.max;
+        const thick = dims.min;
+        const isSideStanding = Number(item.h || 0) > thick * 1.5;
+        if (isSideStanding) {
+            // 立放/侧放 → 平放：俯视为圆，Y 为厚度。
+            nextW = dia;
+            nextH = thick;
+            nextD = dia;
+            item.pdfPosture = 'flat';
+            item.pdfRotationAxis = null;
+        } else {
+            // 平放 → 侧放：俯视为长胶囊/窄长占地，Y 为直径。
+            nextW = thick;
+            nextH = dia;
+            nextD = dia;
+            item.pdfPosture = 'side-standing';
+            item.pdfRotationAxis = 'x';
+        }
+    } else {
+        // 长方体：绕 X 轴翻转，交换 Y 高度与 Z 纵深。
+        nextW = Number(item.w || 0);
+        nextH = Number(item.d || 0);
+        nextD = Number(item.h || 0);
+        item.pdfPosture = 'vertical-rotated';
+        item.pdfRotationAxis = 'x';
+    }
+
+    const limit = getPlacementLayerVerticalLimit({ ...item, h: nextH }, furnace);
+    if (Number(item.y || 0) + nextH > limit.upper + 0.5) {
+        showPlacementEditStatus('danger', `超高：旋转后高 ${nextH.toFixed(0)}mm，可用 ${limit.heightLimit.toFixed(0)}mm。`);
+        return;
+    }
+
+    item.w = nextW;
+    item.h = nextH;
+    item.d = nextD;
+    item.x = cx - nextW / 2;
+    item.z = cz - nextD / 2;
+    item.verticalRotation = ((Number(item.verticalRotation || 0) + 90) % 180);
+    item.rotationInfo = { ...(item.rotationInfo || {}), manualPitchDeg: item.verticalRotation };
+    item.pdfFootprintW = item.w;
+    item.pdfFootprintD = item.d;
+    item.manualMoved = true;
+    item.finalEdited = true;
+    placementEditDirty = true;
+    rerenderPlacementEditScene();
+    focusPlacementEditTopView?.();
+}
+
+function togglePlacementLock() {
+    const item = getPlacementItemById(placementEditSelectedItemId);
+    if (!item) return;
+    ensurePlacementOriginal(item);
+    item.locked = !item.locked;
+    item.finalEdited = true;
+    placementEditDirty = true;
+    updatePlacementEditPanel({ itemId: placementEditSelectedItemId, item });
+}
+
+function restorePlacementSelectedItem() {
+    const item = getPlacementItemById(placementEditSelectedItemId);
+    if (!item) return;
+    const original = getPlacementOriginalStateForItem(item, currentFurnaceIndex);
+    if (!original) {
+        showPlacementEditStatus('warn', '未找到进入编辑前的位置快照，无法还原。');
+        return;
+    }
+    applyPlacementItemState(item, original);
+    item.manualMoved = false;
+    item.finalEdited = false;
+    placementEditDirty = true;
+    rerenderPlacementEditScene();
+    focusPlacementEditTopView?.();
+    showPlacementEditStatus('ok', '已恢复到进入编辑前的位置。');
+}
+
+function savePlacementAdjustedPlan() {
+    if (!globalFurnacesResult || globalFurnacesResult.length === 0) return;
+    globalFurnacesResult.forEach(furnace => {
+        (furnace.packedItems || []).forEach(item => {
+            if (item.manualMoved || item.locked || item.finalEdited) {
+                item.finalEdited = true;
+                item.lastEditedAt = new Date().toISOString();
+            }
+        });
+        furnace.finalEdited = true;
+        furnace.lastEditedAt = new Date().toISOString();
+    });
+    placementEditSessionSnapshot = capturePlacementEditSessionSnapshot();
+    placementEditDirty = false;
+    placementEditSavedInSession = true;
+    if (typeof showCapacityFeedback === 'function') {
+        showCapacityFeedback('success', '✅ 已保存人工调整位置，后续打印方案将读取当前最终位置。');
+    } else {
+        alert('已保存人工调整位置');
+    }
+    refreshPlanLibraryWorkbench();
+}
+
+function isPlacementCanvasEventTarget(event) {
+    const container = document.getElementById('canvas-container');
+    if (!container || !event.target || !container.contains(event.target)) return false;
+    if (event.target.closest('#current-tooling-hud, #placement-edit-panel, #empty-state, #furnace-thumb-bar, #three-dock, .view-dock, .current-tooling-hud')) {
+        return false;
+    }
+    return true;
+}
+
+function bindPlacementEditMode() {
+    const btn = document.getElementById('btn-placement-edit');
+    if (btn) btn.addEventListener('click', () => {
+        if (!globalFurnacesResult || globalFurnacesResult.length === 0) return;
+        setPlacementEditModeActive(!placementEditModeActive);
+    });
+
+    const close = document.getElementById('pep-close');
+    if (close) close.addEventListener('click', () => setPlacementEditModeActive(false));
+
+    document.querySelectorAll('.pep-step-btn').forEach(stepBtn => {
+        stepBtn.addEventListener('click', () => {
+            placementEditStepMm = Number(stepBtn.getAttribute('data-step')) || 10;
+            document.querySelectorAll('.pep-step-btn').forEach(btn => btn.classList.remove('active'));
+            stepBtn.classList.add('active');
+        });
+    });
+
+    const panel = document.getElementById('placement-edit-panel');
+    if (panel) {
+        panel.addEventListener('click', (event) => {
+            const actionBtn = event.target.closest('[data-edit-action]');
+            if (actionBtn) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            if (!actionBtn) return;
+            const action = actionBtn.getAttribute('data-edit-action');
+            if (action === 'move') {
+                movePlacementSelectedItem(
+                    Number(actionBtn.getAttribute('data-dx')) || 0,
+                    Number(actionBtn.getAttribute('data-dz')) || 0
+                );
+            } else if (action === 'rotate' || action === 'rotate-horizontal') {
+                rotatePlacementSelectedItemHorizontal();
+            } else if (action === 'rotate-vertical') {
+                rotatePlacementSelectedItemVertical();
+            } else if (action === 'lock') {
+                togglePlacementLock();
+            } else if (action === 'restore') {
+                restorePlacementSelectedItem();
+            } else if (action === 'prev-layer') {
+                if (typeof stepPlacementEditActiveLayer === 'function') stepPlacementEditActiveLayer(-1);
+                placementEditSelectedItemId = null;
+                updatePlacementEditPanel(null);
+            } else if (action === 'next-layer') {
+                if (typeof stepPlacementEditActiveLayer === 'function') stepPlacementEditActiveLayer(1);
+                placementEditSelectedItemId = null;
+                updatePlacementEditPanel(null);
+            } else if (action === 'show-layer') {
+                if (typeof setPlacementEditShowAllLayers === 'function') setPlacementEditShowAllLayers(false);
+                updatePlacementEditPanel(refreshPlacementEditSelection());
+            } else if (action === 'show-all') {
+                if (typeof setPlacementEditShowAllLayers === 'function') setPlacementEditShowAllLayers(true);
+                updatePlacementEditPanel(refreshPlacementEditSelection());
+            }
+        });
+    }
+
+    const saveBtn = document.getElementById('pep-save-plan');
+    if (saveBtn) saveBtn.addEventListener('click', savePlacementAdjustedPlan);
+
+    const container = document.getElementById('canvas-container');
+    if (!container || container.dataset.placementEditBound === '1') return;
+    container.dataset.placementEditBound = '1';
+
+    container.addEventListener('pointerdown', (event) => {
+        if (!placementEditModeActive || !isPlacementCanvasEventTarget(event)) return;
+        placementEditPointerDown = {
+            x: event.clientX,
+            y: event.clientY,
+            t: performance.now()
+        };
+        // 阻止 OrbitControls 在编辑模式下接管拖动。
+        setPlacementPointerEventConsumed(event);
+    }, true);
+
+    container.addEventListener('pointermove', (event) => {
+        if (!placementEditModeActive || !isPlacementCanvasEventTarget(event)) return;
+        // 编辑模式只允许按钮微调，鼠标移动不改变相机。
+        setPlacementPointerEventConsumed(event);
+    }, true);
+
+    container.addEventListener('pointerup', (event) => {
+        if (!placementEditModeActive || !placementEditPointerDown || !isPlacementCanvasEventTarget(event)) return;
+        const dx = event.clientX - placementEditPointerDown.x;
+        const dy = event.clientY - placementEditPointerDown.y;
+        const dt = performance.now() - placementEditPointerDown.t;
+        placementEditPointerDown = null;
+
+        setPlacementPointerEventConsumed(event);
+
+        if (Math.sqrt(dx * dx + dy * dy) > 6 || dt > 600) return;
+
+        const selection = selectPlacementEditItemAtClientPoint(event.clientX, event.clientY);
+        selectPlacementEditSelection(selection);
+    }, true);
+
+    container.addEventListener('pointercancel', () => {
+        if (!placementEditModeActive) return;
+        placementEditPointerDown = null;
+    }, true);
+}
+
 (function bindNewEvents() {
     // 重置按钮
     const btnClearFurnaces = document.getElementById('btn-clear-all-furnaces');

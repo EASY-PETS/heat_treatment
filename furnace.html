@@ -7,8 +7,6 @@
     <link rel="stylesheet" href="css/main.css">
     <link rel="stylesheet" href="css/pdf-template.css">
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
@@ -433,9 +431,73 @@
                     </div>
                     <div class="cth-unpacked" id="cth-unpacked" style="display:none;"></div>
                     <div class="cth-actions">
+                        <button class="cth-action-btn" id="btn-placement-edit" type="button" style="display:none;">
+                            编辑摆放
+                        </button>
                         <button class="cth-action-btn" id="btn-bom" type="button" style="display:none;">
                             查看施工清单
                         </button>
+                    </div>
+                </div>
+
+                <div id="placement-edit-panel" class="placement-edit-panel" style="display:none;">
+                    <div class="pep-header">
+                        <div>
+                            <div class="pep-kicker">人工调整模式</div>
+                            <div class="pep-title">摆放编辑</div>
+                        </div>
+                        <button id="pep-close" class="pep-close" type="button" title="退出编辑模式">退出</button>
+                    </div>
+                    <div id="pep-empty" class="pep-empty">俯视编辑模式：相机旋转/平移已锁定，可滚轮缩放；默认仅显示当前编辑层，避免多层互相遮挡。</div>
+                    <div id="pep-layer-card" class="pep-layer-card">
+                        <div class="pep-section-title">编辑层显示</div>
+                        <div class="pep-layer-label" id="pep-layer-label">当前编辑：第 1 层</div>
+                        <div class="pep-layer-mode" id="pep-layer-mode">仅显示当前层，避免上下层互相遮挡。</div>
+                        <div class="pep-layer-actions">
+                            <button id="pep-layer-prev" data-edit-action="prev-layer" type="button">上一层</button>
+                            <button id="pep-layer-next" data-edit-action="next-layer" type="button">下一层</button>
+                            <button id="pep-layer-current" data-edit-action="show-layer" type="button" class="active">仅本层</button>
+                            <button id="pep-layer-all" data-edit-action="show-all" type="button">全层参考</button>
+                        </div>
+                    </div>
+                    <div id="pep-body" class="pep-body" style="display:none;">
+                        <div class="pep-item-card">
+                            <div class="pep-item-name" id="pep-item-name">-</div>
+                            <div class="pep-item-meta" id="pep-item-meta">-</div>
+                            <div class="pep-coords" id="pep-item-coords">-</div>
+                        </div>
+                        <div class="pep-section">
+                            <div class="pep-section-title">移动步长</div>
+                            <div class="pep-step-row">
+                                <button class="pep-step-btn active" data-step="10" type="button">10mm</button>
+                                <button class="pep-step-btn" data-step="20" type="button">20mm</button>
+                                <button class="pep-step-btn" data-step="50" type="button">50mm</button>
+                            </div>
+                        </div>
+                        <div class="pep-section">
+                            <div class="pep-section-title">位置微调 <span class="pep-axis-hint">俯视图：X 左右 / Z 前后</span></div>
+                            <div class="pep-axis-guide">相机已锁定：屏幕向上 = Z- 前移；屏幕向右 = X+ 右移</div>
+                            <div class="pep-move-grid">
+                                <button data-edit-action="move" data-dx="0" data-dz="-1" type="button">Z- 前移 ↑</button>
+                                <button data-edit-action="move" data-dx="-1" data-dz="0" type="button">X- 左移 ←</button>
+                                <button data-edit-action="move" data-dx="1" data-dz="0" type="button">X+ 右移 →</button>
+                                <button data-edit-action="move" data-dx="0" data-dz="1" type="button">Z+ 后移 ↓</button>
+                            </div>
+                        </div>
+                        <div class="pep-section">
+                            <div class="pep-section-title">方向与状态</div>
+                            <div class="pep-action-row">
+                                <button data-edit-action="rotate-horizontal" type="button">水平 90°</button>
+                                <button data-edit-action="rotate-vertical" type="button">垂直 90°</button>
+                                <button data-edit-action="lock" type="button" id="pep-lock-btn">锁定位置</button>
+                                <button data-edit-action="restore" type="button">恢复 AI 位置</button>
+                            </div>
+                            <div class="pep-axis-guide">垂直旋转会校验当前层可用高度；超高会自动阻止。</div>
+                        </div>
+                        <div class="pep-status" id="pep-status">等待选择工件</div>
+                        <div class="pep-save-row">
+                            <button id="pep-save-plan" class="pep-save-btn" type="button">保存调整方案</button>
+                        </div>
                     </div>
                 </div>
                 <div id="compare-modal" class="compare-modal compare-modal-dual" style="display:none;">
@@ -707,86 +769,33 @@
         </div>
     </div>
 
-    <!-- PDF Select Modal - PDF V2.8 现场摆料施工单 / 横竖版设置 -->
+    <!-- PDF Select Modal -->
     <div id="pdf-select-overlay">
-        <div id="pdf-select-modal" style="width:720px;max-width:94vw;">
-            <h3>📄 打印现场摆料施工单</h3>
-            <p style="font-size:11px;color:#888;margin:0 0 14px 0;line-height:1.6;">PDF V2.8 支持横版施工图、竖版归档单、区域局部放大与现场试用小修。建议现场摆料选择“自动推荐”或“横版施工图”。</p>
+        <div id="pdf-select-modal">
+            <h3>📄 导出作业指导书</h3>
+            <p style="font-size:11px;color:#888;margin:0 0 14px 0;">选择需要交付的炉次。系统将生成三页式热处理装炉作业指导书：任务总览、分层步骤、AI评分与现场注意事项。</p>
             <div id="pdf-unpacked-warning" class="pdf-unpacked-badge" style="display:none;"></div>
             <div id="pdf-furnace-list"></div>
-
             <div class="pdf-options-section">
-                <div class="opt-title">🖨️ 打印版式</div>
-                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;">
-                    <label class="pdf-opt-item" style="align-items:flex-start;">
-                        <input type="radio" name="pdf-orientation" value="auto" checked>
-                        <span><b>自动推荐</b><span class="opt-desc">系统按件数、层数和是否导出步骤图自动选择。</span></span>
-                    </label>
-                    <label class="pdf-opt-item" style="align-items:flex-start;">
-                        <input type="radio" name="pdf-orientation" value="landscape">
-                        <span><b>横版施工图</b><span class="opt-desc">大图、分步骤，推荐现场照图摆料。</span></span>
-                    </label>
-                    <label class="pdf-opt-item" style="align-items:flex-start;">
-                        <input type="radio" name="pdf-orientation" value="portrait">
-                        <span><b>竖版归档单</b><span class="opt-desc">表格、签字、审核留档更方便。</span></span>
+                <div class="opt-title">📋 附加交付物</div>
+                <div class="pdf-opt-item">
+                    <input type="checkbox" id="pdf-opt-json">
+                    <label for="pdf-opt-json">
+                        同时导出装炉方案 JSON
+                        <span class="opt-desc">用于系统备份、后续导入工作台或对接自动化设备。</span>
                     </label>
                 </div>
-
-                <div class="opt-title">📦 输出模式</div>
-                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;">
-                    <label class="pdf-opt-item" style="align-items:flex-start;">
-                        <input type="radio" name="pdf-output-mode" value="standard" checked>
-                        <span><b>标准版</b><span class="opt-desc">封面、图例、步骤图和坐标清单。</span></span>
+                <div class="pdf-opt-item">
+                    <input type="checkbox" id="pdf-opt-worklist" checked>
+                    <label for="pdf-opt-worklist">
+                        PDF 内包含工件坐标清单
+                        <span class="opt-desc">在作业指导书中展示每件工件的 X / Y / Z 坐标，便于现场复核。</span>
                     </label>
-                    <label class="pdf-opt-item" style="align-items:flex-start;">
-                        <input type="radio" name="pdf-output-mode" value="field">
-                        <span><b>精简现场版</b><span class="opt-desc">只输出封面 + 步骤图；默认关闭图例、坐标表和区域拆分，页数最少。</span></span>
-                    </label>
-                    <label class="pdf-opt-item" style="align-items:flex-start;">
-                        <input type="radio" name="pdf-output-mode" value="archive">
-                        <span><b>完整归档版</b><span class="opt-desc">偏向竖版和清单，方便签字留档。</span></span>
-                    </label>
-                </div>
-
-                <div class="opt-title">页面内容</div>
-                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;">
-                    <div class="pdf-opt-item">
-                        <input type="checkbox" id="pdf-opt-cover" checked>
-                        <label for="pdf-opt-cover">任务封面<span class="opt-desc">工装、工艺、KPI、签字确认。</span></label>
-                    </div>
-                    <div class="pdf-opt-item">
-                        <input type="checkbox" id="pdf-opt-legend" checked>
-                        <label for="pdf-opt-legend">工件图例 / 工件包<span class="opt-desc">颜色、尺寸、数量说明。</span></label>
-                    </div>
-                    <div class="pdf-opt-item">
-                        <input type="checkbox" id="pdf-opt-steps" checked>
-                        <label for="pdf-opt-steps">分步摆放图<span class="opt-desc">每步新增件高亮，已放置件灰化。</span></label>
-                    </div>
-                    <div class="pdf-opt-item">
-                        <input type="checkbox" id="pdf-opt-worklist" checked>
-                        <label for="pdf-opt-worklist">工件坐标清单<span class="opt-desc">X / Y / Z 坐标复核与归档。</span></label>
-                    </div>
-                    <div class="pdf-opt-item">
-                        <input type="checkbox" id="pdf-opt-region-zoom" checked>
-                        <label for="pdf-opt-region-zoom">高密度区域放大<span class="opt-desc">单层件数过多时自动拆 A/B/C/D 区。</span></label>
-                    </div>
-                    <div class="pdf-opt-item">
-                        <input type="checkbox" id="pdf-opt-json">
-                        <label for="pdf-opt-json">同时导出 JSON<span class="opt-desc">用于备份、回写或后续导入。</span></label>
-                    </div>
-                </div>
-
-                <div class="opt-title" style="margin-top:10px;">🔍 图纸密度</div>
-                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
-                    <label class="pdf-opt-item"><input type="radio" name="pdf-density" value="auto" checked><span><b>自动</b><span class="opt-desc">按复杂度拆分步骤。</span></span></label>
-                    <label class="pdf-opt-item"><input type="radio" name="pdf-density" value="large"><span><b>大图优先</b><span class="opt-desc">每步件数更少，更清楚。</span></span></label>
-                    <label class="pdf-opt-item"><input type="radio" name="pdf-density" value="compact"><span><b>节省纸张</b><span class="opt-desc">每页放更多件，页数更少。</span></span></label>
                 </div>
             </div>
-
             <div style="display:flex;gap:10px;margin-top:16px;">
                 <button style="flex:1;padding:9px;background:#3e3e52;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px;font-weight:700;" id="btn-pdf-cancel">取消</button>
-                <button style="flex:2;padding:9px;background:linear-gradient(135deg,#1f7a3a,#165c2b);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px;font-weight:700;" id="btn-pdf-confirm">📄 生成 PDF V2.8</button>
+                <button style="flex:2;padding:9px;background:linear-gradient(135deg,#1f7a3a,#165c2b);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px;font-weight:700;" id="btn-pdf-confirm">📄 导出 PDF</button>
             </div>
         </div>
     </div>

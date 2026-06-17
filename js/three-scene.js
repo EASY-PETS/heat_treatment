@@ -5310,6 +5310,379 @@ export function selectRadiationExposureItemAtClientPoint(clientX, clientY) {
 }
 
 
+
+// ==================== PLACEMENT EDIT MODE V1 ====================
+let placementEditRuntime = {
+    active: false,
+    selectedItemId: null,
+    activeLayer: null,
+    showAllLayers: false
+};
+
+function getPlacementEditCurrentFurnace() {
+    if (!globalFurnacesResult || globalFurnacesResult.length === 0) return null;
+    const idx = Math.max(0, Math.min(currentFurnaceIndex || 0, globalFurnacesResult.length - 1));
+    return globalFurnacesResult[idx] || null;
+}
+
+function getPlacementEditItem(itemId) {
+    const furnace = getPlacementEditCurrentFurnace();
+    if (!furnace || !itemId) return null;
+    return (furnace.packedItems || []).find(item => String(item.id || item.itemId) === String(itemId)) || null;
+}
+
+function getPlacementEditLayerGroups() {
+    const group = furnaceGroups.get(currentFurnaceIndex);
+    if (!group || !group.userData || !group.userData.layerGroups) return null;
+    return group.userData.layerGroups;
+}
+
+function getPlacementEditAvailableLayers() {
+    const layerGroups = getPlacementEditLayerGroups();
+    if (!layerGroups || typeof layerGroups.keys !== 'function') return [1];
+    const layers = [...layerGroups.keys()].map(Number).filter(Number.isFinite).sort((a, b) => a - b);
+    return layers.length ? layers : [1];
+}
+
+function getPlacementEditObjectLayer(obj) {
+    let cur = obj;
+    while (cur) {
+        if (cur.userData) {
+            if (typeof cur.userData.layer === 'number') return cur.userData.layer;
+            if (typeof cur.userData.layerIndex === 'number') return cur.userData.layerIndex;
+            if (cur.userData.isLayerGroup && typeof cur.userData.layerIndex === 'number') return cur.userData.layerIndex;
+        }
+        cur = cur.parent;
+    }
+    return null;
+}
+
+function getPlacementEditItemLayer(itemId) {
+    const item = getPlacementEditItem(itemId);
+    if (item && typeof item.layer === 'number' && item.layer >= 1) return Math.round(item.layer);
+    const root = findPlacementEditRootObject(itemId);
+    const layerFromObject = getPlacementEditObjectLayer(root);
+    if (Number.isFinite(layerFromObject)) return layerFromObject;
+    return 1;
+}
+
+function normalizePlacementEditActiveLayer(preferred = null) {
+    const layers = getPlacementEditAvailableLayers();
+    const target = Number(preferred ?? placementEditRuntime.activeLayer);
+    if (layers.includes(target)) return target;
+    return layers[0] || 1;
+}
+
+
+function setPlacementEditShelfVisibilityForCurrentGroup() {
+    const group = furnaceGroups.get(currentFurnaceIndex);
+    if (!group) return;
+    const showShelves = !placementEditRuntime.active;
+    group.traverse(obj => {
+        if (!obj || !obj.userData || !obj.userData.isShelfMesh) return;
+        obj.visible = showShelves;
+    });
+}
+
+function applyPlacementEditLayerVisibility() {
+
+    const layerGroups = getPlacementEditLayerGroups();
+    if (!layerGroups || typeof layerGroups.forEach !== 'function') return;
+    if (!placementEditRuntime.active || placementEditRuntime.showAllLayers) {
+        layerGroups.forEach(layerGroup => {
+            if (layerGroup && layerGroup.userData && layerGroup.userData.isLayerGroup) layerGroup.visible = true;
+        });
+        return;
+    }
+    const activeLayer = normalizePlacementEditActiveLayer();
+    placementEditRuntime.activeLayer = activeLayer;
+    layerGroups.forEach((layerGroup, layerIndex) => {
+        if (!layerGroup || !layerGroup.userData || !layerGroup.userData.isLayerGroup) return;
+        layerGroup.visible = Number(layerIndex) === Number(activeLayer);
+    });
+}
+
+function getPlacementEditLayerStateInternal() {
+    const layers = getPlacementEditAvailableLayers();
+    const activeLayer = normalizePlacementEditActiveLayer();
+    return {
+        layers,
+        activeLayer,
+        showAllLayers: !!placementEditRuntime.showAllLayers,
+        layerCount: layers.length,
+        activeIndex: Math.max(0, layers.indexOf(activeLayer))
+    };
+}
+
+function getPlacementEditMaterials(mesh) {
+    if (!mesh || !mesh.material) return [];
+    return Array.isArray(mesh.material) ? mesh.material.filter(Boolean) : [mesh.material];
+}
+
+function savePlacementOriginalMaterial(mat) {
+    if (!mat || !mat.userData) return;
+    if (mat.userData._placementEditOriginal) return;
+    mat.userData._placementEditOriginal = {
+        color: mat.color ? mat.color.getHex() : null,
+        emissive: mat.emissive ? mat.emissive.getHex() : null,
+        emissiveIntensity: typeof mat.emissiveIntensity === 'number' ? mat.emissiveIntensity : 0,
+        transparent: !!mat.transparent,
+        opacity: typeof mat.opacity === 'number' ? mat.opacity : 1,
+        depthWrite: typeof mat.depthWrite === 'boolean' ? mat.depthWrite : true
+    };
+}
+
+function restorePlacementEditMaterials() {
+    if (!furnaceGroups || typeof furnaceGroups.forEach !== 'function') return;
+    furnaceGroups.forEach(group => {
+        if (!group) return;
+        group.traverse(child => {
+            if (!child.isMesh || !child.material) return;
+            getPlacementEditMaterials(child).forEach(mat => {
+                const saved = mat?.userData?._placementEditOriginal;
+                if (!saved) return;
+                if (mat.color && saved.color != null) mat.color.setHex(saved.color);
+                if (mat.emissive && saved.emissive != null) mat.emissive.setHex(saved.emissive);
+                if (typeof saved.emissiveIntensity === 'number') mat.emissiveIntensity = saved.emissiveIntensity;
+                mat.transparent = saved.transparent;
+                mat.opacity = saved.opacity;
+                mat.depthWrite = saved.depthWrite;
+                mat.needsUpdate = true;
+                delete mat.userData._placementEditOriginal;
+            });
+        });
+    });
+}
+
+function applyPlacementEditTint() {
+    restorePlacementEditMaterials();
+    applyPlacementEditLayerVisibility();
+    setPlacementEditShelfVisibilityForCurrentGroup();
+    if (!placementEditRuntime.active) return;
+
+    const selectedId = placementEditRuntime.selectedItemId;
+    const group = furnaceGroups.get(currentFurnaceIndex);
+    if (!group) return;
+
+    // 未选择工件时，不再把所有工件变透明；只通过“当前编辑层”减少多层干扰。
+    if (!selectedId) return;
+
+    const selectedLayer = getPlacementEditItemLayer(selectedId);
+    placementEditRuntime.activeLayer = selectedLayer;
+    if (!placementEditRuntime.showAllLayers) applyPlacementEditLayerVisibility();
+
+    group.traverse(child => {
+        if (!child.isMesh || !child.userData || !child.userData.itemId) return;
+        const itemLayer = getPlacementEditObjectLayer(child) || selectedLayer;
+        const isSelected = selectedId && String(child.userData.itemId) === String(selectedId);
+        const isSameLayer = Number(itemLayer) === Number(selectedLayer);
+        getPlacementEditMaterials(child).forEach(mat => {
+            savePlacementOriginalMaterial(mat);
+            if (isSelected) {
+                mat.transparent = false;
+                mat.opacity = 1;
+                mat.depthWrite = true;
+                if (mat.emissive) {
+                    mat.emissive.setHex(0x2563eb);
+                    mat.emissiveIntensity = 0.30;
+                }
+                child.renderOrder = 40;
+            } else if (isSameLayer) {
+                mat.transparent = true;
+                mat.opacity = 0.38;
+                mat.depthWrite = false;
+                if (mat.emissive) {
+                    mat.emissive.setHex(0x000000);
+                    mat.emissiveIntensity = 0;
+                }
+                child.renderOrder = 4;
+            } else {
+                mat.transparent = true;
+                mat.opacity = 0.06;
+                mat.depthWrite = false;
+                if (mat.emissive) {
+                    mat.emissive.setHex(0x000000);
+                    mat.emissiveIntensity = 0;
+                }
+                child.renderOrder = 1;
+            }
+            mat.needsUpdate = true;
+        });
+    });
+}
+
+export function setPlacementEditMode(active) {
+    placementEditRuntime.active = !!active;
+    if (!placementEditRuntime.active) {
+        placementEditRuntime.selectedItemId = null;
+        placementEditRuntime.activeLayer = null;
+        placementEditRuntime.showAllLayers = false;
+        restorePlacementEditMaterials();
+        applyPlacementEditLayerVisibility();
+        setPlacementEditShelfVisibilityForCurrentGroup();
+        return null;
+    }
+    placementEditRuntime.activeLayer = normalizePlacementEditActiveLayer(placementEditRuntime.activeLayer);
+    placementEditRuntime.showAllLayers = false;
+    setPlacementEditShelfVisibilityForCurrentGroup();
+    applyPlacementEditTint();
+    return getPlacementEditSelection();
+}
+
+export function getPlacementEditSelection() {
+    const item = getPlacementEditItem(placementEditRuntime.selectedItemId);
+    if (!item) return null;
+    return {
+        itemId: placementEditRuntime.selectedItemId,
+        item,
+        furnaceIndex: currentFurnaceIndex,
+        layerState: getPlacementEditLayerStateInternal()
+    };
+}
+
+export function clearPlacementEditSelection() {
+    placementEditRuntime.selectedItemId = null;
+    if (placementEditRuntime.active) applyPlacementEditTint();
+    return null;
+}
+
+export function getPlacementEditLayerState() {
+    return getPlacementEditLayerStateInternal();
+}
+
+export function setPlacementEditActiveLayer(layerIndex) {
+    if (!placementEditRuntime.active) return getPlacementEditLayerStateInternal();
+    const nextLayer = normalizePlacementEditActiveLayer(layerIndex);
+    placementEditRuntime.activeLayer = nextLayer;
+    placementEditRuntime.showAllLayers = false;
+    const selectedLayer = placementEditRuntime.selectedItemId ? getPlacementEditItemLayer(placementEditRuntime.selectedItemId) : null;
+    if (selectedLayer != null && Number(selectedLayer) !== Number(nextLayer)) {
+        placementEditRuntime.selectedItemId = null;
+    }
+    applyPlacementEditTint();
+    return getPlacementEditLayerStateInternal();
+}
+
+export function stepPlacementEditActiveLayer(delta = 1) {
+    const layers = getPlacementEditAvailableLayers();
+    const state = getPlacementEditLayerStateInternal();
+    const currentIndex = Math.max(0, layers.indexOf(state.activeLayer));
+    const nextIndex = Math.max(0, Math.min(layers.length - 1, currentIndex + Number(delta || 0)));
+    return setPlacementEditActiveLayer(layers[nextIndex] || state.activeLayer || 1);
+}
+
+export function setPlacementEditShowAllLayers(showAll = false) {
+    if (!placementEditRuntime.active) return getPlacementEditLayerStateInternal();
+    placementEditRuntime.showAllLayers = !!showAll;
+    applyPlacementEditTint();
+    return getPlacementEditLayerStateInternal();
+}
+
+export function selectPlacementEditItem(itemId) {
+    const item = getPlacementEditItem(itemId);
+    if (!item) return clearPlacementEditSelection();
+    placementEditRuntime.selectedItemId = String(item.id || item.itemId || itemId);
+    placementEditRuntime.activeLayer = getPlacementEditItemLayer(placementEditRuntime.selectedItemId);
+    placementEditRuntime.showAllLayers = false;
+    applyPlacementEditTint();
+    return getPlacementEditSelection();
+}
+
+export function refreshPlacementEditSelection() {
+    if (!placementEditRuntime.active) return null;
+    applyPlacementEditTint();
+    return getPlacementEditSelection();
+}
+
+export function selectPlacementEditItemAtClientPoint(clientX, clientY) {
+    if (!placementEditRuntime.active) return null;
+    if (!renderer || !renderer.domElement || !camera) return null;
+    const group = furnaceGroups.get(currentFurnaceIndex);
+    if (!group) return null;
+
+    const rect = renderer.domElement.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+
+    const pointer = new THREE.Vector2(
+        ((clientX - rect.left) / rect.width) * 2 - 1,
+        -((clientY - rect.top) / rect.height) * 2 + 1
+    );
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(pointer, camera);
+    const intersects = raycaster.intersectObjects(group.children, true);
+
+    const state = getPlacementEditLayerStateInternal();
+    for (const hit of intersects) {
+        const itemId = findItemIdFromObject(hit.object);
+        if (!itemId) continue;
+        const itemLayer = getPlacementEditObjectLayer(hit.object) || getPlacementEditItemLayer(itemId);
+        if (!placementEditRuntime.showAllLayers && state.activeLayer != null && Number(itemLayer) !== Number(state.activeLayer)) {
+            continue;
+        }
+        return selectPlacementEditItem(itemId);
+    }
+
+    return clearPlacementEditSelection();
+}
+
+
+function findPlacementEditRootObject(itemId) {
+    const id = String(itemId || '');
+    if (!id) return null;
+    const group = furnaceGroups.get(currentFurnaceIndex);
+    if (!group) return null;
+
+    const layerGroups = group.userData && group.userData.layerGroups;
+    if (layerGroups && typeof layerGroups.forEach === 'function') {
+        let found = null;
+        layerGroups.forEach(layerGroup => {
+            if (found || !layerGroup || !Array.isArray(layerGroup.children)) return;
+            found = layerGroup.children.find(child =>
+                child && child.userData &&
+                String(child.userData.itemId || '') === id &&
+                !child.userData._animMesh
+            ) || null;
+        });
+        if (found) return found;
+    }
+
+    let found = null;
+    group.traverse(obj => {
+        if (found || !obj || !obj.userData) return;
+        if (String(obj.userData.itemId || '') !== id) return;
+        if (obj.userData._animMesh) return;
+        if (obj.parent && obj.parent.userData && obj.parent.userData.isLayerGroup) {
+            found = obj;
+        }
+    });
+    return found;
+}
+
+export function updatePlacementEditItemVisual(itemId) {
+    const furnace = getPlacementEditCurrentFurnace();
+    const item = getPlacementEditItem(itemId);
+    const root = findPlacementEditRootObject(itemId);
+    if (!furnace || !item || !root) return false;
+
+    const baseY = -120;
+    const targetX = Number(item.x || 0) - Number(furnace.w || 0) / 2 + Number(item.w || 0) / 2;
+    const targetY = baseY + Number(item.y || 0) + Number(item.h || 0) / 2;
+    const targetZ = Number(item.z || 0) - Number(furnace.d || 0) / 2 + Number(item.d || 0) / 2;
+
+    root.position.set(targetX, targetY, targetZ);
+    root.updateMatrixWorld(true);
+    applyPlacementEditTint();
+    return true;
+}
+
+export function focusPlacementEditTopView() {
+    if (typeof setTightFitCamera === 'function') {
+        setTightFitCamera(new THREE.Vector3(0, 1, 0), 0.06);
+    }
+}
+
+
 export function getRadiationExposureRuntime() {
     return {
         visible: thermalSimRuntime.visible && thermalSimRuntime.activeMode === 'radiation',
