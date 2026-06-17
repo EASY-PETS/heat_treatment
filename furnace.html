@@ -551,10 +551,6 @@
                     <span class="dock-icon">➡</span>
                     <span class="dock-label">侧视</span>
                 </button>
-                <button class="dock-btn" id="dock-rotate-90" title="绕炉膛中心旋转90°">
-                    <span class="dock-icon">↻</span>
-                    <span class="dock-label">旋转</span>
-                </button>
                 <div class="dock-separator"></div>
                 <button class="dock-btn" id="dock-explode" title="点击开启垂直爆炸">
                     <span class="dock-icon">💥</span>
@@ -606,30 +602,11 @@
             <div id="master-view" class="active">
                 <div id="master-header">
                     <button class="master-back-btn" id="btn-master-back" style="display:none;">← 返回</button>
-                    <span class="master-library-hint">保存、加载、删除历史装炉方案</span>
+                    <span class="master-library-hint">历史方案库：查看、复用、对比已保存的装炉方案</span>
                     <button class="master-import-btn" id="btn-master-import-json">📥 导入JSON到工作台</button>
                 </div>
+                <div id="library-history-banner" class="library-history-banner" style="display:none;"></div>
                 <div id="master-content">
-                    <section id="current-workbench-card" class="current-workbench-card empty">
-                        <div class="cwc-head">
-                            <div>
-                                <div class="cwc-kicker">当前工作台方案</div>
-                                <div class="cwc-title">暂无当前方案</div>
-                            </div>
-                            <span class="cwc-status">未生成</span>
-                        </div>
-                        <div class="cwc-metrics"><span>生成方案后，这里显示当前工作台快照；保存后才会进入历史方案。</span></div>
-                    </section>
-
-                    <div class="current-workbench-save-slot">
-                        <button class="btn plan-action-btn save-plan-library-main" id="btn-save-plan-library" type="button" style="display:none;">
-                            保存到方案库
-                        </button>
-                        <div class="current-workbench-save-hint">
-                            保存后进入历史方案，可用于查看、复用和对比。
-                        </div>
-                    </div>
-
                     <div class="history-section-head">
                         <div>
                             <div class="history-title">历史方案</div>
@@ -653,6 +630,26 @@
             </div>
 
             <div class="right-tab-pane" id="right-tab-analysis">
+                <section id="current-workbench-card" class="current-workbench-card empty analysis-workbench-card">
+                    <div class="cwc-head">
+                        <div>
+                            <div class="cwc-kicker">当前工作台方案</div>
+                            <div class="cwc-title">暂无当前方案</div>
+                        </div>
+                        <span class="cwc-status">未生成</span>
+                    </div>
+                    <div class="cwc-metrics"><span>生成方案后，这里显示当前工作台快照；保存后才会进入历史方案。</span></div>
+                </section>
+
+                <div class="current-workbench-save-slot analysis-save-slot">
+                    <button class="btn plan-action-btn save-plan-library-main" id="btn-save-plan-library" type="button" style="display:none;">
+                        保存到方案库
+                    </button>
+                    <div class="current-workbench-save-hint">
+                        保存后进入方案库，作为历史方案查看、复用和对比。
+                    </div>
+                </div>
+
                 <div class="plan-action-bar plan-print-action-bar">
                     <button class="btn plan-action-btn print-plan-btn" id="btn-export-pdf" style="display:none;">打印方案</button>
                 </div>

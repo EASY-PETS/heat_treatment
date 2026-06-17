@@ -265,14 +265,23 @@ function buildAutoWorkspaceTitle(strategyLabel = '') {
     return `${toolingName}_${totalItems}件_${totalWeight.toFixed(1)}kg_${strategy}`;
 }
 
-function setCurrentWorkspaceIdentityFromPlan(strategyLabel = '') {
+function normalizePlanStrategyLabel(strategyLabel = '') {
+    const raw = String(strategyLabel || '').trim();
+    if (!raw) return STRATEGY_LABELS[placementRules.strategy] || placementRules.strategy || '均衡方案';
+    return raw.replace(/^当前策略[:：]\s*/, '');
+}
+
+function setCurrentWorkspaceIdentityFromPlan(strategyLabel = '', strategyKey = '') {
     const existed = ensureCurrentWorkspaceIdentity();
     const now = new Date().toISOString();
+    const normalizedStrategyLabel = normalizePlanStrategyLabel(strategyLabel);
     currentWorkspaceIdentity = {
         ...existed,
-        title: buildAutoWorkspaceTitle(strategyLabel),
+        title: buildAutoWorkspaceTitle(normalizedStrategyLabel),
         source: 'generated',
         status: 'unsaved',
+        strategyLabel: normalizedStrategyLabel,
+        strategyKey: strategyKey || placementRules.strategy || '',
         createdAt: existed.createdAt || now,
         updatedAt: now
     };
@@ -289,6 +298,8 @@ function resetCurrentWorkspaceIdentity() {
         title: '当前工作台方案',
         source: 'draft',
         status: 'draft',
+        strategyLabel: '',
+        strategyKey: '',
         createdAt: '',
         updatedAt: ''
     };
@@ -396,7 +407,7 @@ function applyCandidatePlan(index) {
     setCurrentFurnaceIndex(0);
 
     window._currentPlanAnalysis = plan.analysis;
-    setCurrentWorkspaceIdentityFromPlan(plan.label);
+    setCurrentWorkspaceIdentityFromPlan(plan.label, plan.strategy);
 
     renderPlanAnalysisPanel(plan.analysis);
     renderCandidatePlanCards(candidatePlans, index, applyCandidatePlan);
@@ -557,7 +568,7 @@ function executeAndRender() {
     );
 
     window._currentPlanAnalysis = analysis;
-    setCurrentWorkspaceIdentityFromPlan(bestPlan?.label || '');
+    setCurrentWorkspaceIdentityFromPlan(bestPlan?.label || '', bestPlan?.strategy || '');
 
     renderPlanAnalysisPanel(analysis);
     renderCandidatePlanCards(candidatePlans, currentCandidatePlanIndex, applyCandidatePlan);
@@ -744,6 +755,8 @@ const planLibrary = createPlanLibraryController({
         updateWorkbenchUiMode();
         refreshPlanLibraryWorkbench();
         updateCurrentToolingHud();
+        // 查看历史方案属于“方案库”内的只读预览，不自动跳转到“方案分析”。
+        setTimeout(() => activateRightPanelTab('library'), 0);
     }
 });
 
@@ -1168,8 +1181,19 @@ function findRecordForPlanCard(card) {
 let workspaceViewState = {
     mode: 'current',
     historyTitle: '',
-    backupRecord: null
+    backupRecord: null,
+    backupHadPlan: false,
+    backupHadInputs: false
 };
+
+function hasCurrentGeneratedPlan() {
+    return !!(globalFurnacesResult && globalFurnacesResult.length > 0);
+}
+
+function hasCurrentInputResources() {
+    return document.querySelectorAll('.furnace-card').length > 0 ||
+        document.querySelectorAll('.material-card').length > 0;
+}
 
 function captureCurrentWorkspaceSnapshot(title = '当前工作台自动快照') {
     try {
@@ -1186,7 +1210,11 @@ function captureCurrentWorkspaceSnapshot(title = '当前工作台自动快照') 
 
 function markHistoryView(record, title) {
     if (workspaceViewState.mode !== 'history') {
-        workspaceViewState.backupRecord = captureCurrentWorkspaceSnapshot('加载历史前的当前方案');
+        workspaceViewState.backupHadPlan = hasCurrentGeneratedPlan();
+        workspaceViewState.backupHadInputs = hasCurrentInputResources();
+        workspaceViewState.backupRecord = captureCurrentWorkspaceSnapshot(
+            workspaceViewState.backupHadPlan ? '加载历史前的当前方案' : '加载历史前的资源配置'
+        );
     }
     workspaceViewState.mode = 'history';
     workspaceViewState.historyTitle = title || getPlanRecordTitle(record) || '历史方案';
@@ -1198,6 +1226,8 @@ function clearHistoryViewState() {
     workspaceViewState.mode = 'current';
     workspaceViewState.historyTitle = '';
     workspaceViewState.backupRecord = null;
+    workspaceViewState.backupHadPlan = false;
+    workspaceViewState.backupHadInputs = false;
     document.body.classList.remove('history-view-mode');
     updateHistoryEditorReadonly();
 }
@@ -1224,9 +1254,75 @@ function updateHistoryEditorReadonly() {
     });
 }
 
+function resetWorkspaceToBlankDraft() {
+    // 无确认的内部重置：用于从历史只读态回到可编辑空白工作台。
+    clearHistoryViewState();
+    exitCompareMode(false);
+    resetCurrentWorkspaceIdentity();
+
+    document.querySelectorAll('.furnace-card').forEach(c => c.remove());
+    document.querySelectorAll('.material-card').forEach(c => c.remove());
+
+    setSelectedFurnaceCardId(null);
+    setSelectedMaterialCardId(null);
+    setFurnaceCounter(0);
+    setMaterialCounter(0);
+    clearUsedColors();
+
+    setGlobalFurnacesResult(null);
+    setGlobalUnpackedItems([]);
+    clearFurnaceGroups();
+    clearThermalSimulationLayer();
+
+    if (itemsGroup) {
+        while (itemsGroup.children.length > 0) itemsGroup.remove(itemsGroup.children[0]);
+    }
+
+    hidePlanActionButtons();
+    const nav = document.getElementById('furnace-nav');
+    if (nav) nav.style.display = 'none';
+    const thumbBar = document.getElementById('furnace-thumb-bar');
+    if (thumbBar) thumbBar.style.display = 'none';
+    const empty = document.getElementById('empty-state');
+    if (empty) empty.style.display = 'block';
+    renderAISummaryBar(null);
+    hideExplodeBOMButtons();
+
+    const fdpPlaceholder = document.getElementById('fdp-placeholder');
+    const fdpBody = document.getElementById('fdp-body');
+    const fdpTitle = document.getElementById('fdp-title');
+    const mdpPlaceholder = document.getElementById('mdp-placeholder');
+    const mdpBody = document.getElementById('mdp-body');
+    const mdpTitle = document.getElementById('mdp-title');
+    if (fdpPlaceholder) fdpPlaceholder.style.display = 'block';
+    if (fdpBody) fdpBody.style.display = 'none';
+    if (fdpTitle) fdpTitle.textContent = '📋 工装参数';
+    if (mdpPlaceholder) mdpPlaceholder.style.display = 'block';
+    if (mdpBody) mdpBody.style.display = 'none';
+    if (mdpTitle) mdpTitle.textContent = '📋 工件详情';
+
+    clearMaterialFilters();
+    clearProcessFilters();
+    clearHardnessFilters();
+    renderFilterBars(clearFurnaceResults);
+
+    setCurrentFurnaceIndex(0);
+    updateTopSummary();
+    updateWorkbenchUiMode();
+    refreshPlanLibraryWorkbench();
+    updateCurrentToolingHud();
+}
+
 function restoreCurrentWorkspaceFromHistory() {
     const record = workspaceViewState.backupRecord;
+    const hadPlan = !!workspaceViewState.backupHadPlan;
+    const hadInputs = !!workspaceViewState.backupHadInputs;
+
     if (!record) {
+        if (!hadPlan && !hadInputs) {
+            resetWorkspaceToBlankDraft();
+            return;
+        }
         alert('没有找到可恢复的当前方案快照');
         return;
     }
@@ -1235,19 +1331,73 @@ function restoreCurrentWorkspaceFromHistory() {
     clearHistoryViewState();
 
     workbenchRecord.applyDigitalTwinRecordToWorkbench(snapshot, {
-        sourceTitle: '当前工作台方案',
+        sourceTitle: hadPlan ? '当前工作台方案' : '资源配置',
         closeLibrary: false,
         showSuccess: true
     });
+
+    if (!hadPlan) {
+        // 加载历史前没有“当前方案”，只恢复工装/工件输入，不保留历史方案的装炉结果。
+        clearFurnaceResults();
+    }
 
     updateWorkbenchUiMode();
     refreshPlanLibraryWorkbench();
     updateCurrentToolingHud();
 }
 
+function startNewWorkspaceFromHistory() {
+    const record = workspaceViewState.backupRecord;
+    const hadInputs = !!workspaceViewState.backupHadInputs;
+    const hadPlan = !!workspaceViewState.backupHadPlan;
+
+    if (record && (hadInputs || hadPlan)) {
+        clearHistoryViewState();
+        workbenchRecord.applyDigitalTwinRecordToWorkbench(record, {
+            sourceTitle: '资源配置',
+            closeLibrary: false,
+            showSuccess: false
+        });
+        // “新生成”语义：回到可编辑输入态，清除旧方案结果，用户重新点击生成。
+        clearFurnaceResults();
+        updateWorkbenchUiMode();
+        refreshPlanLibraryWorkbench();
+        updateCurrentToolingHud();
+        return;
+    }
+
+    resetWorkspaceToBlankDraft();
+}
+
 function renderCurrentWorkbenchPlanCard() {
     const card = document.getElementById('current-workbench-card');
     if (!card) return;
+
+    const isHistory = workspaceViewState.mode === 'history';
+
+    if (isHistory && !workspaceViewState.backupHadPlan) {
+        const historyTitle = workspaceViewState.historyTitle || '历史方案';
+        const inputNote = workspaceViewState.backupHadInputs
+            ? '当前工作台原本没有已生成方案。点击“新生成方案”会恢复原工装/工件输入，并回到可编辑状态。'
+            : '当前工作台原本为空。点击“新生成方案”会退出历史查看，并回到可编辑空白状态。';
+        card.className = 'current-workbench-card empty history-viewing empty-history-viewing';
+        card.innerHTML = `
+            <div class="cwc-head">
+                <div>
+                    <div class="cwc-kicker">当前工作台方案</div>
+                    <div class="cwc-title">暂无当前方案</div>
+                    <div class="cwc-subtitle">正在只读查看：${historyTitle}</div>
+                </div>
+                <span class="cwc-status">历史查看</span>
+            </div>
+            <div class="cwc-metrics cwc-muted-line">${inputNote}</div>
+            <button class="cwc-restore-btn cwc-new-workspace-btn" id="btn-start-new-workspace-from-history" type="button">新生成方案</button>
+            <div class="cwc-history-note">左侧资源当前为历史快照只读状态；新生成后会解除锁定。</div>
+        `;
+        const newBtn = card.querySelector('#btn-start-new-workspace-from-history');
+        if (newBtn) newBtn.addEventListener('click', startNewWorkspaceFromHistory);
+        return;
+    }
 
     if (!globalFurnacesResult || globalFurnacesResult.length === 0) {
         card.className = 'current-workbench-card empty';
@@ -1271,7 +1421,6 @@ function renderCurrentWorkbenchPlanCard() {
     ensureCurrentWorkspaceIdentity();
     const workspaceTitle = getCurrentWorkspaceTitle();
     const updatedText = formatWorkspaceTime(currentWorkspaceIdentity.updatedAt);
-    const isHistory = workspaceViewState.mode === 'history';
     const statusText = isHistory ? '历史查看' : (currentWorkspaceIdentity.status === 'saved' ? '已保存' : '当前');
 
     card.className = 'current-workbench-card' + (isHistory ? ' history-viewing' : '');
@@ -1289,25 +1438,92 @@ function renderCurrentWorkbenchPlanCard() {
             <span><b>${totalItems}</b> 件</span>
             <span><b>${totalWeight.toFixed(1)}</b> kg</span>
             <span><b>${unpacked}</b> 未装</span>
-            <span><b>${placementRules.strategy || '-'}</b></span>
+            <span><b>${currentWorkspaceIdentity.strategyLabel || STRATEGY_LABELS[placementRules.strategy] || placementRules.strategy || '-'}</b></span>
         </div>
         ${isHistory ? `
-            <button class="cwc-restore-btn" id="btn-restore-current-workspace" type="button">恢复当前方案</button>
-            <div class="cwc-history-note">当前左侧工装/工件为历史快照，只读查看；点击恢复可回到加载历史前的工作台。</div>
+            <div class="cwc-action-row">
+                <button class="cwc-restore-btn" id="btn-restore-current-workspace" type="button">恢复当前方案</button>
+                <button class="cwc-restore-btn cwc-new-workspace-btn" id="btn-start-new-workspace-from-history" type="button">新生成方案</button>
+            </div>
+            <div class="cwc-history-note">当前左侧工装/工件为历史快照，只读查看；可恢复原工作台，也可回到输入态重新生成。</div>
         ` : `<div class="cwc-history-note">保存后进入历史方案，可用于后续对比。</div>`}
     `;
 
     const restoreBtn = card.querySelector('#btn-restore-current-workspace');
     if (restoreBtn) restoreBtn.addEventListener('click', restoreCurrentWorkspaceFromHistory);
+    const newBtn = card.querySelector('#btn-start-new-workspace-from-history');
+    if (newBtn) newBtn.addEventListener('click', startNewWorkspaceFromHistory);
+}
+
+function renderLibraryHistoryBanner() {
+    const banner = document.getElementById('library-history-banner');
+    if (!banner) return;
+
+    if (workspaceViewState.mode !== 'history') {
+        banner.style.display = 'none';
+        banner.innerHTML = '';
+        return;
+    }
+
+    const title = workspaceViewState.historyTitle || '历史方案';
+    const hadPlan = !!workspaceViewState.backupHadPlan;
+    banner.style.display = 'flex';
+    banner.innerHTML = `
+        <div class="lhb-copy">
+            <strong>正在只读查看历史方案</strong>
+            <span>${title}</span>
+        </div>
+        <div class="lhb-actions">
+            ${hadPlan ? '<button type="button" class="lhb-btn restore" id="btn-library-restore-current">恢复当前方案</button>' : ''}
+            <button type="button" class="lhb-btn new" id="btn-library-start-new">新生成方案</button>
+        </div>
+    `;
+
+    const restoreBtn = banner.querySelector('#btn-library-restore-current');
+    if (restoreBtn) restoreBtn.addEventListener('click', restoreCurrentWorkspaceFromHistory);
+    const newBtn = banner.querySelector('#btn-library-start-new');
+    if (newBtn) newBtn.addEventListener('click', startNewWorkspaceFromHistory);
+}
+
+function compactPlanLibraryCards() {
+    const cards = document.querySelectorAll('#master-list .master-plan-card');
+    cards.forEach(card => {
+        card.classList.add('master-plan-card-compact');
+
+        if (!card.dataset.compactNormalized) {
+            const title = card.querySelector('.mpc-title');
+            const tag = card.querySelector('.mpc-tag');
+            const meta = card.querySelector('.mpc-meta');
+
+            if (title && !card.querySelector('.mpc-head-row')) {
+                const head = document.createElement('div');
+                head.className = 'mpc-head-row';
+                card.insertBefore(head, card.firstChild);
+                head.appendChild(title);
+                if (tag) head.appendChild(tag);
+            }
+
+            if (meta) {
+                const raw = (meta.textContent || '').replace(/\s+/g, ' ').trim();
+                meta.textContent = raw;
+                meta.title = raw;
+            }
+
+            card.dataset.compactNormalized = '1';
+        }
+    });
 }
 
 function refreshPlanLibraryWorkbench() {
     renderCurrentWorkbenchPlanCard();
+    renderLibraryHistoryBanner();
     setTimeout(enhancePlanLibraryCompareButtons, 0);
 }
 
 function enhancePlanLibraryCompareButtons() {
     renderCurrentWorkbenchPlanCard();
+    renderLibraryHistoryBanner();
+    compactPlanLibraryCards();
     const cards = document.querySelectorAll('#master-list .master-plan-card');
     const empty = document.getElementById('master-empty-state');
     if (empty) empty.style.display = cards.length ? 'none' : 'block';
@@ -1351,6 +1567,7 @@ function enhancePlanLibraryCompareButtons() {
             actionRow.appendChild(deleteBtn);
         }
     });
+    compactPlanLibraryCards();
 }
 
 function observePlanLibraryForCompareButtons() {
@@ -4757,11 +4974,9 @@ function showGenerationOptions() {
         return;
     }
 
-    const overlay = document.getElementById("gen-option-overlay");
-    const cards = document.querySelectorAll(".gen-option-card");
-    // 清除之前的选中状态
-    cards.forEach(c => c.classList.remove("selected"));
-    overlay.classList.add("active");
+    // 生成入口简化：不再弹出“装炉仿真/直接生成”的二选一。
+    // 方案生成后默认进入“方案分析”；装炉仿真已在方案工作台独立 Tab 中查看。
+    executeWithAILoading();
 }
 
 /**
@@ -5833,6 +6048,10 @@ function bindPlacementEditMode() {
     const dockFrontView = document.getElementById('dock-front-view');
     const dockSideView = document.getElementById('dock-side-view');
     const dockRotate90 = document.getElementById('dock-rotate-90');
+    if (dockRotate90) {
+        // 45° 视角旋转已经覆盖微调查看需求，移除旧 90° 旋转按钮，避免工具栏重复。
+        try { dockRotate90.remove(); } catch (_) { dockRotate90.style.display = 'none'; }
+    }
     const dockExplode = document.getElementById('dock-explode');
     // const dockGravity = document.getElementById('dock-gravity');
     const dockThermal = document.getElementById('dock-thermal');
@@ -5854,7 +6073,7 @@ function bindPlacementEditMode() {
         return btn;
     }
 
-    const dockRotate45 = ensureDockButton('dock-rotate-45', '↺', '45°', '绕当前工装中心旋转 45°', dockRotate90);
+    const dockRotate45 = ensureDockButton('dock-rotate-45', '↺', '45°', '绕当前工装中心旋转 45°', dockSideView || dockFrontView || dockTopView);
     const dockCenterView = ensureDockButton('dock-center-view', '◎', '居中', '将当前工装重新居中到画面', dockRotate45);
     const dockExplodeVertical = ensureDockButton('dock-explode-vertical', '↕', '纵爆', '垂直方向爆炸图 / 再次点击关闭', dockExplode);
     const dockExplodeHorizontal = ensureDockButton('dock-explode-horizontal', '↔', '横爆', '水平方向爆炸图 / 再次点击关闭', dockExplodeVertical);
@@ -5899,10 +6118,6 @@ function bindPlacementEditMode() {
         setTightFitCamera(dir, 0.18);
     }
 
-    function rotateCurrentView90() {
-        rotateCurrentViewByAngle(Math.PI / 2);
-    }
-
     function rotateCurrentView45() {
         rotateCurrentViewByAngle(Math.PI / 4);
     }
@@ -5923,12 +6138,6 @@ function bindPlacementEditMode() {
         });
     }
 
-    if (dockRotate90) {
-        dockRotate90.addEventListener('click', () => {
-            rotateCurrentView90();
-            highlightDockBtn(dockRotate90);
-        });
-    }
     if (dockRotate45) {
         dockRotate45.addEventListener('click', () => {
             rotateCurrentView45();
