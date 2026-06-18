@@ -1538,6 +1538,47 @@ async function waitForPdfRenderReady(host) {
     return host?.querySelector('.pdfv22-root') || host;
 }
 
+function loadScriptOnce(src, testFn) {
+    if (typeof testFn === 'function' && testFn()) return Promise.resolve(true);
+    return new Promise((resolve) => {
+        const existing = [...document.scripts].find(s => s.src === src);
+        if (existing) {
+            existing.addEventListener('load', () => resolve(true), { once: true });
+            existing.addEventListener('error', () => resolve(false), { once: true });
+            setTimeout(() => resolve(typeof testFn === 'function' ? !!testFn() : true), 3500);
+            return;
+        }
+        const script = document.createElement('script');
+        script.src = src;
+        script.async = false;
+        script.crossOrigin = 'anonymous';
+        script.onload = () => resolve(true);
+        script.onerror = () => resolve(false);
+        document.head.appendChild(script);
+    });
+}
+
+async function ensurePdfDependencies() {
+    const hasCanvas = () => typeof window.html2canvas !== 'undefined';
+    const hasPdf = () => !!(window.jspdf?.jsPDF || window.jsPDF);
+
+    if (!hasCanvas()) {
+        await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js', hasCanvas);
+    }
+    if (!hasPdf()) {
+        await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js', hasPdf);
+    }
+    // 备用 CDN：如果 cdnjs 偶发失败，尝试 jsDelivr。
+    if (!hasCanvas()) {
+        await loadScriptOnce('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js', hasCanvas);
+    }
+    if (!hasPdf()) {
+        await loadScriptOnce('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js', hasPdf);
+    }
+
+    return hasCanvas() && hasPdf();
+}
+
 async function renderPageToCanvas(pageEl) {
     if (typeof window.html2canvas === 'undefined') {
         throw new Error('html2canvas 未加载。请检查 furnace.html 是否已引入 html2canvas。');
@@ -1579,9 +1620,12 @@ function makeFileName(entries, options = {}) {
 export async function generateSixPagePDF(selectedIds = []) {
     let host = null;
     try {
+        updatePdfProgress('正在检查 PDF 导出组件...', 1, 10);
+        const depsOk = await ensurePdfDependencies();
         const JsPDF = getJsPdfCtor();
-        if (!JsPDF || typeof window.html2canvas === 'undefined') {
-            alert('PDF 导出组件未加载，请检查 html2canvas / jsPDF 是否正常引入。');
+        if (!depsOk || !JsPDF || typeof window.html2canvas === 'undefined') {
+            hidePdfProgressOverlay();
+            alert('PDF 导出组件未加载：html2canvas / jsPDF 加载失败。请确认 furnace.html 已恢复依赖，或浏览器 Network 中 cdnjs/jsDelivr 没有被拦截。');
             return;
         }
 

@@ -6,7 +6,8 @@
     <title>热处理预装炉智能体 - 影在科技</title>
     <link rel="stylesheet" href="css/main.css">
     <link rel="stylesheet" href="css/pdf-template.css">
-
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
@@ -551,6 +552,10 @@
                     <span class="dock-icon">➡</span>
                     <span class="dock-label">侧视</span>
                 </button>
+                <button class="dock-btn" id="dock-rotate-90" title="绕炉膛中心旋转90°">
+                    <span class="dock-icon">↻</span>
+                    <span class="dock-label">旋转</span>
+                </button>
                 <div class="dock-separator"></div>
                 <button class="dock-btn" id="dock-explode" title="点击开启垂直爆炸">
                     <span class="dock-icon">💥</span>
@@ -602,11 +607,12 @@
             <div id="master-view" class="active">
                 <div id="master-header">
                     <button class="master-back-btn" id="btn-master-back" style="display:none;">← 返回</button>
-                    <span class="master-library-hint">历史方案库：查看、复用、对比已保存的装炉方案</span>
+                    <span class="master-library-hint">保存、加载、删除历史装炉方案</span>
                     <button class="master-import-btn" id="btn-master-import-json">📥 导入JSON到工作台</button>
                 </div>
-                <div id="library-history-banner" class="library-history-banner" style="display:none;"></div>
                 <div id="master-content">
+                    <div id="library-history-banner" class="library-history-banner" style="display:none;"></div>
+
                     <div class="history-section-head">
                         <div>
                             <div class="history-title">历史方案</div>
@@ -630,7 +636,7 @@
             </div>
 
             <div class="right-tab-pane" id="right-tab-analysis">
-                <section id="current-workbench-card" class="current-workbench-card empty analysis-workbench-card">
+                <section id="current-workbench-card" class="current-workbench-card analysis-workbench-card empty">
                     <div class="cwc-head">
                         <div>
                             <div class="cwc-kicker">当前工作台方案</div>
@@ -646,7 +652,7 @@
                         保存到方案库
                     </button>
                     <div class="current-workbench-save-hint">
-                        保存后进入方案库，作为历史方案查看、复用和对比。
+                        保存后进入历史方案，可用于查看、复用和对比。
                     </div>
                 </div>
 
@@ -766,36 +772,90 @@
         </div>
     </div>
 
-    <!-- PDF Select Modal -->
+    <!-- PDF Select Modal - PDF V2.8 现场摆料施工单 / 横竖版设置 -->
     <div id="pdf-select-overlay">
-        <div id="pdf-select-modal">
-            <h3>📄 导出作业指导书</h3>
-            <p style="font-size:11px;color:#888;margin:0 0 14px 0;">选择需要交付的炉次。系统将生成三页式热处理装炉作业指导书：任务总览、分层步骤、AI评分与现场注意事项。</p>
+        <div id="pdf-select-modal" style="width:720px;max-width:94vw;">
+            <h3>📄 打印现场摆料施工单</h3>
+            <p style="font-size:11px;color:#888;margin:0 0 14px 0;line-height:1.6;">PDF V2.8 支持横版施工图、竖版归档单、区域局部放大与现场试用小修。建议现场摆料选择“自动推荐”或“横版施工图”。</p>
             <div id="pdf-unpacked-warning" class="pdf-unpacked-badge" style="display:none;"></div>
             <div id="pdf-furnace-list"></div>
+
             <div class="pdf-options-section">
-                <div class="opt-title">📋 附加交付物</div>
-                <div class="pdf-opt-item">
-                    <input type="checkbox" id="pdf-opt-json">
-                    <label for="pdf-opt-json">
-                        同时导出装炉方案 JSON
-                        <span class="opt-desc">用于系统备份、后续导入工作台或对接自动化设备。</span>
+                <div class="opt-title">🖨️ 打印版式</div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;">
+                    <label class="pdf-opt-item" style="align-items:flex-start;">
+                        <input type="radio" name="pdf-orientation" value="auto" checked>
+                        <span><b>自动推荐</b><span class="opt-desc">系统按件数、层数和是否导出步骤图自动选择。</span></span>
+                    </label>
+                    <label class="pdf-opt-item" style="align-items:flex-start;">
+                        <input type="radio" name="pdf-orientation" value="landscape">
+                        <span><b>横版施工图</b><span class="opt-desc">大图、分步骤，推荐现场照图摆料。</span></span>
+                    </label>
+                    <label class="pdf-opt-item" style="align-items:flex-start;">
+                        <input type="radio" name="pdf-orientation" value="portrait">
+                        <span><b>竖版归档单</b><span class="opt-desc">表格、签字、审核留档更方便。</span></span>
                     </label>
                 </div>
-                <div class="pdf-opt-item">
-                    <input type="checkbox" id="pdf-opt-worklist" checked>
-                    <label for="pdf-opt-worklist">
-                        PDF 内包含工件坐标清单
-                        <span class="opt-desc">在作业指导书中展示每件工件的 X / Y / Z 坐标，便于现场复核。</span>
+
+                <div class="opt-title">📦 输出模式</div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;">
+                    <label class="pdf-opt-item" style="align-items:flex-start;">
+                        <input type="radio" name="pdf-output-mode" value="standard" checked>
+                        <span><b>标准版</b><span class="opt-desc">封面、图例、步骤图和坐标清单。</span></span>
                     </label>
+                    <label class="pdf-opt-item" style="align-items:flex-start;">
+                        <input type="radio" name="pdf-output-mode" value="field">
+                        <span><b>精简现场版</b><span class="opt-desc">只输出封面 + 步骤图；默认关闭图例、坐标表和区域拆分，页数最少。</span></span>
+                    </label>
+                    <label class="pdf-opt-item" style="align-items:flex-start;">
+                        <input type="radio" name="pdf-output-mode" value="archive">
+                        <span><b>完整归档版</b><span class="opt-desc">偏向竖版和清单，方便签字留档。</span></span>
+                    </label>
+                </div>
+
+                <div class="opt-title">页面内容</div>
+                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;">
+                    <div class="pdf-opt-item">
+                        <input type="checkbox" id="pdf-opt-cover" checked>
+                        <label for="pdf-opt-cover">任务封面<span class="opt-desc">工装、工艺、KPI、签字确认。</span></label>
+                    </div>
+                    <div class="pdf-opt-item">
+                        <input type="checkbox" id="pdf-opt-legend" checked>
+                        <label for="pdf-opt-legend">工件图例 / 工件包<span class="opt-desc">颜色、尺寸、数量说明。</span></label>
+                    </div>
+                    <div class="pdf-opt-item">
+                        <input type="checkbox" id="pdf-opt-steps" checked>
+                        <label for="pdf-opt-steps">分步摆放图<span class="opt-desc">每步新增件高亮，已放置件灰化。</span></label>
+                    </div>
+                    <div class="pdf-opt-item">
+                        <input type="checkbox" id="pdf-opt-worklist" checked>
+                        <label for="pdf-opt-worklist">工件坐标清单<span class="opt-desc">X / Y / Z 坐标复核与归档。</span></label>
+                    </div>
+                    <div class="pdf-opt-item">
+                        <input type="checkbox" id="pdf-opt-region-zoom" checked>
+                        <label for="pdf-opt-region-zoom">高密度区域放大<span class="opt-desc">单层件数过多时自动拆 A/B/C/D 区。</span></label>
+                    </div>
+                    <div class="pdf-opt-item">
+                        <input type="checkbox" id="pdf-opt-json">
+                        <label for="pdf-opt-json">同时导出 JSON<span class="opt-desc">用于备份、回写或后续导入。</span></label>
+                    </div>
+                </div>
+
+                <div class="opt-title" style="margin-top:10px;">🔍 图纸密度</div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
+                    <label class="pdf-opt-item"><input type="radio" name="pdf-density" value="auto" checked><span><b>自动</b><span class="opt-desc">按复杂度拆分步骤。</span></span></label>
+                    <label class="pdf-opt-item"><input type="radio" name="pdf-density" value="large"><span><b>大图优先</b><span class="opt-desc">每步件数更少，更清楚。</span></span></label>
+                    <label class="pdf-opt-item"><input type="radio" name="pdf-density" value="compact"><span><b>节省纸张</b><span class="opt-desc">每页放更多件，页数更少。</span></span></label>
                 </div>
             </div>
+
             <div style="display:flex;gap:10px;margin-top:16px;">
                 <button style="flex:1;padding:9px;background:#3e3e52;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px;font-weight:700;" id="btn-pdf-cancel">取消</button>
-                <button style="flex:2;padding:9px;background:linear-gradient(135deg,#1f7a3a,#165c2b);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px;font-weight:700;" id="btn-pdf-confirm">📄 导出 PDF</button>
+                <button style="flex:2;padding:9px;background:linear-gradient(135deg,#1f7a3a,#165c2b);color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px;font-weight:700;" id="btn-pdf-confirm">📄 生成 PDF V2.8</button>
             </div>
         </div>
     </div>
+
 
     <!-- Import Preview Modal -->
     <div id="import-preview-overlay">

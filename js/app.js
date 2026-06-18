@@ -1372,6 +1372,9 @@ function startNewWorkspaceFromHistory() {
 function renderCurrentWorkbenchPlanCard() {
     const card = document.getElementById('current-workbench-card');
     if (!card) return;
+    const cardBaseClass = card.closest('#right-tab-analysis')
+        ? 'current-workbench-card analysis-workbench-card'
+        : 'current-workbench-card';
 
     const isHistory = workspaceViewState.mode === 'history';
 
@@ -1380,7 +1383,7 @@ function renderCurrentWorkbenchPlanCard() {
         const inputNote = workspaceViewState.backupHadInputs
             ? '当前工作台原本没有已生成方案。点击“新生成方案”会恢复原工装/工件输入，并回到可编辑状态。'
             : '当前工作台原本为空。点击“新生成方案”会退出历史查看，并回到可编辑空白状态。';
-        card.className = 'current-workbench-card empty history-viewing empty-history-viewing';
+        card.className = cardBaseClass + ' empty history-viewing empty-history-viewing';
         card.innerHTML = `
             <div class="cwc-head">
                 <div>
@@ -1400,7 +1403,7 @@ function renderCurrentWorkbenchPlanCard() {
     }
 
     if (!globalFurnacesResult || globalFurnacesResult.length === 0) {
-        card.className = 'current-workbench-card empty';
+        card.className = cardBaseClass + ' empty';
         card.innerHTML = `
             <div class="cwc-head">
                 <div>
@@ -1423,7 +1426,7 @@ function renderCurrentWorkbenchPlanCard() {
     const updatedText = formatWorkspaceTime(currentWorkspaceIdentity.updatedAt);
     const statusText = isHistory ? '历史查看' : (currentWorkspaceIdentity.status === 'saved' ? '已保存' : '当前');
 
-    card.className = 'current-workbench-card' + (isHistory ? ' history-viewing' : '');
+    card.className = cardBaseClass + (isHistory ? ' history-viewing' : '');
     card.innerHTML = `
         <div class="cwc-head">
             <div>
