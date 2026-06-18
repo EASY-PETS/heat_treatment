@@ -284,6 +284,7 @@
                 <button class="left-tab-btn active" data-tab="furnace">装载工装</button>
                 <button class="left-tab-btn" data-tab="tooling">生产车间</button>
                 <button class="left-tab-btn" data-tab="material">工件详情</button>
+                <button class="left-tab-btn" data-tab="merge">合炉设计</button>
             </div>
 
             <div class="left-tab-pane active" id="left-tab-furnace">
@@ -366,6 +367,33 @@
                     </div>
                 </div>
             </div>
+
+            <div class="left-tab-pane" id="left-tab-merge">
+                <div class="left-tab-intro heat-merge-intro">
+                    <strong>合炉设计 V0.5 Mock</strong>
+                    <span>基于测试用例二数据，按材质、工艺、硬度、渗层和历史曲线编号做合炉分组。当前版本用于验证交互与客户理解，不做最终硬度预测。</span>
+                </div>
+
+                <div class="heat-merge-toolbar">
+                    <div class="hm-strategy-group" aria-label="合炉策略">
+                        <button class="hm-strategy-btn active" data-merge-strategy="quality" type="button">质量优先</button>
+                        <button class="hm-strategy-btn" data-merge-strategy="delivery" type="button">交付优先</button>
+                        <button class="hm-strategy-btn" data-merge-strategy="cost" type="button">成本优先</button>
+                    </div>
+                    <div class="hm-toolbar-actions">
+                        <button class="hm-mini-btn primary" id="btn-load-merge-mock" type="button">载入测试用例二</button>
+                        <button class="hm-mini-btn" id="btn-refresh-merge-groups" type="button">重新分组</button>
+                        <button class="hm-mini-btn" id="btn-show-all-merge-materials" type="button">全部物料</button>
+                    </div>
+                </div>
+
+                <div id="heat-merge-summary" class="heat-merge-summary"></div>
+                <div id="heat-merge-groups" class="heat-merge-groups"></div>
+                <div class="heat-merge-footer-note">
+                    V0.5 只做“历史曲线匹配 + 合炉可行性提示”。工艺员仍需确认保温补偿和最终生产工艺。
+                </div>
+            </div>
+
             <div class="left-generate-action left-generate-bottom">
                 <button class="btn btn-generate left-generate-btn" id="btn-generate-plan">生成方案</button>
                 <div class="left-generate-hint">配置工装与工件后，生成装炉方案</div>
