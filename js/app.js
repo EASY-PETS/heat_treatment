@@ -410,7 +410,9 @@ function applyCandidatePlan(index) {
     setCurrentWorkspaceIdentityFromPlan(plan.label, plan.strategy);
 
     renderPlanAnalysisPanel(plan.analysis);
+    capturePlanCompareV05Baseline(plan.label, plan.strategy);
     renderHeatProcessRiskCard();
+    renderPlanCompareV05Card();
     renderCandidatePlanCards(candidatePlans, index, applyCandidatePlan);
     renderLoadingSimulationPanel();
     processSimulationActive = false;
@@ -573,7 +575,9 @@ function executeAndRender() {
     setCurrentWorkspaceIdentityFromPlan(bestPlan?.label || '', bestPlan?.strategy || '');
 
     renderPlanAnalysisPanel(analysis);
+    capturePlanCompareV05Baseline(bestPlan?.label || '', bestPlan?.strategy || '');
     renderHeatProcessRiskCard();
+    renderPlanCompareV05Card();
     renderCandidatePlanCards(candidatePlans, currentCandidatePlanIndex, applyCandidatePlan);
     renderLoadingSimulationPanel();
     processSimulationActive = false;
@@ -4453,6 +4457,12 @@ let heatMergeState = {
     lastGroups: []
 };
 
+// ==================== Plan Compare V0.5 ====================
+// 只做可解释的方案对比摘要：AI 原始方案、人工调整后当前方案、历史相似方案。
+// 不直接预测最终硬度，也不改写客户工艺曲线。
+let planCompareV05Baseline = null;
+
+
 function hmEscape(value) {
     return String(value ?? '').replace(/[&<>"']/g, ch => ({
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -4931,6 +4941,247 @@ function renderHeatProcessRiskCard() {
     panel.insertAdjacentElement('afterbegin', card);
 }
 
+
+function capturePlanCompareV05Baseline(label = '', strategy = '') {
+    if (!globalFurnacesResult || globalFurnacesResult.length === 0) {
+        planCompareV05Baseline = null;
+        window._planCompareV05Baseline = null;
+        return;
+    }
+
+    planCompareV05Baseline = {
+        createdAt: new Date().toISOString(),
+        label: label || currentWorkspaceIdentity?.strategyLabel || 'AI 原始方案',
+        strategy: strategy || currentWorkspaceIdentity?.strategyKey || placementRules.strategy || '',
+        furnaces: clonePlain(globalFurnacesResult || []),
+        unpackedItems: clonePlain(globalUnpackedItems || []),
+        heatGroupId: heatMergeState.appliedGroupId || null
+    };
+    window._planCompareV05Baseline = planCompareV05Baseline;
+}
+
+function ensurePlanCompareV05Baseline() {
+    if (planCompareV05Baseline?.furnaces?.length) return planCompareV05Baseline;
+    if (!globalFurnacesResult || globalFurnacesResult.length === 0) return null;
+    capturePlanCompareV05Baseline(currentWorkspaceIdentity?.strategyLabel || 'AI 原始方案', currentWorkspaceIdentity?.strategyKey || '');
+    return planCompareV05Baseline;
+}
+
+function parsePlanComparePercent(text) {
+    const n = parseFloat(String(text || '').replace('%', ''));
+    return Number.isFinite(n) ? n : 0;
+}
+
+function parsePlanCompareWeightRange(text) {
+    const nums = String(text || '').match(/\d+(?:\.\d+)?/g)?.map(Number).filter(Number.isFinite) || [];
+    if (nums.length >= 2) return { min: Math.min(nums[0], nums[1]), max: Math.max(nums[0], nums[1]) };
+    if (nums.length === 1) return { min: nums[0], max: nums[0] };
+    return null;
+}
+
+function getPlanCompareTotals(furnaces = [], unpackedItems = [], role = 'current') {
+    const safeFurnaces = Array.isArray(furnaces) ? furnaces : [];
+    const packedItems = safeFurnaces.flatMap(f => Array.isArray(f?.packedItems) ? f.packedItems : []);
+    const totalWeight = safeFurnaces.reduce((sum, f) => sum + Number(f?.totalWeight || 0), 0);
+    const maxWeight = safeFurnaces.reduce((sum, f) => sum + Number(f?.max_weight || f?.maxWeight || 0), 0);
+    const packedVolume = safeFurnaces.reduce((sum, f) => sum + getPackedVolume(f), 0);
+    const totalVolume = safeFurnaces.reduce((sum, f) => sum + getFurnaceVolume(f), 0);
+    const maxLayers = safeFurnaces.reduce((max, f) => Math.max(max, getCurrentToolingLayerCount(f)), 0);
+    const editedCount = packedItems.filter(item => item?.manualMoved || item?.finalEdited || item?.locked || item?.lastEditedAt).length;
+    const avgSpace = totalVolume > 0 ? (packedVolume / totalVolume) * 100 : NaN;
+    const weightRate = maxWeight > 0 ? (totalWeight / maxWeight) * 100 : NaN;
+    const unpackedCount = Array.isArray(unpackedItems) ? unpackedItems.length : Number(unpackedItems || 0) || 0;
+
+    return {
+        role,
+        furnaceCount: safeFurnaces.length,
+        itemCount: packedItems.length,
+        totalWeight,
+        maxWeight,
+        weightRate,
+        avgSpace,
+        maxLayers,
+        editedCount,
+        unpackedCount,
+        packedItems
+    };
+}
+
+function getActivePlanCompareHeatContext() {
+    const groupId = heatMergeState.appliedGroupId || planCompareV05Baseline?.heatGroupId || null;
+    const group = groupId ? (getHeatMergeGroupById(groupId) || getHeatMergeGroupPreset(groupId)) : null;
+    const curve = group ? (HEAT_MERGE_CURVES[group.curveKey] || HEAT_MERGE_CURVES['PENDING-MANUAL']) : null;
+    return { groupId, group, curve };
+}
+
+function getPlanCompareRisk(summary, context, role) {
+    const issues = [];
+    const space = Number(summary.avgSpace);
+    const weightRate = Number(summary.weightRate);
+    const totalWeight = Number(summary.totalWeight);
+    const range = parsePlanCompareWeightRange(context?.curve?.typicalWeight);
+
+    if (summary.unpackedCount > 0) issues.push(`仍有 ${summary.unpackedCount} 件未装`);
+    if (Number.isFinite(space) && space >= 42) issues.push('装载密度偏高');
+    if (Number.isFinite(weightRate) && weightRate >= 90) issues.push('接近承重上限');
+    if (range?.max && totalWeight > range.max * 1.12) issues.push('高于历史典型重量');
+    if (role === 'current' && summary.editedCount > 0) issues.push(`人工调整 ${summary.editedCount} 件`);
+
+    if (!issues.length) {
+        return { level: 'ok', label: '风险低', text: '当前摘要指标稳定，可进入仿真或打印确认。' };
+    }
+
+    const severe = issues.some(v => /未装|承重|高于历史/.test(v));
+    return {
+        level: severe ? 'warn' : 'mid',
+        label: severe ? '需确认' : '可优化',
+        text: issues.join('；')
+    };
+}
+
+function formatPlanCompareMetricNumber(value, digits = 1) {
+    return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '-';
+}
+
+function formatPlanComparePercent(value) {
+    return Number.isFinite(Number(value)) ? `${Number(value).toFixed(1)}%` : '-';
+}
+
+function buildPlanCompareColumnHtml(title, subtitle, summary, risk, roleClass) {
+    return `
+        <div class="pcv05-col ${roleClass}">
+            <div class="pcv05-col-head">
+                <div>
+                    <div class="pcv05-col-title">${hmEscape(title)}</div>
+                    <div class="pcv05-col-subtitle">${hmEscape(subtitle)}</div>
+                </div>
+                <span class="pcv05-risk ${risk.level}">${hmEscape(risk.label)}</span>
+            </div>
+            <div class="pcv05-metrics">
+                <div><span>工装</span><strong>${summary.furnaceCount || 0}</strong></div>
+                <div><span>已装</span><strong>${summary.itemCount || 0}</strong></div>
+                <div><span>重量</span><strong>${formatPlanCompareMetricNumber(summary.totalWeight)}kg</strong></div>
+                <div><span>空间</span><strong>${formatPlanComparePercent(summary.avgSpace)}</strong></div>
+                <div><span>层数</span><strong>${summary.maxLayers || '-'}</strong></div>
+                <div><span>未装</span><strong>${summary.unpackedCount || 0}</strong></div>
+            </div>
+            <div class="pcv05-note">${hmEscape(risk.text)}</div>
+        </div>
+    `;
+}
+
+function buildHistoricalPlanCompareColumn(context) {
+    const group = context?.group;
+    const curve = context?.curve;
+    if (!group || !curve) {
+        return `
+            <div class="pcv05-col history empty">
+                <div class="pcv05-col-head">
+                    <div>
+                        <div class="pcv05-col-title">历史相似方案</div>
+                        <div class="pcv05-col-subtitle">暂无合炉组 / 曲线</div>
+                    </div>
+                    <span class="pcv05-risk muted">待匹配</span>
+                </div>
+                <div class="pcv05-note">先在“合炉设计”中锁定一个工艺组，再生成方案，可显示历史曲线和典型重量。</div>
+            </div>
+        `;
+    }
+
+    const range = parsePlanCompareWeightRange(curve.typicalWeight);
+    const typicalMid = range ? (range.min + range.max) / 2 : NaN;
+    const mockSummary = {
+        furnaceCount: '-',
+        itemCount: group.quantity || group.items?.reduce((s, it) => s + Number(it.count || 0), 0) || '-',
+        totalWeight: typicalMid,
+        avgSpace: NaN,
+        maxLayers: '-',
+        unpackedCount: 0
+    };
+    const risk = {
+        level: group.statusClass === 'danger' ? 'danger' : (group.statusClass === 'warn' ? 'warn' : 'ok'),
+        label: group.status || '历史参考',
+        text: `${curve.historyCount || 0} 个相似炉次 · 典型重量 ${curve.typicalWeight || '-'} · 典型保温 ${curve.hold || '-'}。${curve.suggestion || ''}`
+    };
+
+    return buildPlanCompareColumnHtml('历史相似方案', curve.title || group.title, mockSummary, risk, 'history');
+}
+
+function updatePlanCompareV05Delta(card, baseSummary, currentSummary, context) {
+    const deltaEl = card.querySelector('.pcv05-delta-row');
+    if (!deltaEl) return;
+
+    const itemDelta = currentSummary.itemCount - baseSummary.itemCount;
+    const weightDelta = currentSummary.totalWeight - baseSummary.totalWeight;
+    const spaceDelta = Number(currentSummary.avgSpace) - Number(baseSummary.avgSpace);
+    const editDelta = currentSummary.editedCount || 0;
+    const range = parsePlanCompareWeightRange(context?.curve?.typicalWeight);
+    const historyText = range?.max && currentSummary.totalWeight > range.max
+        ? `本次重量高于历史上限 ${formatPlanCompareMetricNumber(currentSummary.totalWeight - range.max)}kg`
+        : '本次重量未明显超出历史典型范围';
+
+    deltaEl.innerHTML = `
+        <span>对比摘要</span>
+        <b>${itemDelta === 0 ? '已装件数持平' : `已装 ${itemDelta > 0 ? '+' : ''}${itemDelta} 件`}</b>
+        <b>重量 ${Math.abs(weightDelta) < 0.05 ? '持平' : `${weightDelta > 0 ? '+' : ''}${weightDelta.toFixed(1)}kg`}</b>
+        <b>空间 ${Number.isFinite(spaceDelta) ? (Math.abs(spaceDelta) < 0.05 ? '持平' : `${spaceDelta > 0 ? '+' : ''}${spaceDelta.toFixed(1)}%`) : '-'}</b>
+        <b>人工调整 ${editDelta} 件</b>
+        <b>${historyText}</b>
+    `;
+}
+
+function renderPlanCompareV05Card() {
+    const panel = document.getElementById('plan-analysis-panel');
+    if (!panel) return;
+    const old = document.getElementById('plan-compare-v05-card');
+    if (old) old.remove();
+
+    if (!globalFurnacesResult || globalFurnacesResult.length === 0) return;
+
+    const baseline = ensurePlanCompareV05Baseline();
+    const context = getActivePlanCompareHeatContext();
+    const baseSummary = getPlanCompareTotals(baseline?.furnaces || globalFurnacesResult, baseline?.unpackedItems || [], 'ai');
+    const currentSummary = getPlanCompareTotals(globalFurnacesResult, globalUnpackedItems || [], 'current');
+
+    const baseRisk = getPlanCompareRisk(baseSummary, context, 'ai');
+    const currentRisk = getPlanCompareRisk(currentSummary, context, 'current');
+    const currentTitle = currentSummary.editedCount > 0 ? '人工调整方案' : '当前方案';
+    const currentSub = currentSummary.editedCount > 0 ? `已调整 ${currentSummary.editedCount} 件，可继续运行仿真验证` : '尚未人工编辑，作为当前执行候选';
+
+    const card = document.createElement('section');
+    card.id = 'plan-compare-v05-card';
+    card.className = 'plan-compare-v05-card';
+    card.innerHTML = `
+        <div class="pcv05-head">
+            <div>
+                <div class="pcv05-kicker">方案对比 V0.5</div>
+                <div class="pcv05-title">AI 原始方案 / 人工调整方案 / 历史相似方案</div>
+            </div>
+            <span class="pcv05-badge">摘要对比</span>
+        </div>
+        <div class="pcv05-grid">
+            ${buildPlanCompareColumnHtml('AI 原始方案', baseline?.label || '当前候选策略初始结果', baseSummary, baseRisk, 'ai')}
+            ${buildPlanCompareColumnHtml(currentTitle, currentSub, currentSummary, currentRisk, 'manual')}
+            ${buildHistoricalPlanCompareColumn(context)}
+        </div>
+        <div class="pcv05-delta-row"></div>
+        <div class="pcv05-actions">
+            <button type="button" class="hm-mini-btn" data-action="pcv05-refresh">刷新对比</button>
+            <button type="button" class="hm-mini-btn primary" data-action="pcv05-run-sim">去仿真验证</button>
+        </div>
+    `;
+
+    const anchor = document.getElementById('heat-process-risk-card');
+    if (anchor?.parentNode === panel) {
+        anchor.insertAdjacentElement('afterend', card);
+    } else {
+        panel.insertAdjacentElement('afterbegin', card);
+    }
+
+    updatePlanCompareV05Delta(card, baseSummary, currentSummary, context);
+}
+
+
 function initHeatMergeDesign() {
     const loadBtn = document.getElementById('btn-load-merge-mock');
     if (loadBtn) loadBtn.addEventListener('click', () => loadHeatMergeMockData(false));
@@ -4940,6 +5191,24 @@ function initHeatMergeDesign() {
 
     const showAllBtn = document.getElementById('btn-show-all-merge-materials');
     if (showAllBtn) showAllBtn.addEventListener('click', () => applyHeatMergeGroupToMaterialCards(null));
+
+    const analysisPanel = document.getElementById('plan-analysis-panel');
+    if (analysisPanel && analysisPanel.dataset.planCompareV05Bound !== '1') {
+        analysisPanel.dataset.planCompareV05Bound = '1';
+        analysisPanel.addEventListener('click', event => {
+            const btn = event.target.closest('[data-action]');
+            if (!btn) return;
+            const action = btn.getAttribute('data-action');
+            if (action === 'pcv05-refresh') {
+                renderPlanCompareV05Card();
+                return;
+            }
+            if (action === 'pcv05-run-sim') {
+                activateRightPanelTab('thermal');
+                renderThermalSimulationPanel(null, 'idle');
+            }
+        });
+    }
 
     document.querySelectorAll('.hm-strategy-btn').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -4989,6 +5258,7 @@ function initHeatMergeDesign() {
     }
 
     renderHeatMergeDesignPanel();
+    renderPlanCompareV05Card();
 }
 
 
