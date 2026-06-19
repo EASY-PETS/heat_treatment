@@ -11,75 +11,7 @@
  *   - 容量不足详细提示：显示缺少数值 (kg)
  */
 import { createToolingModalController } from './tooling-modal.js';
-const toolingModal = createToolingModalController({
-    furnaceTooling,
-    defaultToolingType,
-
-    createFurnaceCard,
-    selectFurnaceCard,
-    updateTopSummary,
-
-    buildFurnaceGroup,
-    getFurnaceDataFromCard,
-
-    itemsGroup,
-    clearFurnaceGroups,
-    furnaceGroups,
-    setCurrentFurnaceIndex,
-
-    controls,
-    camera,
-
-    hideExplodeBOMButtons,
-
-    getSelectedFurnaceCardId: () => selectedFurnaceCardId
-});
 import { createWorkbenchRecordController } from './workbench-record.js';
-const workbenchRecord = createWorkbenchRecordController({
-    analyzeFurnaces,
-    renderPlanAnalysisPanel,
-    activateRightPanelTab,
-
-    getRuntimeFurnacesFromRecord,
-
-    setPlacementRules,
-    setGlobalFurnacesResult,
-    setGlobalUnpackedItems,
-    setCurrentFurnaceIndex,
-    setSelectedFurnaceCardId,
-    setSelectedMaterialCardId,
-    clearFurnaceGroups,
-
-    createFurnaceCard,
-    createMaterialCard,
-    getFurnaceDataFromCard,
-
-    getSelectedMaterialName,
-    renderSingleFurnace,
-    updateFurnaceNav,
-    updateExplodeBOMButtons,
-    renderFurnaceThumbnails,
-    renderAISummaryBar,
-    updateTopSummary,
-    renderFilterBars,
-
-    generateUniqueColor,
-    usedColors,
-    clearUsedColors,
-    setFurnaceCounter,
-    setMaterialCounter,
-    clearMaterialFilters,
-    clearProcessFilters,
-    clearHardnessFilters,
-
-    showPlanActionButtons,
-    hidePlanActionButtons,
-    hideExplodeBOMButtons,
-    showCapacityFeedback,
-    hideMasterView,
-    onCenterFurnaceClick,
-    clearFurnaceResults
-});
 import { createPlanLibraryController } from './plan-library.js';
 import { analyzeFurnaces } from './plan-analysis.js';
 import { renderPlanAnalysisPanel, renderCandidatePlanCards, renderLoadingSimulationPanel, renderThermalSimulationPanel } from './ui.js';
@@ -103,6 +35,7 @@ import {
     furnaceGroups, controls, camera,
     setFurnaceCounter, setMaterialCounter,
     setSelectedFurnaceCardId, setSelectedMaterialCardId,
+    currentMaterialFilters, currentProcessFilters, currentHardnessFilters,
     clearMaterialFilters, clearProcessFilters, clearHardnessFilters,
     clearUsedColors
 } from './state.js';
@@ -182,7 +115,8 @@ import {
     setPlacementEditActiveLayer,
     stepPlacementEditActiveLayer,
     setPlacementEditShowAllLayers,
-    showAILoadingLoading, hideAILoadingLoading
+    showAILoadingLoading, hideAILoadingLoading,
+    setItemColorMode, getItemColorMode
 } from './three-scene.js';
 import {
     createFurnaceCard, selectFurnaceCard, showFurnaceDetail,
@@ -206,6 +140,77 @@ import {
     getRuntimeFurnacesFromRecord,
     isDigitalTwinRecord
 } from './plan-record.js';
+
+// V0.7.1 compile fix: keep all static imports together first, then initialize controllers.
+const toolingModal = createToolingModalController({
+    furnaceTooling,
+    defaultToolingType,
+
+    createFurnaceCard,
+    selectFurnaceCard,
+    updateTopSummary,
+
+    buildFurnaceGroup,
+    getFurnaceDataFromCard,
+
+    itemsGroup,
+    clearFurnaceGroups,
+    furnaceGroups,
+    setCurrentFurnaceIndex,
+
+    controls,
+    camera,
+
+    hideExplodeBOMButtons,
+
+    getSelectedFurnaceCardId: () => selectedFurnaceCardId
+});
+
+const workbenchRecord = createWorkbenchRecordController({
+    analyzeFurnaces,
+    renderPlanAnalysisPanel,
+    activateRightPanelTab,
+
+    getRuntimeFurnacesFromRecord,
+
+    setPlacementRules,
+    setGlobalFurnacesResult,
+    setGlobalUnpackedItems,
+    setCurrentFurnaceIndex,
+    setSelectedFurnaceCardId,
+    setSelectedMaterialCardId,
+    clearFurnaceGroups,
+
+    createFurnaceCard,
+    createMaterialCard,
+    getFurnaceDataFromCard,
+
+    getSelectedMaterialName,
+    renderSingleFurnace,
+    updateFurnaceNav,
+    updateExplodeBOMButtons,
+    renderFurnaceThumbnails,
+    renderAISummaryBar,
+    updateTopSummary,
+    renderFilterBars,
+
+    generateUniqueColor,
+    usedColors,
+    clearUsedColors,
+    setFurnaceCounter,
+    setMaterialCounter,
+    clearMaterialFilters,
+    clearProcessFilters,
+    clearHardnessFilters,
+
+    showPlanActionButtons,
+    hidePlanActionButtons,
+    hideExplodeBOMButtons,
+    showCapacityFeedback,
+    hideMasterView,
+    onCenterFurnaceClick,
+    clearFurnaceResults
+});
 
 let candidatePlans = [];
 let currentCandidatePlanIndex = 0;
@@ -317,10 +322,10 @@ function markCurrentWorkspaceSaved(title) {
 }
 
 const STRATEGY_LABELS = {
-    balanced: '均衡方案',
-    spaceUtil: '空间优先',
-    thermalBalance: '热场均衡',
-    surfaceUniform: '表面均匀'
+    balanced: '重心稳定',
+    spaceUtil: '空间利用率优先',
+    thermalBalance: '热场均衡装载',
+    surfaceUniform: '表面均匀性优先'
 };
 
 function clonePlain(obj) {
@@ -335,10 +340,10 @@ function generateCandidatePlans(furnacePoolInput, itemsInput, spacing) {
             key: currentStrategy,
             label: '当前策略：' + (STRATEGY_LABELS[currentStrategy] || currentStrategy)
         },
-        { key: 'balanced', label: '均衡方案' },
-        { key: 'spaceUtil', label: '空间优先' },
-        { key: 'thermalBalance', label: '热场均衡' },
-        { key: 'surfaceUniform', label: '表面均匀' }
+        { key: 'balanced', label: '重心稳定' },
+        { key: 'spaceUtil', label: '空间利用率优先' },
+        { key: 'thermalBalance', label: '热场均衡装载' },
+        { key: 'surfaceUniform', label: '表面均匀性优先' }
     ];
 
     // 去重：如果当前策略本来就是 balanced / spaceUtil 等，不重复跑
@@ -371,8 +376,15 @@ function generateCandidatePlans(furnacePoolInput, itemsInput, spacing) {
         };
     });
 
-    // 排序：能全部装入的优先，其次看综合评分
-    plans.sort((a, b) => {
+    // V0.7.13：装炉规则弹窗选择的策略必须真正成为当前主方案。
+    // 旧逻辑会把所有候选策略按综合评分排序，导致用户选择“热场均衡/表面均匀”后，
+    // 仍可能被评分更高的“重心稳定/空间优先”覆盖，看起来像策略没有启动。
+    // 新逻辑：当前选择策略固定排第一；其它策略仅作为右侧候选对比。
+    const selectedStrategy = currentStrategy;
+    const selectedPlan = plans.find(p => p.strategy === selectedStrategy) || plans[0];
+    const otherPlans = plans.filter(p => p !== selectedPlan);
+
+    otherPlans.sort((a, b) => {
         const aExecutable = a.analysis.unpackedCount === 0 ? 1 : 0;
         const bExecutable = b.analysis.unpackedCount === 0 ? 1 : 0;
 
@@ -383,7 +395,7 @@ function generateCandidatePlans(furnacePoolInput, itemsInput, spacing) {
         return b.analysis.compositeScore - a.analysis.compositeScore;
     });
 
-    return plans;
+    return selectedPlan ? [selectedPlan, ...otherPlans] : otherPlans;
 }
 
 function applyCandidatePlan(index) {
@@ -412,6 +424,7 @@ function applyCandidatePlan(index) {
     renderPlanAnalysisPanel(plan.analysis);
     capturePlanCompareV05Baseline(plan.label, plan.strategy);
     renderHeatProcessRiskCard();
+    renderToolingRecommendationBasisCard();
     renderPlanCompareV05Card();
     renderCandidatePlanCards(candidatePlans, index, applyCandidatePlan);
     renderLoadingSimulationPanel();
@@ -450,6 +463,83 @@ function applyCandidatePlan(index) {
     updateTopSummary();
     renderHeatMergeDesignPanel();
     updateWorkbenchUiMode();
+}
+
+
+function buildPackingItemFromHeatMergeItem(item, index = 0) {
+    if (!item) return null;
+    const dims = inferMockShape(item);
+    const shape = item.shape || dims.shape || 'cuboid';
+    return {
+        name: item.name || item.showName || `合炉物料-${index + 1}`,
+        shape,
+        count: Number(item.count) || 0,
+        dim1: Number(item.dim1 || item.L || dims.dim1 || 80) || 80,
+        dim2: Number(item.dim2 || item.W || dims.dim2 || (shape === 'cylinder' ? (item.dim1 || item.D || dims.dim1 || 80) : 80)) || 80,
+        dim3: Number(item.dim3 || item.H || dims.dim3 || 30) || 30,
+        weight: Number(item.weight || item.totalWeight || item.totalWeightKg || 0) || 0,
+        color: item.color || '#2E86AB',
+        material: item.material || item.materialRaw || '',
+        process: item.process || '',
+        hardness: item.hardness || item.hardnessRaw || '',
+        customer: item.customer || '',
+        itemCode: item.itemCode || '',
+        showName: item.showName || item.name || '',
+        orderDate: item.orderDate || item.date || '',
+        deliveryDate: item.deliveryDate || item.dueDate || '',
+        remark: item.remark || ''
+    };
+}
+
+function collectPackingItemsForCurrentGeneration() {
+    const groupId = heatMergeState?.appliedGroupId || heatMergeState?.adoptedToolingPlan?.groupId || null;
+    const group = groupId ? getHeatMergeGroupById(groupId) : null;
+
+    // V0.7.11：如果已经在合炉设计里采用了某个工艺组，生成方案必须使用该组的源数据，
+    // 不再依赖 material-card 的 display 状态。否则在“交付优先/成本优先”等策略下，
+    // 卡片筛选与策略分组 key 不一致时会出现 0 物料 / 0 炉次。
+    if (group && Array.isArray(group.items) && group.items.length > 0) {
+        return group.items
+            .filter(isHeatMergeItemEligible)
+            .map((item, index) => buildPackingItemFromHeatMergeItem(item, index))
+            .filter(item => item && Number(item.count) > 0);
+    }
+
+    const items = [];
+    document.querySelectorAll('.material-card').forEach(card => {
+        // 未锁定合炉组时，才尊重工件详情里的可见筛选结果。
+        if (card.style.display === 'none') return;
+        const d = getMaterialDataFromCard(card);
+        const h = parseHardnessRange(d.hardness);
+        const validationProbe = {
+            material: normalizeMaterialName(d.material),
+            process: normalizeHeatText(d.process),
+            hardness: h ? h.label : '',
+            count: Number(d.count) || 0,
+            weight: Number(d.totalWeight) || 0
+        };
+        if (!isHeatMergeItemEligible(validationProbe)) return;
+        items.push({
+            name: d.name,
+            shape: d.shape,
+            count: d.count,
+            dim1: d.dim1,
+            dim2: d.dim2,
+            dim3: d.dim3,
+            weight: d.totalWeight,
+            color: d.color,
+            material: d.material || '',
+            process: d.process || '',
+            hardness: d.hardness || '',
+            customer: d.customer || '',
+            itemCode: d.itemCode || '',
+            showName: d.showName || '',
+            orderDate: d.orderDate || '',
+            deliveryDate: d.deliveryDate || '',
+            remark: d.remark || ''
+        });
+    });
+    return items;
 }
 
 /**
@@ -506,36 +596,12 @@ function executeAndRender() {
             params: toolingParams   // 新增
         });
     });
-    let itemsInput = [];
-    document.querySelectorAll(".material-card").forEach(card => {
-        // 关键：跳过被筛选隐藏的卡片
-        if (card.style.display === 'none') return;
-        const d = getMaterialDataFromCard(card);
-        itemsInput.push({
-            name: d.name,
-            shape: d.shape,
-            count: d.count,
+    let itemsInput = collectPackingItemsForCurrentGeneration();
 
-            dim1: d.dim1,
-            dim2: d.dim2,
-            dim3: d.dim3,
-
-            weight: d.totalWeight,
-            color: d.color,
-
-            material: d.material || "",
-            process: d.process || "",
-            hardness: d.hardness || "",
-
-            customer: d.customer || "",
-            itemCode: d.itemCode || "",
-            showName: d.showName || "",
-
-            orderDate: d.orderDate || "",
-            deliveryDate: d.deliveryDate || "",
-            remark: d.remark || "",
-        });
-    });
+    if (heatMergeState?.appliedGroupId && itemsInput.length === 0) {
+        const group = getHeatMergeGroupById(heatMergeState.appliedGroupId);
+        console.warn('[heat-merge] locked group has no generation items:', heatMergeState.appliedGroupId, group);
+    }
 
     // 全局安全间距已取消，保留 5mm 作为系统兜底值。
     // 实际装炉优先使用每个工装自己的 actualSpacing。
@@ -577,6 +643,7 @@ function executeAndRender() {
     renderPlanAnalysisPanel(analysis);
     capturePlanCompareV05Baseline(bestPlan?.label || '', bestPlan?.strategy || '');
     renderHeatProcessRiskCard();
+    renderToolingRecommendationBasisCard();
     renderPlanCompareV05Card();
     renderCandidatePlanCards(candidatePlans, currentCandidatePlanIndex, applyCandidatePlan);
     renderLoadingSimulationPanel();
@@ -802,6 +869,10 @@ export function clearFurnaceResults() {
 
     const hpr = document.getElementById('heat-process-risk-card');
     if (hpr) hpr.remove();
+    const trb = document.getElementById('tooling-recommendation-basis-card');
+    if (trb) trb.remove();
+    const pcv05 = document.getElementById('plan-compare-v05-card');
+    if (pcv05) pcv05.remove();
 
     renderAISummaryBar(null);
     updateCurrentToolingHud();
@@ -959,8 +1030,10 @@ function updateCurrentToolingHud() {
         }
     }
 
-    const editBtn = document.getElementById('btn-placement-edit');
-    if (editBtn) editBtn.style.display = 'inline-flex';
+    // V0.7.18：编辑入口迁移到底部 Dock；HUD 内按钮保持隐藏，只同步 Dock 状态。
+    if (typeof syncPlacementEditEntryButtons === 'function') {
+        syncPlacementEditEntryButtons();
+    }
 
     syncCurrentToolingHudControls(globalFurnacesResult.length);
     hud.style.display = 'block';
@@ -1541,7 +1614,7 @@ function enhancePlanLibraryCompareButtons() {
     const empty = document.getElementById('master-empty-state');
     if (empty) empty.style.display = cards.length ? 'none' : 'block';
     cards.forEach(card => {
-        if (card.querySelector('[data-action="compare-plan"]')) return;
+        card.querySelectorAll('[data-action="compare-plan"]').forEach(btn => btn.remove());
 
         let actionRow = card.querySelector('.mpc-actions');
         if (!actionRow) {
@@ -1558,12 +1631,8 @@ function enhancePlanLibraryCompareButtons() {
             actionRow.appendChild(existingLoad);
         }
 
-        const compareBtn = document.createElement('button');
-        compareBtn.type = 'button';
-        compareBtn.className = 'plan-card-action compare';
-        compareBtn.setAttribute('data-action', 'compare-plan');
-        compareBtn.textContent = '对比';
-        actionRow.appendChild(compareBtn);
+        // V0.7.5：历史方案 3D 对比入口暂时隐藏，避免和方案分析页摘要对比造成认知负担。
+        card.querySelectorAll('[data-action="compare-plan"]').forEach(btn => btn.remove());
 
         const legacyDelete = card.querySelector('.mpc-delete');
         if (legacyDelete && !actionRow.querySelector('[data-action="delete-plan-proxy"]')) {
@@ -2981,7 +3050,7 @@ function syncThermalControlState(metrics = null) {
     syncProcessPlayerHud(metrics);
 }
 
-function renderCurrentThermalSimulation(progress = 0.18, switchTab = true) {
+function renderCurrentThermalSimulation(progress = 0, switchTab = true) {
     if (!guardProcessSimulationEntry()) return null;
     processSimulationMode = 'thermal';
     processSimulationActive = true;
@@ -3091,7 +3160,7 @@ function renderCurrentProcessSimulation() {
         return renderCurrentQuenchSimulation(true);
     }
     const runtime = getVacuumQuenchThermalRuntime();
-    const p = runtime?.activeMode === 'thermal' ? (runtime.progress || 0.18) : 0.18;
+    const p = runtime?.activeMode === 'thermal' ? (runtime.progress || 0) : 0;
     return renderCurrentThermalSimulation(p, true);
 }
 
@@ -3120,7 +3189,7 @@ function switchProcessSimulationMode(mode) {
         renderCurrentQuenchSimulation(true);
     } else {
         const runtime = getVacuumQuenchThermalRuntime();
-        renderCurrentThermalSimulation(runtime?.progress || 0.18, true);
+        renderCurrentThermalSimulation(runtime?.progress || 0, true);
     }
 }
 
@@ -3135,7 +3204,7 @@ function playCurrentThermalSimulation() {
     document.body.classList.remove('quench-medium-mode');
     activateRightPanelTab('thermal');
     const runtime = getVacuumQuenchThermalRuntime();
-    const startProgress = runtime.paused && runtime.activeMode === 'thermal' ? (runtime.progress || 0) : 0.03;
+    const startProgress = runtime.paused && runtime.activeMode === 'thermal' ? (runtime.progress || 0) : 0;
 
     const metrics = playVacuumQuenchThermalSimulation({
         durationMs: getThermalDurationFromUi(),
@@ -3731,11 +3800,25 @@ function setupDockViewSettingsMenu() {
             { id: 'dock-toggle-rulers', label: '尺寸标注', active: !!displaySettings.showRulers },
             { id: 'dock-toggle-axes', label: '方向轴', active: !!displaySettings.showAxes }
         ];
+        const colorMode = typeof getItemColorMode === 'function' ? getItemColorMode() : 'materialCustomer';
+        const colorModeOptions = [
+            { value: 'materialCustomer', label: '材质主色 + 客户标识' },
+            { value: 'material', label: '按材质着色' },
+            { value: 'customer', label: '按客户着色' },
+            { value: 'process', label: '按工艺着色' }
+        ];
         pop.innerHTML = items.map(item => `
             <button type="button" data-dock-proxy="${item.id}" style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 10px;border:0;border-radius:10px;background:${item.active ? '#eff6ff' : 'transparent'};color:#0f172a;font-size:12px;font-weight:800;cursor:pointer;margin-bottom:2px;">
                 <span>${item.label}</span><span style="color:${item.active ? '#2563eb' : '#94a3b8'};">${item.active ? '✓' : '—'}</span>
             </button>
-        `).join('') + '<div style="font-size:10px;color:#94a3b8;line-height:1.35;padding:6px 8px 2px;">视图设置只影响观察辅助，不改变装炉方案。</div>';
+        `).join('') + `
+            <div style="height:1px;background:#e2e8f0;margin:8px 2px;"></div>
+            <label style="display:block;font-size:10px;font-weight:900;color:#64748b;padding:0 4px 5px;">颜色模式</label>
+            <select id="item-color-mode-select" style="width:100%;height:34px;border:1px solid #cbd5e1;border-radius:10px;background:white;color:#0f172a;font-size:12px;font-weight:800;padding:0 8px;">
+                ${colorModeOptions.map(opt => `<option value="${opt.value}" ${opt.value === colorMode ? 'selected' : ''}>${opt.label}</option>`).join('')}
+            </select>
+            <div style="font-size:10px;color:#94a3b8;line-height:1.35;padding:7px 6px 2px;">默认保留材质主色，同时用客户/批次辅助标识区分相似工件。</div>
+        `;
     }
 
     function positionMenu() {
@@ -3766,6 +3849,20 @@ function setupDockViewSettingsMenu() {
         event.stopPropagation();
         const target = document.getElementById(proxy.getAttribute('data-dock-proxy'));
         if (target) target.click();
+        renderMenu();
+    });
+
+    pop.addEventListener('change', (event) => {
+        const select = event.target.closest('#item-color-mode-select');
+        if (!select) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (typeof setItemColorMode === 'function') setItemColorMode(select.value || 'materialCustomer');
+        if (globalFurnacesResult && globalFurnacesResult.length > 0) {
+            renderSingleFurnace(currentFurnaceIndex || 0, getSelectedMaterialName());
+            renderFurnaceThumbnails(globalFurnacesResult, currentFurnaceIndex || 0, handleThumbFurnaceClick);
+            updateCurrentToolingHud();
+        }
         renderMenu();
     });
 
@@ -4360,8 +4457,8 @@ function addDefaultMaterial() {
 
 
 
-// ==================== Heat Merge Design V0.5 Mock ====================
-// 基于“测试用例二.xlsx”抽取的演示数据：只用于验证 UI/交互，不做最终工艺判定。
+// ==================== Heat Merge Design V0.6 Excel Data Pool ====================
+// V0.6：真实生产任务从“工件详情”导入，合炉设计只读取工件详情数据池；Mock 仅保留为演示样例。
 const HEAT_MERGE_MOCK_ITEMS = [
     { name:'模具', itemCode:'00057790', customer:'瑞丰养殖', L:null, W:null, H:328, D:52, count:6, weight:131.5, material:'mov', hardness:'60-62,', process:'真空淬火', date:'2023.05.10', remark:'' },
     { name:'模具', itemCode:'00057791', customer:'科星检测', L:160, W:155, H:37, D:null, count:1, weight:7, material:'mov', hardness:'58—62,', process:'真空淬火', date:'2023.05.10', remark:'' },
@@ -4454,7 +4551,17 @@ let heatMergeState = {
     strategy: 'quality',
     selectedGroupId: null,
     appliedGroupId: null,
-    lastGroups: []
+    lastGroups: [],
+    dataSource: 'materials',
+    /** V0.7：AI 工装推荐 / 预装炉设计 */
+    lastToolingRecommendations: [],
+    selectedToolingPlanId: null,
+    adoptedToolingPlan: null,
+    /** V0.7.5：默认只按当前策略推荐一张卡；用户主动点击后才比较三种策略 */
+    compareToolingStrategies: false,
+    /** V0.7.12：人工拼炉 Beta。自动分组保持保守；跨材质拼炉必须由用户确认生成。 */
+    manualMergeGroups: [],
+    manualMergeDraftGroupIds: []
 };
 
 // ==================== Plan Compare V0.5 ====================
@@ -4504,6 +4611,155 @@ function extractCaseDepth(value) {
     return match ? `${match[1]}-${match[2]}mm` : '';
 }
 
+function getHeatMergeItemValidation(item) {
+    const missing = [];
+    if (!item.material) missing.push('材质');
+    if (!normalizeHeatText(item.process)) missing.push('工艺');
+    if (!item.hardness) missing.push('硬度');
+    if (!Number(item.count)) missing.push('数量');
+    if (!Number(item.weight)) missing.push('重量');
+    if (missing.includes('材质') || missing.includes('工艺') || missing.includes('硬度')) {
+        return { level: 'invalid', missing, text: `缺少${missing.join('、')}` };
+    }
+    if (missing.length) {
+        return { level: 'review', missing, text: `需确认${missing.join('、')}` };
+    }
+    return { level: 'valid', missing: [], text: '可参与合炉分组' };
+}
+
+function isHeatMergeItemEligible(item) {
+    return getHeatMergeItemValidation(item).level === 'valid';
+}
+
+function applyHeatMergeValidationToMaterialCards() {
+    document.querySelectorAll('.material-card').forEach(card => {
+        const d = getMaterialDataFromCard(card);
+        const h = parseHardnessRange(d.hardness);
+        const item = {
+            material: normalizeMaterialName(d.material),
+            process: normalizeHeatText(d.process),
+            hardness: h ? h.label : '',
+            count: Number(d.count) || 0,
+            weight: Number(d.totalWeight) || 0
+        };
+        const status = getHeatMergeItemValidation(item);
+        card.classList.toggle('heat-item-invalid', status.level === 'invalid');
+        card.classList.toggle('heat-item-review', status.level === 'review');
+        card.classList.toggle('heat-item-excluded', status.level !== 'valid');
+        card.setAttribute('data-heat-validation', status.level);
+        card.setAttribute('data-heat-validation-message', status.text);
+
+        let badge = card.querySelector('.heat-validation-badge');
+        if (status.level === 'valid') {
+            if (badge) badge.remove();
+            return;
+        }
+        if (!badge) {
+            badge = document.createElement('div');
+            badge.className = 'heat-validation-badge';
+            const info = card.querySelector('.m-info') || card;
+            info.appendChild(badge);
+        }
+        badge.className = `heat-validation-badge ${status.level}`;
+        badge.innerHTML = `<b>${status.level === 'invalid' ? '异常' : '待确认'}</b><span>${hmEscape(status.text)} · 不参与合炉/生成</span>`;
+    });
+}
+
+function normalizeHeatMergeKeyPart(value) {
+    return normalizeHeatText(value || '')
+        .replace(/\s+/g, '')
+        .replace(/[^一-龥A-Za-z0-9#.-]/g, '') || 'NA';
+}
+
+function getHeatMergeDynamicGroupId(item) {
+    const material = normalizeMaterialName(item.material);
+    const process = normalizeHeatText(item.process);
+    const hardness = item.hardness || '';
+    const caseDepth = item.caseDepth || '无渗层';
+    return [material, process, hardness, caseDepth].map(normalizeHeatMergeKeyPart).join('|');
+}
+
+function getHeatMergeCurveKeyFromItem(item) {
+    const material = normalizeMaterialName(item.material);
+    const process = normalizeHeatText(item.process);
+    const hardness = item.hardness || '';
+    if (material === 'MOV' && process === '真空淬火' && hardness === '56-58') return 'VAC-MOV-56-58';
+    if (material === '20Cr' && process === '渗碳抛丸' && hardness === '55-60') return 'CARB-SHOT-20CR-55-60';
+    if (material === 'MOV' && process === '真空淬火' && (hardness === '58-62' || hardness === '60-62')) return 'VAC-MOV-58-62-MIX';
+    const mat = normalizeHeatMergeKeyPart(material).toUpperCase();
+    const proc = normalizeHeatMergeKeyPart(process);
+    const hard = normalizeHeatMergeKeyPart(hardness);
+    const depth = normalizeHeatMergeKeyPart(item.caseDepth || 'NOCASE');
+    return `AUTO-${mat}-${proc}-${hard}-${depth}`;
+}
+
+function getHeatMergeDataSourceInfo() {
+    const total = document.querySelectorAll('.material-card').length;
+    const isMock = heatMergeState.dataSource === 'mock' && total > 0;
+    if (isMock) {
+        return {
+            key: 'mock',
+            label: '示例数据',
+            curveLabel: '内置示例曲线',
+            curveStatus: '示例曲线',
+            historyLabel: '示例历史',
+            note: '当前物料来自测试用例二，仅用于演示合炉、工装推荐和装炉流程。'
+        };
+    }
+    return {
+        key: total ? (heatMergeState.dataSource || 'materials') : 'empty',
+        label: total ? '真实/手动任务' : '暂无数据',
+        curveLabel: '未接入真实曲线库',
+        curveStatus: '待曲线确认',
+        historyLabel: '暂无真实历史炉次',
+        note: total
+            ? '当前只做规则分组和工装预估；真实曲线库、历史炉次库尚未接入。'
+            : '请先在工件详情导入生产任务 Excel。'
+    };
+}
+
+function getHeatMergeCurveStatusText(group) {
+    if (!group) return '-';
+    const source = getHeatMergeDataSourceInfo();
+    if (source.key === 'mock') {
+        return HEAT_MERGE_CURVES[group.curveKey] ? `示例曲线：${group.curveKey}` : '示例曲线：待人工确认';
+    }
+    return '曲线状态：未接入真实曲线库';
+}
+
+function getHeatMergeCurveForGroup(group) {
+    if (!group) return HEAT_MERGE_CURVES['PENDING-MANUAL'];
+    const source = getHeatMergeDataSourceInfo();
+
+    // V0.7.5：只有“载入示例数据”时才展示内置 Demo 曲线和示例历史炉次。
+    // 真实 Excel / 手动录入数据即使字段命中 MOV/20Cr 的演示组合，也不能假装已经匹配到真实历史曲线。
+    if (source.key === 'mock') {
+        const known = HEAT_MERGE_CURVES[group.curveKey];
+        if (known) return { ...known, curveSource: 'mock' };
+    }
+
+    return {
+        title: group.curveKey && source.key === 'mock' ? group.curveKey : 'WAITING-RECIPE-LIBRARY',
+        scope: `${group.line || '真实生产任务'} · ${source.curveLabel}`,
+        historyCount: source.key === 'mock' ? '示例' : '未接入',
+        recentUse: '-',
+        equipment: '按工件详情 / 生产车间配置确认',
+        typicalWeight: '-',
+        hold: '-',
+        curveSource: source.key,
+        stages: [['规则分组', '已完成', '按材质 / 工艺 / 硬度 / 渗层成组'], ['曲线匹配', '待接入', '客户历史升温/保温曲线库']],
+        suggestion: source.key === 'mock'
+            ? '当前为内置示例曲线，仅用于演示流程，不代表客户真实历史炉次。'
+            : '当前为规则分组结果：可以辅助判断合炉兼容性，但尚未读取真实工艺曲线和历史炉次，需工艺员确认。'
+    };
+}
+
+function getHeatMergeGroupTitle(index, group) {
+    if (group?.title && !/^自动工艺组/.test(group.title)) return group.title;
+    const letter = String.fromCharCode(65 + Math.min(25, index));
+    return `工艺组 ${letter}`;
+}
+
 function inferMockShape(item) {
     if (item.D && item.H) {
         return { shape: 'cylinder', dim1: Number(item.D) || 30, dim2: Number(item.D) || 30, dim3: Number(item.H) || 30 };
@@ -4515,30 +4771,73 @@ function inferMockShape(item) {
     return { shape: 'cuboid', dim1: 80, dim2: 80, dim3: 30 };
 }
 
-function getHeatMergeItemsFromCards() {
-    return [...document.querySelectorAll('.material-card')].map(card => {
-        const d = getMaterialDataFromCard(card);
-        const h = parseHardnessRange(d.hardness);
-        return {
-            source: 'card',
-            cardId: card.id,
-            name: d.showName || d.name,
-            itemCode: d.itemCode || '',
-            customer: d.customer || '',
-            count: Number(d.count) || 0,
-            weight: Number(d.totalWeight) || 0,
-            material: normalizeMaterialName(d.material),
-            materialRaw: d.material || '',
-            process: normalizeHeatText(d.process),
-            hardnessRaw: d.hardness || '',
-            hardness: h ? h.label : '',
-            hardnessRange: h,
-            caseDepth: extractCaseDepth(d.hardness),
-            remark: d.remark || ''
-        };
-    });
+
+function getHeatMergeActiveFilterInfo() {
+    return {
+        material: [...(currentMaterialFilters || [])],
+        process: [...(currentProcessFilters || [])],
+        hardness: [...(currentHardnessFilters || [])],
+        get active() {
+            return this.material.length > 0 || this.process.length > 0 || this.hardness.length > 0;
+        }
+    };
 }
 
+function getHeatMergeActiveFilterLabel() {
+    const f = getHeatMergeActiveFilterInfo();
+    if (!f.active) return '';
+    const parts = [];
+    if (f.material.length) parts.push(`材质 ${f.material.join('/')}`);
+    if (f.process.length) parts.push(`工艺 ${f.process.join('/')}`);
+    if (f.hardness.length) parts.push(`硬度 ${f.hardness.join('/')}`);
+    return parts.join(' · ');
+}
+
+function materialCardPassesHeatMergeFilters(card) {
+    const f = getHeatMergeActiveFilterInfo();
+    if (!f.active) return true;
+    const material = card.getAttribute('data-material') || '';
+    const process = card.getAttribute('data-process') || '';
+    const hardness = card.getAttribute('data-hardness') || '';
+    const materialPass = f.material.length === 0 || f.material.includes(material);
+    const processPass = f.process.length === 0 || f.process.includes(process);
+    const hardnessPass = f.hardness.length === 0 || f.hardness.includes(hardness);
+    return materialPass && processPass && hardnessPass;
+}
+
+function getHeatMergeItemsFromCards(options = {}) {
+    const respectFilters = options.respectFilters !== false;
+    return [...document.querySelectorAll('.material-card')]
+        .filter(card => !respectFilters || materialCardPassesHeatMergeFilters(card))
+        .map(card => {
+            const d = getMaterialDataFromCard(card);
+            const h = parseHardnessRange(d.hardness);
+            return {
+                source: 'card',
+                cardId: card.id,
+                name: d.showName || d.name,
+                itemCode: d.itemCode || '',
+                customer: d.customer || '',
+                count: Number(d.count) || 0,
+                weight: Number(d.totalWeight) || 0,
+                shape: d.shape || 'cuboid',
+                dim1: Number(d.dim1) || 0,
+                dim2: Number(d.dim2) || 0,
+                dim3: Number(d.dim3) || 0,
+                material: normalizeMaterialName(d.material),
+                materialRaw: d.material || '',
+                process: normalizeHeatText(d.process),
+                hardnessRaw: d.hardness || '',
+                hardness: h ? h.label : '',
+                hardnessRange: h,
+                caseDepth: extractCaseDepth(d.hardness),
+                orderDate: d.orderDate || '',
+                deliveryDate: d.deliveryDate || '',
+                dueDate: d.deliveryDate || d.orderDate || '',
+                remark: d.remark || ''
+            };
+        });
+}
 function getHeatMergeMockPreviewItems() {
     return HEAT_MERGE_MOCK_ITEMS.map((item, index) => {
         const h = parseHardnessRange(item.hardness);
@@ -4550,6 +4849,10 @@ function getHeatMergeMockPreviewItems() {
             customer: item.customer,
             count: Number(item.count) || 0,
             weight: Number(item.weight) || 0,
+            shape: inferMockShape(item).shape,
+            dim1: inferMockShape(item).dim1,
+            dim2: inferMockShape(item).dim2,
+            dim3: inferMockShape(item).dim3,
             material: normalizeMaterialName(item.material),
             materialRaw: item.material || '',
             process: normalizeHeatText(item.process),
@@ -4557,26 +4860,106 @@ function getHeatMergeMockPreviewItems() {
             hardness: h ? h.label : '',
             hardnessRange: h,
             caseDepth: extractCaseDepth(item.hardness),
+            orderDate: item.date ? String(item.date).replace(/\./g, '-') : '',
+            deliveryDate: '',
+            dueDate: item.date ? String(item.date).replace(/\./g, '-') : '',
             remark: item.remark || ''
         };
     });
 }
 
 function getHeatMergeSourceItems() {
-    const cardItems = getHeatMergeItemsFromCards();
-    return cardItems.length ? cardItems : getHeatMergeMockPreviewItems();
+    // V0.7.16：合炉分组只使用已通过数据校验的物料。
+    // 缺材质/工艺/硬度/数量/重量的任务仍显示在工件详情中，但不参与合炉计算和生成方案。
+    return getHeatMergeItemsFromCards().filter(isHeatMergeItemEligible);
 }
 
-function classifyHeatMergeItem(item) {
-    const material = item.material;
-    const process = normalizeHeatText(item.process);
-    const hardness = item.hardness;
 
+function getHeatMergeStrategyProfile(strategy = heatMergeState.strategy || 'quality') {
+    const profiles = {
+        quality: {
+            id: 'quality',
+            label: '质量优先',
+            groupMode: '严格同工艺/同硬度',
+            note: '严格合炉，控制单炉装载密度',
+            status: '可合炉',
+            statusClass: 'ok',
+            targetWeightLoad: 0.68,
+            targetSpaceLoad: 0.32
+        },
+        delivery: {
+            id: 'delivery',
+            label: '交付优先',
+            groupMode: '交期优先排炉',
+            note: '优先处理临近交期，允许小批量先加工',
+            status: '优先排炉',
+            statusClass: 'warn',
+            targetWeightLoad: 0.82,
+            targetSpaceLoad: 0.45
+        },
+        cost: {
+            id: 'cost',
+            label: '成本优先',
+            groupMode: '兼容拼炉/减少炉次',
+            note: '提高装载率，减少炉次；必要时建议等待拼炉',
+            status: '拼炉候选',
+            statusClass: 'warn',
+            targetWeightLoad: 0.92,
+            targetSpaceLoad: 0.58
+        }
+    };
+    return profiles[strategy] || profiles.quality;
+}
+
+function parseHeatDateValue(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return null;
+    const normalized = raw.replace(/[.\/]/g, '-');
+    const d = new Date(normalized);
+    return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function getHeatMergeDueBucket(item) {
+    const d = parseHeatDateValue(item.deliveryDate || item.dueDate || item.orderDate);
+    if (!d) return '未设交期';
+    const now = new Date();
+    const days = Math.ceil((d.getTime() - now.getTime()) / 86400000);
+    if (days <= 3) return '急单';
+    if (days <= 7) return '近期待交';
+    return '正常交付';
+}
+
+function getHeatMergeStrategyGroupId(item, strategy = heatMergeState.strategy || 'quality') {
+    const material = normalizeMaterialName(item.material);
+    const process = normalizeHeatText(item.process);
+    const hardness = item.hardness || '';
+    const caseDepth = item.caseDepth || '无渗层';
     if (!material || !process || !hardness) return 'G-INVALID';
-    if (material === 'MOV' && process === '真空淬火' && hardness === '56-58') return 'G-MOV-VAC-56-58';
-    if (material === '20Cr' && process === '渗碳抛丸' && hardness === '55-60') return 'G-20CR-CARB-SHOT-55-60';
-    if (material === 'MOV' && process === '真空淬火' && (hardness === '58-62' || hardness === '60-62')) return 'G-MOV-VAC-58-62-MIX';
-    return 'G-OTHER';
+
+    // 示例数据保留典型 Demo 组，真实数据仍会显示“待接入曲线库”。
+    // 质量优先：最严格，按材质 + 工艺 + 硬度 + 渗层精确分组。
+    if (strategy === 'quality') {
+        if (material === 'MOV' && process === '真空淬火' && hardness === '56-58') return 'G-MOV-VAC-56-58';
+        if (material === '20Cr' && process === '渗碳抛丸' && hardness === '55-60') return 'G-20CR-CARB-SHOT-55-60';
+        return `DYN-${getHeatMergeDynamicGroupId(item)}`;
+    }
+
+    // 交付优先：以交期桶 + 材质/工艺为主，允许硬度相近的同工艺件先排炉。
+    if (strategy === 'delivery') {
+        const dueBucket = getHeatMergeDueBucket(item);
+        return `DYN-${[material, process, dueBucket, caseDepth].map(normalizeHeatMergeKeyPart).join('|')}`;
+    }
+
+    // 成本优先：以减少炉次为主，按材质/工艺/渗层拼炉，硬度改为“兼容待确认”。
+    if (strategy === 'cost') {
+        return `DYN-${[material, process, '兼容拼炉', caseDepth].map(normalizeHeatMergeKeyPart).join('|')}`;
+    }
+
+    return `DYN-${getHeatMergeDynamicGroupId(item)}`;
+}
+
+function classifyHeatMergeItem(item, strategy = heatMergeState.strategy || 'quality') {
+    return getHeatMergeStrategyGroupId(item, strategy);
 }
 
 function getHeatMergeGroupPreset(groupId) {
@@ -4637,23 +5020,225 @@ function getHeatMergeGroupPreset(groupId) {
             risk: '需要先补全工艺字段，再进入合炉判断。'
         }
     };
-    return presets[groupId] || presets['G-OTHER'];
+    if (presets[groupId]) return presets[groupId];
+    if (String(groupId || '').startsWith('DYN-')) {
+        const keyText = String(groupId).replace(/^DYN-/, '');
+        const parts = keyText.split('|');
+        const material = parts[0] || '未知材质';
+        const process = parts[1] || '未知工艺';
+        const hardnessOrMode = parts[2] || '待确认';
+        const caseDepth = parts[3] && parts[3] !== '无渗层' && parts[3] !== 'NOCASE' ? ` · 渗层 ${parts[3]}` : '';
+        const hardText = /^\d/.test(hardnessOrMode) ? `${hardnessOrMode}HRC` : hardnessOrMode;
+        return {
+            id: groupId,
+            title: '规则工艺组',
+            status: '待曲线确认',
+            statusClass: 'muted',
+            score: 72,
+            curveKey: `AUTO-${normalizeHeatMergeKeyPart(material).toUpperCase()}-${normalizeHeatMergeKeyPart(process)}-${normalizeHeatMergeKeyPart(hardnessOrMode)}-${normalizeHeatMergeKeyPart(parts[3] || 'NOCASE')}`,
+            line: `${material} · ${process} · ${hardText}${caseDepth}`,
+            reason: ['规则成组', '待匹配客户曲线库'],
+            risk: '已按当前策略成组，曲线和保温时间仍需工艺员确认。'
+        };
+    }
+    return presets['G-OTHER'];
+}
+
+function applyHeatMergeStrategyToGroup(group, strategy) {
+    const profile = getHeatMergeStrategyProfile(strategy);
+    group.strategy = strategy;
+    group.strategyLabel = profile.label;
+
+    if (group.id === 'G-INVALID') {
+        group.statusClass = 'danger';
+        group.status = '异常';
+        group.score = 0;
+        group.shortHint = '补全字段';
+        return group;
+    }
+
+    const multi = group.items.length > 1;
+    const hasReview = group.validation.review > 0 || group.validation.invalid > 0;
+    const weight = Number(group.weight || 0);
+
+    if (strategy === 'quality') {
+        group.status = hasReview ? '需确认' : '可合炉';
+        group.statusClass = hasReview ? 'warn' : 'ok';
+        group.score = group.score || (multi ? 90 : 76);
+        group.shortHint = '严格同工艺';
+        group.risk = '质量优先：严格按材质/工艺/硬度成组，推荐时控制单框密度。';
+    } else if (strategy === 'delivery') {
+        group.status = '优先排炉';
+        group.statusClass = 'warn';
+        group.score = Math.max(group.score || 0, multi ? 84 : 72);
+        group.shortHint = '交期优先';
+        group.risk = '交付优先：优先把临近交期物料排炉，小批量也允许先加工。';
+    } else if (strategy === 'cost') {
+        group.status = weight < 250 ? '建议等拼炉' : '拼炉候选';
+        group.statusClass = weight < 250 ? 'muted' : 'warn';
+        group.score = Math.max(group.score || 0, weight < 250 ? 66 : 86);
+        group.shortHint = weight < 250 ? '待积攒' : '少炉次';
+        group.risk = '成本优先：允许兼容拼炉，优先减少炉次并提高装载率。';
+    }
+
+    if (String(group.id).startsWith('DYN-')) {
+        group.title = '规则工艺组';
+        group.reason = [profile.groupMode, profile.note];
+    }
+    return group;
+}
+
+
+function getHeatMergeManualGroupLabel(items = []) {
+    const materials = [...new Set(items.map(i => normalizeMaterialName(i.material)).filter(Boolean))];
+    const processes = [...new Set(items.map(i => normalizeHeatText(i.process)).filter(Boolean))];
+    const materialText = materials.length <= 3 ? materials.join(' + ') : `${materials.slice(0, 3).join(' + ')} 等${materials.length}种`;
+    const processText = processes.length === 1 ? processes[0] : (processes.length ? '多工艺待确认' : '工艺待确认');
+    return `${materialText || '跨材质'} · ${processText}`;
+}
+
+function normalizeHeatManualMergeGroup(group, index = 0) {
+    const items = Array.isArray(group?.items) ? group.items : [];
+    const quantity = items.reduce((sum, item) => sum + (Number(item.count) || 0), 0);
+    const weight = items.reduce((sum, item) => sum + (Number(item.weight) || 0), 0);
+    const validation = items.reduce((acc, item) => {
+        const v = getHeatMergeItemValidation(item);
+        const key = v.level === 'invalid' ? 'invalid' : (v.level === 'review' ? 'review' : 'valid');
+        acc[key] += 1;
+        return acc;
+    }, { valid: 0, review: 0, invalid: 0 });
+    const line = group.line || getHeatMergeManualGroupLabel(items);
+    return {
+        ...group,
+        id: group.id || `MANUAL-${index + 1}`,
+        title: group.title || `人工拼炉组 ${index + 1}`,
+        line,
+        status: '人工拼炉',
+        statusClass: 'warn',
+        score: Math.max(60, Math.min(82, Number(group.score || 72))),
+        curveKey: 'MANUAL-MERGE-REVIEW',
+        reason: ['用户确认拼炉', '跨材质/曲线待确认'],
+        risk: '人工拼炉：包含跨材质或跨工艺风险，需工艺员确认后再执行。',
+        shortHint: '需确认',
+        items,
+        quantity,
+        weight,
+        validation,
+        manualMerge: true,
+        strategy: 'cost',
+        strategyLabel: '成本优先'
+    };
+}
+
+function getHeatManualMergeDraftGroups(baseGroups = []) {
+    const ids = new Set(heatMergeState.manualMergeDraftGroupIds || []);
+    return baseGroups.filter(g => ids.has(g.id) && !g.manualMerge && g.id !== 'G-INVALID');
+}
+
+function renderHeatManualMergeDraftBar(baseGroups = []) {
+    if ((heatMergeState.strategy || 'quality') !== 'cost') return '';
+    const draftGroups = getHeatManualMergeDraftGroups(baseGroups);
+    if (!draftGroups.length) return '';
+    const totalItems = draftGroups.reduce((sum, g) => sum + (g.quantity || 0), 0);
+    const totalWeight = draftGroups.reduce((sum, g) => sum + (Number(g.weight) || 0), 0);
+    const materials = [...new Set(draftGroups.flatMap(g => (g.items || []).map(i => normalizeMaterialName(i.material)).filter(Boolean)))];
+    const materialText = materials.length <= 3 ? materials.join(' + ') : `${materials.slice(0, 3).join(' + ')} 等${materials.length}种`;
+    return `
+        <div class="hm-manual-draft-bar">
+            <div>
+                <strong>人工拼炉 Beta</strong>
+                <span>已选 ${draftGroups.length} 组 · ${totalItems} 件 · ${totalWeight.toFixed(1)}kg · ${hmEscape(materialText || '跨材质')}</span>
+            </div>
+            <div class="hm-manual-draft-actions">
+                <button type="button" class="hm-mini-btn" data-action="heat-manual-clear-draft">清空</button>
+                <button type="button" class="hm-mini-btn primary" data-action="heat-manual-create-group" ${draftGroups.length >= 2 ? '' : 'disabled'}>生成拼炉组</button>
+            </div>
+        </div>
+    `;
+}
+
+function toggleHeatManualMergeDraftGroup(groupId) {
+    if (!groupId || groupId === 'G-INVALID') return;
+    if ((heatMergeState.strategy || 'quality') !== 'cost') {
+        heatMergeState.strategy = 'cost';
+        document.querySelectorAll('.hm-strategy-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.getAttribute('data-merge-strategy') === 'cost');
+        });
+    }
+    const ids = new Set(heatMergeState.manualMergeDraftGroupIds || []);
+    if (ids.has(groupId)) ids.delete(groupId);
+    else ids.add(groupId);
+    heatMergeState.manualMergeDraftGroupIds = [...ids];
+    heatMergeState.selectedToolingPlanId = null;
+    heatMergeState.adoptedToolingPlan = null;
+    heatMergeState.lastToolingRecommendations = [];
+    renderHeatMergeDesignPanel();
+    const count = heatMergeState.manualMergeDraftGroupIds.length;
+    showCapacityFeedback('success', count ? `已加入人工拼炉候选：${count} 个工艺组` : '已清空人工拼炉候选');
+}
+
+function clearHeatManualMergeDraft() {
+    heatMergeState.manualMergeDraftGroupIds = [];
+    renderHeatMergeDesignPanel();
+    showCapacityFeedback('success', '已清空人工拼炉候选');
+}
+
+function createHeatManualMergeGroupFromDraft() {
+    const baseGroups = (heatMergeState.lastGroups || []).filter(g => !g.manualMerge);
+    const draftGroups = getHeatManualMergeDraftGroups(baseGroups);
+    if (draftGroups.length < 2) {
+        alert('请至少选择 2 个工艺组，再生成跨材质人工拼炉组。');
+        return;
+    }
+    const items = draftGroups.flatMap(g => (g.items || [])
+        .filter(isHeatMergeItemEligible)
+        .map(item => ({ ...item, manualMergeSourceGroupId: g.id, manualMergeSourceGroupTitle: g.title })));
+    const group = normalizeHeatManualMergeGroup({
+        id: `MANUAL-${Date.now()}`,
+        title: `人工拼炉组 ${(heatMergeState.manualMergeGroups || []).length + 1}`,
+        sourceGroupIds: draftGroups.map(g => g.id),
+        sourceGroupTitles: draftGroups.map(g => g.title),
+        items,
+        createdAt: new Date().toISOString()
+    }, (heatMergeState.manualMergeGroups || []).length);
+    heatMergeState.manualMergeGroups = [group, ...(heatMergeState.manualMergeGroups || [])];
+    heatMergeState.manualMergeDraftGroupIds = [];
+    heatMergeState.selectedGroupId = group.id;
+    heatMergeState.appliedGroupId = null;
+    heatMergeState.selectedToolingPlanId = null;
+    heatMergeState.adoptedToolingPlan = null;
+    heatMergeState.lastToolingRecommendations = [];
+    renderHeatMergeDesignPanel();
+    showCapacityFeedback('success', `已生成 ${group.title}：${group.quantity} 件 / ${group.weight.toFixed(1)}kg，需工艺员确认后执行`);
+}
+
+function removeHeatManualMergeGroup(groupId) {
+    heatMergeState.manualMergeGroups = (heatMergeState.manualMergeGroups || []).filter(g => g.id !== groupId);
+    heatMergeState.manualMergeDraftGroupIds = (heatMergeState.manualMergeDraftGroupIds || []).filter(id => id !== groupId);
+    if (heatMergeState.selectedGroupId === groupId) heatMergeState.selectedGroupId = null;
+    if (heatMergeState.appliedGroupId === groupId) heatMergeState.appliedGroupId = null;
+    if (heatMergeState.adoptedToolingPlan?.groupId === groupId) heatMergeState.adoptedToolingPlan = null;
+    renderHeatMergeDesignPanel();
+    showCapacityFeedback('success', '已移除人工拼炉组');
 }
 
 function buildHeatMergeGroups() {
     const items = getHeatMergeSourceItems();
+    const strategy = heatMergeState.strategy || 'quality';
     const map = new Map();
 
     items.forEach(item => {
-        const groupId = classifyHeatMergeItem(item);
+        const groupId = classifyHeatMergeItem(item, strategy);
         if (!map.has(groupId)) {
             const preset = getHeatMergeGroupPreset(groupId);
-            map.set(groupId, { ...preset, items: [], quantity: 0, weight: 0 });
+            map.set(groupId, { ...preset, items: [], quantity: 0, weight: 0, validation: { valid: 0, review: 0, invalid: 0 } });
         }
         const group = map.get(groupId);
+        const validation = getHeatMergeItemValidation(item);
         group.items.push(item);
         group.quantity += Number(item.count) || 0;
         group.weight += Number(item.weight) || 0;
+        group.validation[validation.level === 'invalid' ? 'invalid' : (validation.level === 'review' ? 'review' : 'valid')] += 1;
     });
 
     const preferredOrder = [
@@ -4664,14 +5249,41 @@ function buildHeatMergeGroups() {
         'G-INVALID'
     ];
 
-    const groups = [...map.values()].sort((a, b) => {
+    const groups = [...map.values()].map(group => applyHeatMergeStrategyToGroup(group, strategy)).sort((a, b) => {
+        if (a.id === 'G-INVALID' || b.id === 'G-INVALID') return a.id === 'G-INVALID' ? 1 : -1;
         const ia = preferredOrder.indexOf(a.id);
         const ib = preferredOrder.indexOf(b.id);
-        return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+        if ((ia >= 0) || (ib >= 0)) return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+        if (strategy === 'delivery') {
+            const urgencyRank = v => /急单/.test(v.line || '') ? 0 : (/近期/.test(v.line || '') ? 1 : 2);
+            const rankDelta = urgencyRank(a) - urgencyRank(b);
+            if (rankDelta !== 0) return rankDelta;
+        }
+        if (b.score !== a.score) return b.score - a.score;
+        return b.weight - a.weight;
     });
 
-    heatMergeState.lastGroups = groups;
-    return groups;
+    groups.forEach((group, index) => {
+        if (group.title === '自动工艺组' || group.title === '规则工艺组') group.title = `规则工艺组 ${index + 1}`;
+    });
+
+    const manualGroups = (heatMergeState.manualMergeGroups || [])
+        .map((group, index) => normalizeHeatManualMergeGroup(group, index))
+        .filter(group => Array.isArray(group.items) && group.items.length > 0);
+
+    // V0.7.14：人工拼炉组生成后，隐藏其来源规则组。
+    // 否则同一批物料会同时出现在“人工拼炉组”和原规则组里，用户会误以为有重复任务。
+    const manualSourceGroupIds = new Set(
+        manualGroups.flatMap(group => Array.isArray(group.sourceGroupIds) ? group.sourceGroupIds : [])
+    );
+    const visibleRuleGroups = manualSourceGroupIds.size
+        ? groups.filter(group => !manualSourceGroupIds.has(group.id))
+        : groups;
+
+    const finalGroups = (heatMergeState.strategy === 'cost') ? [...manualGroups, ...visibleRuleGroups] : visibleRuleGroups;
+
+    heatMergeState.lastGroups = finalGroups;
+    return finalGroups;
 }
 
 function getHeatMergeGroupById(groupId) {
@@ -4679,28 +5291,77 @@ function getHeatMergeGroupById(groupId) {
     return groups.find(g => g.id === groupId) || null;
 }
 
+function getHeatMergeTaskStats(options = {}) {
+    const respectFilters = options.respectFilters !== false;
+    const items = getHeatMergeItemsFromCards({ respectFilters });
+    let valid = 0, review = 0, invalid = 0;
+    items.forEach(item => {
+        const st = getHeatMergeItemValidation(item);
+        if (st.level === 'valid') valid += 1;
+        else if (st.level === 'review') review += 1;
+        else invalid += 1;
+    });
+    return {
+        total: items.length,
+        qty: items.reduce((sum, item) => sum + (Number(item.count) || 0), 0),
+        weight: items.reduce((sum, item) => sum + (Number(item.weight) || 0), 0),
+        valid,
+        review,
+        invalid,
+        excluded: review + invalid,
+        filtered: !!getHeatMergeActiveFilterLabel()
+    };
+}
+
 function renderHeatMergeSummary(groups) {
     const el = document.getElementById('heat-merge-summary');
     if (!el) return;
-    const itemCount = groups.reduce((s, g) => s + g.items.length, 0);
-    const totalQty = groups.reduce((s, g) => s + g.quantity, 0);
-    const totalWeight = groups.reduce((s, g) => s + g.weight, 0);
-    const okCount = groups.filter(g => g.statusClass === 'ok').length;
-    const warnCount = groups.filter(g => g.statusClass === 'warn').length;
-    const invalidCount = groups.filter(g => g.id === 'G-INVALID').reduce((s, g) => s + g.items.length, 0);
-    const activeGroup = heatMergeState.appliedGroupId ? getHeatMergeGroupPreset(heatMergeState.appliedGroupId) : null;
+    const activeGroup = heatMergeState.appliedGroupId
+        ? (getHeatMergeGroupById(heatMergeState.appliedGroupId) || getHeatMergeGroupPreset(heatMergeState.appliedGroupId))
+        : (heatMergeState.selectedGroupId ? (getHeatMergeGroupById(heatMergeState.selectedGroupId) || getHeatMergeGroupPreset(heatMergeState.selectedGroupId)) : null);
+    const source = getHeatMergeDataSourceInfo();
+    const stats = getHeatMergeTaskStats();
+    const filterLabel = getHeatMergeActiveFilterLabel();
+    const strategyProfile = getHeatMergeStrategyProfile(heatMergeState.strategy || 'quality');
+    const dataLine = stats.total
+        ? `${stats.total}条 · ${stats.qty}件 · ${stats.weight.toFixed(1)}kg · ${stats.valid}有效${stats.excluded ? ` · ${stats.excluded}已排除` : ''}`
+        : '暂无可合炉任务';
+    const activeLine = activeGroup
+        ? `${heatMergeState.appliedGroupId ? '已采用' : '当前选中'}：${activeGroup.line || activeGroup.title}`
+        : (filterLabel ? `当前筛选：${filterLabel}` : '选择工艺组后推荐工装');
 
     el.innerHTML = `
-        <div class="hm-summary-kpi"><span>物料</span><strong>${itemCount}</strong></div>
-        <div class="hm-summary-kpi"><span>数量</span><strong>${totalQty}</strong></div>
-        <div class="hm-summary-kpi"><span>重量</span><strong>${totalWeight.toFixed(1)}kg</strong></div>
-        <div class="hm-summary-kpi"><span>推荐组</span><strong>${okCount}</strong></div>
-        <div class="hm-summary-kpi"><span>需确认</span><strong>${warnCount}</strong></div>
-        <div class="hm-summary-kpi danger"><span>异常</span><strong>${invalidCount}</strong></div>
-        <div class="hm-active-group ${activeGroup ? 'active' : ''}">
-            ${activeGroup ? `已锁定：${hmEscape(activeGroup.title)} · ${hmEscape(activeGroup.line)}` : '当前未锁定合炉组，生成方案会使用全部可见物料'}
+        <div class="hm-status-line v0719">
+            <div class="hm-status-main">
+                <strong>${hmEscape(dataLine)}</strong>
+                <span>${hmEscape(strategyProfile.label)} · ${hmEscape(strategyProfile.groupMode)} · ${hmEscape(source.curveLabel)}</span>
+            </div>
+            <div class="hm-status-active">${hmEscape(activeLine)}</div>
         </div>
     `;
+}
+function getHeatMergeGroupDisplayTitle(group, index = 0) {
+    const source = getHeatMergeDataSourceInfo();
+    if (group?.manualMerge) return group.title || `人工拼炉组 ${index + 1}`;
+    if (source.key === 'mock') return group?.title || getHeatMergeGroupTitle(index, group);
+    if (group?.id === 'G-INVALID') return '异常数据组';
+    return `规则工艺组 ${index + 1}`;
+}
+
+function getHeatMergeGroupDisplayRisk(group) {
+    const source = getHeatMergeDataSourceInfo();
+    if (group?.manualMerge) return '跨材质 · 需确认';
+    if (source.key === 'mock') return group?.status || '';
+    if (group?.id === 'G-INVALID') return '字段缺失';
+    if (group?.statusClass === 'warn') return '需工艺确认';
+    return '可进入工装推荐';
+}
+
+function getHeatMergeDisplayReasons(group) {
+    const source = getHeatMergeDataSourceInfo();
+    if (source.key === 'mock') return group?.reason || [];
+    if (group?.id === 'G-INVALID') return ['字段缺失'];
+    return ['规则成组'];
 }
 
 function renderHeatMergeGroups() {
@@ -4711,55 +5372,936 @@ function renderHeatMergeGroups() {
     renderHeatMergeSummary(groups);
 
     if (!groups.length) {
+        const allItems = getHeatMergeItemsFromCards();
+        const excluded = allItems.filter(item => !isHeatMergeItemEligible(item)).length;
         container.innerHTML = `
-            <div class="hm-empty">
-                暂无工件数据。可以点击“载入测试用例二”，先查看 V0.5 合炉设计 Mock 效果。
+            <div class="hm-empty hm-empty-v0719">
+                ${excluded ? `当前筛选下 ${excluded} 条物料未通过校验，已从合炉计算中排除。请回到工件详情补全字段。` : '暂无可合炉物料。请先到“工件详情”导入 Excel。'}
             </div>
         `;
         return;
     }
 
-    container.innerHTML = groups.map(group => {
+    const draftBarHtml = renderHeatManualMergeDraftBar(groups.filter(g => !g.manualMerge));
+    container.innerHTML = draftBarHtml + groups.map((group, index) => {
         const active = heatMergeState.selectedGroupId === group.id || heatMergeState.appliedGroupId === group.id;
-        const curve = HEAT_MERGE_CURVES[group.curveKey] || HEAT_MERGE_CURVES['PENDING-MANUAL'];
-        const itemNames = group.items.slice(0, 3).map(i => `${i.customer || '-'} · ${i.name}`).join(' / ');
-        const more = group.items.length > 3 ? ` 等 ${group.items.length} 批` : '';
-        const reasonHtml = group.reason.map(r => `<span>✓ ${hmEscape(r)}</span>`).join('');
+        const displayTitle = getHeatMergeGroupDisplayTitle(group, index);
+        const displayRisk = getHeatMergeGroupDisplayRisk(group);
         const canGenerate = group.id !== 'G-INVALID';
+        const curveStatus = group.manualMerge ? '人工确认' : (group.id === 'G-INVALID' ? '字段缺失' : '曲线待确认');
+        const manualAddText = (heatMergeState.manualMergeDraftGroupIds || []).includes(group.id) ? '已加入' : '拼炉';
+        const statusText = group.manualMerge ? '人工确认' : (group.status || displayRisk || '待确认');
+        const lineText = group.line || displayRisk || '规则成组';
         return `
-            <article class="hm-group-card ${group.statusClass} ${active ? 'active' : ''}" data-merge-group-id="${hmEscape(group.id)}">
-                <div class="hm-card-head">
-                    <div>
-                        <div class="hm-card-title">${hmEscape(group.title)}</div>
-                        <div class="hm-card-line">${hmEscape(group.line)}</div>
+            <article class="hm-group-card v0719 ${group.statusClass} ${group.manualMerge ? 'manual-merge-card' : ''} ${active ? 'active' : ''}" data-merge-group-id="${hmEscape(group.id)}">
+                <div class="hm-card-topline">
+                    <div class="hm-card-title-wrap">
+                        <div class="hm-card-title">${hmEscape(displayTitle)}</div>
+                        <div class="hm-card-line">${hmEscape(lineText)}</div>
                     </div>
-                    <div class="hm-status-pill ${group.statusClass}">${hmEscape(group.status)}</div>
+                    <span class="hm-status-pill ${group.manualMerge ? 'manual' : group.statusClass}">${hmEscape(statusText)}</span>
                 </div>
-                <div class="hm-card-meta">
-                    <span>${group.items.length} 批</span>
-                    <span>${group.quantity} 件</span>
+                <div class="hm-card-meta hm-card-meta-compact">
+                    <span>${group.items.length}批</span>
+                    <span>${group.quantity}件</span>
                     <span>${group.weight.toFixed(1)}kg</span>
-                    <span>${hmEscape(curve.title)}</span>
-                </div>
-                <div class="hm-score-row">
-                    <div class="hm-score-bar"><i style="width:${Math.max(4, Math.min(100, group.score))}%"></i></div>
                     <strong>${group.score ? group.score + '分' : '待补全'}</strong>
                 </div>
-                <div class="hm-reason-list">${reasonHtml}</div>
-                <div class="hm-risk-note">${hmEscape(group.risk)}</div>
-                <div class="hm-item-preview">${hmEscape(itemNames + more)}</div>
-                <div class="hm-card-actions">
-                    <button class="hm-mini-btn" data-action="heat-merge-view-curve" data-merge-group-id="${hmEscape(group.id)}" type="button">查看曲线</button>
-                    <button class="hm-mini-btn" data-action="heat-merge-apply-group" data-merge-group-id="${hmEscape(group.id)}" type="button">锁定分组</button>
-                    <button class="hm-mini-btn primary" data-action="heat-merge-generate-group" data-merge-group-id="${hmEscape(group.id)}" type="button" ${canGenerate ? '' : 'disabled'}>生成该组方案</button>
+                <div class="hm-card-footline">
+                    <span>${hmEscape(curveStatus)}</span>
+                    <span>${hmEscape(displayRisk)}</span>
+                </div>
+                <div class="hm-card-actions compact ${group.manualMerge ? 'manual-actions' : 'single-action'}">
+                    ${(heatMergeState.strategy === 'cost' && !group.manualMerge && group.id !== 'G-INVALID') ? `
+                        <button class="hm-mini-btn ghost" data-action="heat-merge-add-manual" data-merge-group-id="${hmEscape(group.id)}" type="button">${hmEscape(manualAddText)}</button>
+                    ` : ''}
+                    ${group.manualMerge ? `
+                        <button class="hm-mini-btn ghost" data-action="heat-merge-remove-manual" data-merge-group-id="${hmEscape(group.id)}" type="button">移除</button>
+                    ` : ''}
+                    <button class="hm-mini-btn primary" data-action="heat-merge-recommend-tooling" data-merge-group-id="${hmEscape(group.id)}" type="button" ${canGenerate ? '' : 'disabled'}>推荐工装</button>
                 </div>
             </article>
         `;
     }).join('');
 }
 
+// ==================== Heat Merge V0.7.5 Tooling Recommendation ====================
+// V0.7.5：默认按当前策略生成单张推荐卡，可主动比较三种策略；保持规则估算与真实曲线库状态分离。
+function getToolingLabel(toolingType) {
+    return furnaceTooling?.[toolingType]?.label || {
+        'standard-basket': '标准料框',
+        'mesh-basket': '网篮',
+        'material-tray': '料盘',
+        'ring-tooling': '环形工装'
+    }[toolingType] || '工装';
+}
+
+function getDefaultToolingRecommendationTemplates() {
+    return [
+        { id: 'tpl-standard-600', source: 'default', name: '标准料框 600×600×900', toolingType: 'standard-basket', basketType: 'grid', width: 600, height: 600, depth: 900, maxWeight: 500, maxLayers: 5, hasShelf: true, shelfThickness: 20 },
+        { id: 'tpl-standard-900', source: 'default', name: '大号标准料框 900×900×1200', toolingType: 'standard-basket', basketType: 'grid', width: 900, height: 900, depth: 1200, maxWeight: 1000, maxLayers: 5, hasShelf: true, shelfThickness: 20 },
+        { id: 'tpl-mesh-600', source: 'default', name: '密网篮 600×500×600', toolingType: 'mesh-basket', basketType: 'honeycomb', width: 600, height: 500, depth: 600, maxWeight: 300, maxLayers: 1, hasShelf: false, shelfThickness: 0 },
+        { id: 'tpl-tray-800', source: 'default', name: '平面料盘 800×160×800', toolingType: 'material-tray', basketType: 'tray', width: 800, height: 160, depth: 800, maxWeight: 250, maxLayers: 1, hasShelf: false, shelfThickness: 0 },
+        { id: 'tpl-ring-800', source: 'default', name: '环形工装 Ø800×900', toolingType: 'ring-tooling', basketType: 'ringnode', width: 800, height: 900, depth: 800, maxWeight: 700, maxLayers: 3, hasShelf: true, shelfThickness: 5 }
+    ];
+}
+
+function getAvailableToolingTemplatesForRecommendation() {
+    const cards = [...document.querySelectorAll('.furnace-card')];
+    const fromCards = cards.map((card, idx) => {
+        const d = getFurnaceDataFromCard(card);
+        const cfg = furnaceTooling?.[d.toolingType] || furnaceTooling?.['standard-basket'] || {};
+        const ex = d.extras || {};
+        const hasShelf = typeof ex.hasShelf === 'boolean' ? ex.hasShelf : !!cfg.hasShelf;
+        const shelfThickness = Number(ex.shelfThickness ?? cfg.params?.shelfThickness ?? (hasShelf ? 20 : 0)) || 0;
+        const maxLayers = hasShelf || d.toolingType === 'ring-tooling'
+            ? (Number(d.maxLayers) || Number(cfg.maxLayers) || 1)
+            : 1;
+        return {
+            id: `card-${d.fid || idx}`,
+            source: 'current',
+            name: d.name || `${getToolingLabel(d.toolingType)}模板`,
+            toolingType: d.toolingType || 'standard-basket',
+            basketType: d.basketType || cfg.basketType || 'grid',
+            width: Number(d.width) || 600,
+            height: Number(d.height) || 600,
+            depth: Number(d.depth) || 900,
+            maxWeight: Number(d.maxWeight) || 500,
+            maxLayers,
+            hasShelf,
+            shelfThickness,
+            availableCount: Number(d.count) || 1
+        };
+    });
+
+    const usable = fromCards.filter(t => t.width > 0 && t.height > 0 && t.depth > 0 && t.maxWeight > 0);
+    // V0.7.5：推荐阶段同时参考“当前本次工装”和“系统样板工装”。
+    // 原来只要页面已有 600 标准料框，就不会再考虑 900 大料框，容易出现“14 个小框单层”的误导结果。
+    // 真实企业工装库接入后，可把这里替换为“当前可用库存 + 企业工装模板”。
+    const merged = [...usable, ...getDefaultToolingRecommendationTemplates()];
+    const seen = new Set();
+    return merged.filter(t => {
+        const sig = [t.toolingType, t.basketType, t.width, t.height, t.depth, t.maxWeight, t.maxLayers, t.hasShelf, t.shelfThickness].join('|');
+        if (seen.has(sig)) return false;
+        seen.add(sig);
+        return true;
+    });
+}
+
+function isProcessCompatibleWithTooling(process, toolingType) {
+    const allowed = furnaceTooling?.[toolingType]?.allowedProcesses || [];
+    if (!allowed.length) return true;
+    const p = normalizeHeatText(process);
+    return allowed.some(rule => p.includes(rule) || String(rule).includes(p));
+}
+
+function getHeatMergeGroupStats(group) {
+    const items = Array.isArray(group?.items) ? group.items : [];
+    let maxFootprint = 0;
+    let maxLong = 0;
+    let maxWide = 0;
+    let maxHeight = 0;
+    let tallestRaw = 0;
+    let totalVolume = 0;
+    let totalFootprintArea = 0;
+    let cylinderCount = 0;
+    items.forEach(item => {
+        const d1 = Number(item.dim1) || 80;
+        const d2 = Number(item.dim2) || d1;
+        const d3 = Number(item.dim3) || 30;
+        const count = Math.max(1, Number(item.count) || 1);
+        const dims = [d1, d2, d3].sort((a, b) => b - a);
+        const flatLong = Math.max(1, dims[0]);
+        const flatWide = Math.max(1, dims[1]);
+        const flatHeight = Math.max(1, dims[2]);
+        maxFootprint = Math.max(maxFootprint, flatLong, flatWide);
+        maxLong = Math.max(maxLong, flatLong);
+        maxWide = Math.max(maxWide, flatWide);
+        maxHeight = Math.max(maxHeight, flatHeight);
+        tallestRaw = Math.max(tallestRaw, d1, d2, d3);
+        totalVolume += count * Math.max(1, d1) * Math.max(1, d2) * Math.max(1, d3);
+        totalFootprintArea += count * flatLong * flatWide;
+        if (item.shape === 'cylinder') cylinderCount += 1;
+    });
+    const quantity = Number(group?.quantity) || items.reduce((s, item) => s + (Number(item.count) || 0), 0);
+    return {
+        itemBatches: items.length,
+        quantity,
+        weight: Number(group?.weight) || items.reduce((s, item) => s + (Number(item.weight) || 0), 0),
+        process: normalizeHeatText(items[0]?.process || group?.line || ''),
+        maxFootprint,
+        maxLong,
+        maxWide,
+        maxHeight,
+        tallestRaw,
+        totalVolume,
+        totalFootprintArea,
+        avgFootprintArea: quantity > 0 ? totalFootprintArea / Math.max(1, quantity) : 0,
+        cylinderRate: items.length ? cylinderCount / items.length : 0
+    };
+}
+
+
+function getTemplateShelfMeta(template) {
+    const cfg = furnaceTooling?.[template.toolingType] || {};
+    const hasShelf = typeof template.hasShelf === 'boolean' ? template.hasShelf : !!cfg.hasShelf;
+    const shelfThickness = Number(template.shelfThickness ?? cfg.params?.shelfThickness ?? (hasShelf ? 20 : 0)) || 0;
+    const maxLayers = hasShelf || template.toolingType === 'ring-tooling'
+        ? Math.max(1, Number(template.maxLayers) || Number(cfg.maxLayers) || 1)
+        : 1;
+    return { hasShelf, shelfThickness, maxLayers };
+}
+
+function estimateLayerCapabilityForGroup(group, template, strategy = 'quality') {
+    const stats = getHeatMergeGroupStats(group);
+    const meta = getTemplateShelfMeta(template);
+    const spacing = 8;
+    const verticalGap = strategy === 'quality' ? 18 : (strategy === 'delivery' ? 10 : 8);
+    const edgeGap = 20;
+    const usableW = Math.max(1, Number(template.width || 0) - edgeGap * 2);
+    const usableD = Math.max(1, Number(template.depth || 0) - edgeGap * 2);
+    const usableH = Math.max(1, Number(template.height || 0) - edgeGap * 2);
+    const largestFitsPlan = (
+        Math.max(stats.maxLong || 0, stats.maxWide || 0) <= Math.max(usableW, usableD) &&
+        Math.min(stats.maxLong || 0, stats.maxWide || 0) <= Math.min(usableW, usableD)
+    );
+    const largestFitsHeight = (stats.maxHeight || 0) + verticalGap <= usableH;
+
+    let usableLayers = 1;
+    let layerHeight = usableH;
+    if (largestFitsHeight && meta.maxLayers > 1) {
+        for (let layers = meta.maxLayers; layers >= 1; layers--) {
+            const nextLayerHeight = (usableH - Math.max(0, layers - 1) * meta.shelfThickness) / layers;
+            if (nextLayerHeight >= (stats.maxHeight || 0) + verticalGap) {
+                usableLayers = layers;
+                layerHeight = nextLayerHeight;
+                break;
+            }
+        }
+    }
+
+    const areaFill = strategy === 'quality' ? 0.46 : (strategy === 'delivery' ? 0.58 : 0.66);
+    const avgArea = Math.max(1, stats.avgFootprintArea || Math.max(1, (stats.maxLong || 80) * (stats.maxWide || 80)));
+    const byArea = Math.max(1, Math.floor((usableW * usableD * areaFill) / avgArea));
+    const gridW = Math.max(1, Math.floor((usableW + spacing) / Math.max(1, (stats.maxLong || 80) + spacing)));
+    const gridD = Math.max(1, Math.floor((usableD + spacing) / Math.max(1, (stats.maxWide || 80) + spacing)));
+    const byGrid = Math.max(1, gridW * gridD);
+    // 混合尺寸下用面积容量为主，最大件网格为上限参考，避免单个超大件误判成很多件。
+    const perLayerCapacity = Math.max(1, Math.min(byArea, Math.max(byGrid, 1) * 3));
+    const perToolCapacity = perLayerCapacity * usableLayers;
+    const countByLayer = stats.quantity > 0 ? Math.ceil(stats.quantity / Math.max(1, perToolCapacity)) : 1;
+    const needsShelf = meta.hasShelf && usableLayers > 1;
+    const heightRisk = !largestFitsHeight
+        ? '最大工件高度超过工装可用高度'
+        : (!largestFitsPlan ? '最大工件平面尺寸可能放不下' : (needsShelf ? '建议使用搁板分层' : '单层可放置'));
+
+    return {
+        hasShelf: meta.hasShelf,
+        shelfThickness: meta.shelfThickness,
+        maxLayers: meta.maxLayers,
+        usableLayers,
+        layerHeight,
+        perLayerCapacity,
+        perToolCapacity,
+        countByLayer,
+        needsShelf,
+        fitsLargestPiece: largestFitsPlan && largestFitsHeight,
+        largestFitsPlan,
+        largestFitsHeight,
+        heightRisk
+    };
+}
+
+function scoreToolingTemplateForGroup(template, group, strategy) {
+    const stats = getHeatMergeGroupStats(group);
+    const layerPlan = estimateLayerCapabilityForGroup(group, template, strategy);
+    const process = stats.process;
+    const shortSide = Math.min(template.width, template.depth);
+    const longSide = Math.max(template.width, template.depth);
+    const fitsLargest = layerPlan.largestFitsPlan && stats.maxFootprint <= Math.max(shortSide, longSide);
+    const processOk = isProcessCompatibleWithTooling(process, template.toolingType);
+    const type = template.toolingType;
+    let score = 50;
+
+    if (fitsLargest) score += 16; else score -= 48;
+    if (layerPlan.largestFitsHeight) score += 16; else score -= 64;
+    if (layerPlan.needsShelf) score += 10;
+    if (!layerPlan.hasShelf && stats.quantity > layerPlan.perLayerCapacity) score -= 10;
+    if (processOk) score += 18; else score -= 24;
+    if (template.maxWeight >= Math.max(80, stats.weight * 0.35)) score += 8;
+    if (type === 'standard-basket') score += 8;
+    if (/渗碳|碳氮/.test(process) && (type === 'standard-basket' || type === 'mesh-basket')) score += 10;
+    if (/真空/.test(process) && type === 'standard-basket') score += 10;
+    if (/氮化/.test(process) && type === 'material-tray') score += 18;
+    if (stats.cylinderRate > 0.6 && stats.quantity > 30 && type === 'ring-tooling') score += 12;
+
+    if (strategy === 'quality') {
+        if (furnaceTooling?.[type]?.exposurePriority === 'high') score += 8;
+        if (layerPlan.needsShelf) score += 8;
+        if (layerPlan.usableLayers <= 4) score += 4;
+        if (type === 'mesh-basket' && stats.quantity > 80) score -= 8;
+    }
+    if (strategy === 'cost') {
+        score += Math.min(18, (template.maxWeight || 0) / 80);
+        score += Math.min(12, (template.width * template.depth) / 90000);
+        if (layerPlan.perToolCapacity > 1) score += Math.min(12, layerPlan.perToolCapacity / 8);
+    }
+    if (strategy === 'delivery') {
+        score += Math.min(20, (template.maxWeight || 0) / 60);
+        if (template.source === 'current') score += 4;
+        if (layerPlan.countByLayer <= 2) score += 8;
+    }
+
+    return score;
+}
+
+function chooseToolingTemplateForGroup(group, strategy) {
+    const templates = getAvailableToolingTemplatesForRecommendation();
+    const scored = templates.map(template => ({
+        ...template,
+        _score: scoreToolingTemplateForGroup(template, group, strategy)
+    })).sort((a, b) => b._score - a._score);
+
+    const best = scored[0] || getDefaultToolingRecommendationTemplates()[0];
+    return best;
+}
+
+function estimateToolingCountForGroup(group, template, strategy) {
+    const stats = getHeatMergeGroupStats(group);
+    const layerPlan = estimateLayerCapabilityForGroup(group, template, strategy);
+    const targetWeightLoad = strategy === 'quality' ? 0.72 : (strategy === 'delivery' ? 0.86 : 0.94);
+    const byWeight = template.maxWeight > 0
+        ? Math.ceil(stats.weight / Math.max(1, template.maxWeight * targetWeightLoad))
+        : 1;
+    const byLayerCapacity = layerPlan.countByLayer || 1;
+
+    // V0.7.5：推荐“几个框”时，优先使用少框多层/搁板能力。
+    // 总体积只作为风险提示，不再作为强制增加工装数量的主约束，避免薄片/圆件被误判为需要十几个单层料框。
+    let count = Math.max(1, byWeight, byLayerCapacity);
+
+    // 质量优先不等于无限摊开；如果支持搁板且层高安全，允许先用少框多层，再由真实装炉算法验证。
+    if (strategy === 'quality' && layerPlan.needsShelf && layerPlan.fitsLargestPiece) {
+        count = Math.max(1, byWeight, Math.ceil((layerPlan.countByLayer || 1) * 0.9));
+    }
+
+    // 对不支持搁板的浅盘/网篮保守一些，避免只靠总体积忽略堆叠风险。
+    if (!layerPlan.hasShelf && stats.quantity > layerPlan.perLayerCapacity) {
+        count = Math.max(count, Math.ceil(stats.quantity / Math.max(1, layerPlan.perLayerCapacity)));
+    }
+
+    return Math.max(1, count);
+}
+
+function getHeatToolingRecommendationStrategies() {
+    return [
+        { id: 'quality', title: '质量优先', subtitle: '降低单框密度，减少遮挡', badge: '风险低', target: '更均匀', desc: '适合硬度一致性、渗层一致性要求较高的订单。' },
+        { id: 'cost', title: '成本优先', subtitle: '提高装载率，减少炉次', badge: '效率高', target: '少炉次', desc: '适合普通订单，允许工艺员确认保温补偿。' },
+        { id: 'delivery', title: '交付优先', subtitle: '优先把当前组尽快做完', badge: '快交付', target: '少等待', desc: '适合急单，优先使用更大承载工装。' }
+    ];
+}
+
+
+function getPackingStrategyForHeatMergeStrategy(strategy) {
+    if (strategy === 'cost') return 'spaceUtil';
+    if (strategy === 'quality') return 'thermalBalance';
+    if (strategy === 'delivery') return 'balanced';
+    return placementRules.strategy || 'balanced';
+}
+
+function buildPackingItemsFromHeatMergeGroup(group) {
+    return (group?.items || []).filter(item => getHeatMergeItemValidation(item).level !== 'invalid').map((item, index) => ({
+        name: item.name || `工件${index + 1}`,
+        shape: item.shape || 'cuboid',
+        count: Number(item.count) || 1,
+        dim1: Number(item.dim1) || 80,
+        dim2: Number(item.dim2) || 80,
+        dim3: Number(item.dim3) || 30,
+        weight: Number(item.weight) || 0,
+        color: item.color || '#2563eb',
+        material: item.material || '',
+        process: item.process || '',
+        hardness: item.hardness || item.hardnessRaw || '',
+        customer: item.customer || '',
+        itemCode: item.itemCode || '',
+        showName: item.name || '',
+        orderDate: item.orderDate || '',
+        deliveryDate: item.deliveryDate || '',
+        remark: item.remark || ''
+    }));
+}
+
+function summarizeTrialPackingResult(result) {
+    const completed = result?.completedFurnaces || [];
+    const unpacked = result?.unpackedItems || [];
+    const packedItems = completed.flatMap(f => f.packedItems || []);
+    const totalWeight = completed.reduce((sum, f) => sum + Number(f.totalWeight || 0), 0);
+    const maxWeight = completed.reduce((sum, f) => sum + Number(f.max_weight || f.maxWeight || 0), 0);
+    const totalVolume = completed.reduce((sum, f) => sum + Number((f.w || 0) * (f.h || 0) * (f.d || 0)), 0);
+    const packedVolume = completed.reduce((sum, f) => sum + getPackedVolume(f), 0);
+    const maxLayers = completed.reduce((max, f) => Math.max(max, getCurrentToolingLayerCount(f)), 0);
+    return {
+        completedFurnaceCount: completed.length,
+        packedCount: packedItems.length,
+        unpackedCount: unpacked.length,
+        totalWeight,
+        weightRate: maxWeight > 0 ? (totalWeight / maxWeight) * 100 : 0,
+        spaceRate: totalVolume > 0 ? (packedVolume / totalVolume) * 100 : 0,
+        maxLayers,
+        allPacked: unpacked.length === 0 && packedItems.length > 0
+    };
+}
+
+function simulateHeatToolingTrial(group, template, count, strategy) {
+    const furnacePoolInput = [{
+        name: template.name || getToolingLabel(template.toolingType),
+        count: Math.max(1, Number(count) || 1),
+        width: Number(template.width) || 600,
+        height: Number(template.height) || 600,
+        depth: Number(template.depth) || 900,
+        maxWeight: Number(template.maxWeight) || 500,
+        actualSpacing: 5,
+        basketType: template.basketType || furnaceTooling?.[template.toolingType]?.basketType || 'grid',
+        toolingType: template.toolingType || 'standard-basket',
+        maxLayers: Number(template.maxLayers) || furnaceTooling?.[template.toolingType]?.maxLayers || 3,
+        allowedProcesses: '',
+        placementMode: 'free',
+        params: {}
+    }];
+    const itemsInput = buildPackingItemsFromHeatMergeGroup(group);
+    try {
+        const result = executePacking(
+            clonePlain(furnacePoolInput),
+            clonePlain(itemsInput),
+            5,
+            getPackingStrategyForHeatMergeStrategy(strategy)
+        );
+        return { count, result, ...summarizeTrialPackingResult(result) };
+    } catch (err) {
+        console.warn('[heat tooling trial] packing failed:', err);
+        return { count, result: null, allPacked: false, unpackedCount: itemsInput.length, packedCount: 0, totalWeight: 0, weightRate: 0, spaceRate: 0, maxLayers: 0, error: String(err?.message || err) };
+    }
+}
+
+function findVerifiedHeatToolingTrial(group, template, strategy, estimatedCount) {
+    const profile = getHeatMergeStrategyProfile(strategy);
+    const minCount = 1;
+    const maxCount = Math.min(16, Math.max(1, Number(estimatedCount) || 1) + 6);
+    const trials = [];
+    for (let count = minCount; count <= maxCount; count += 1) {
+        const trial = simulateHeatToolingTrial(group, template, count, strategy);
+        trials.push(trial);
+        if (trial.allPacked) {
+            if (strategy === 'cost') break;
+            if (strategy === 'delivery') break;
+            if (strategy === 'quality' && trial.weightRate <= profile.targetWeightLoad * 100 && trial.spaceRate <= profile.targetSpaceLoad * 100) break;
+        }
+    }
+    const allPackedTrials = trials.filter(t => t.allPacked);
+    if (!allPackedTrials.length) {
+        return trials.sort((a, b) => (a.unpackedCount - b.unpackedCount) || (a.count - b.count))[0] || trials[0];
+    }
+    if (strategy === 'quality') {
+        const target = allPackedTrials.find(t => t.weightRate <= profile.targetWeightLoad * 100 && t.spaceRate <= profile.targetSpaceLoad * 100);
+        return target || allPackedTrials[0];
+    }
+    // 成本和交付优先都先保证“能装完”，再选最少框，避免推荐数量和真实生成结果矛盾。
+    return allPackedTrials[0];
+}
+
+function buildHeatToolingRecommendations(group, options = {}) {
+    if (!group || group.id === 'G-INVALID') return [];
+    const allStrategies = getHeatToolingRecommendationStrategies();
+    const currentStrategyId = heatMergeState.strategy || 'quality';
+    const compareAll = options.compareAll === true || heatMergeState.compareToolingStrategies === true;
+    const strategies = compareAll
+        ? allStrategies
+        : [allStrategies.find(s => s.id === currentStrategyId) || allStrategies[0]];
+    const stats = getHeatMergeGroupStats(group);
+    const recommendations = strategies.map(strategy => {
+        const template = chooseToolingTemplateForGroup(group, strategy.id);
+        const layerPlan = estimateLayerCapabilityForGroup(group, template, strategy.id);
+        const estimatedCount = estimateToolingCountForGroup(group, template, strategy.id);
+        const trial = findVerifiedHeatToolingTrial(group, template, strategy.id, estimatedCount);
+        const count = Math.max(1, Number(trial?.count || estimatedCount || 1));
+        const weightRate = Number(trial?.weightRate || 0);
+        const spaceRate = Number(trial?.spaceRate || 0);
+        const heightRisk = !layerPlan.fitsLargestPiece;
+        const riskLevel = heightRisk || !trial?.allPacked ? 'warn' : (strategy.id === 'quality' ? 'ok' : (weightRate > 86 || spaceRate > 42 ? 'warn' : 'mid'));
+        const reasons = [];
+        if (isProcessCompatibleWithTooling(stats.process, template.toolingType)) reasons.push('工艺匹配当前工装类型');
+        else reasons.push('工艺适配性需人工确认');
+        reasons.push(`试装验证：${trial?.allPacked ? `${count} 个${getToolingLabel(template.toolingType)}可装完` : `${count} 个仍有 ${trial?.unpackedCount || 0} 件未装`}`);
+        if (estimatedCount !== count) reasons.push(`已用装炉算法校正估算数量：${estimatedCount} → ${count}`);
+        reasons.push(`最大工件平放高度 ${Math.round(stats.maxHeight || 0)}mm，建议层高 ${Math.round(layerPlan.layerHeight || 0)}mm`);
+        if (layerPlan.needsShelf) reasons.push(`支持搁板分层：预计 ${layerPlan.usableLayers} 层，搁板厚 ${layerPlan.shelfThickness}mm`);
+        else reasons.push(layerPlan.hasShelf ? '当前尺寸下建议单层/少层放置' : '该工装不依赖搁板，按单层容量估算');
+        reasons.push(`策略目标：${strategy.id === 'quality' ? '低密度/低遮挡' : (strategy.id === 'cost' ? '少炉次/高装载率' : '先排炉/少等待')}`);
+        if (heightRisk) reasons.push(layerPlan.heightRisk);
+        if (weightRate > 86) reasons.push('接近承重上限，建议仿真后确认');
+        if (spaceRate > 42) reasons.push('空间密度偏高，建议关注遮挡');
+        if (template.source === 'current') reasons.push('来自当前已配置工装模板');
+        else reasons.push('来自系统样板工装，后续可替换为企业工装库');
+
+        return {
+            id: `HTR-${group.id}-${strategy.id}`,
+            groupId: group.id,
+            strategy: strategy.id,
+            title: `${strategy.title}方案`,
+            subtitle: strategy.subtitle,
+            badge: heightRisk ? '需校验' : strategy.badge,
+            target: strategy.target,
+            desc: strategy.desc,
+            riskLevel,
+            weightRate,
+            spaceRate,
+            count,
+            template,
+            layerPlan,
+            trial,
+            maxItemHeight: stats.maxHeight,
+            toolings: [{
+                name: `AI推荐-${getToolingLabel(template.toolingType)}`,
+                toolingType: template.toolingType,
+                basketType: template.basketType || furnaceTooling?.[template.toolingType]?.basketType || 'grid',
+                width: template.width,
+                height: template.height,
+                depth: template.depth,
+                maxWeight: template.maxWeight,
+                count
+            }],
+            reasons,
+            note: !trial?.allPacked
+                ? '试装未完全装入，请增加工装或调整物料组。'
+                : (heightRisk
+                    ? '最大件高度或平面尺寸存在风险，生成方案后仍需校验未装件。'
+                    : (riskLevel === 'ok'
+                        ? '已通过装炉算法试装，可继续生成方案并做仿真确认。'
+                        : '已通过试装验证，但建议生成后运行仿真并由工艺员确认。'))
+        };
+    });
+
+    // V0.7.5：默认只保留当前策略的一张推荐卡；只有点击“比较三种策略”时才显示三张。
+    heatMergeState.lastToolingRecommendations = recommendations;
+    return recommendations;
+}
+
+function getHeatToolingPlanById(planId) {
+    return (heatMergeState.lastToolingRecommendations || []).find(p => p.id === planId) || null;
+}
+
+function renderHeatToolingRecommendationsPanel(force = false) {
+    const pane = document.getElementById('left-tab-merge');
+    if (!pane) return;
+    let panel = document.getElementById('heat-tooling-recommendations');
+    if (!panel) {
+        panel = document.createElement('section');
+        panel.id = 'heat-tooling-recommendations';
+        panel.className = 'heat-tooling-recommendations htr-compact-v0715';
+        const groups = document.getElementById('heat-merge-groups');
+        if (groups) groups.insertAdjacentElement('afterend', panel);
+        else pane.appendChild(panel);
+    }
+    panel.classList.add('htr-compact-v0715');
+
+    const groupId = heatMergeState.selectedGroupId || heatMergeState.appliedGroupId;
+    const group = groupId ? (getHeatMergeGroupById(groupId) || getHeatMergeGroupPreset(groupId)) : null;
+    if (!group || group.id === 'G-INVALID') {
+        panel.innerHTML = `
+            <div class="htr-empty htr-empty-compact">
+                <strong>工装推荐</strong>
+                <span>先选择一个工艺组，再点击「推荐工装」。</span>
+            </div>
+        `;
+        heatMergeState.lastToolingRecommendations = [];
+        return;
+    }
+
+    const recommendations = buildHeatToolingRecommendations(group, { compareAll: false });
+    const activeStrategy = getHeatToolingRecommendationStrategies().find(s => s.id === (heatMergeState.strategy || 'quality')) || getHeatToolingRecommendationStrategies()[0];
+    const adoptedId = heatMergeState.adoptedToolingPlan?.id || '';
+    const isAdoptedGroup = !!(heatMergeState.adoptedToolingPlan && heatMergeState.adoptedToolingPlan.groupId === group.id);
+    const groupLabel = group.manualMerge ? '人工拼炉组' : '规则工艺组';
+
+    const cardsHtml = recommendations.map(plan => {
+        const tpl = plan.template;
+        const active = heatMergeState.selectedToolingPlanId === plan.id || adoptedId === plan.id;
+        const trialText = plan.trial?.allPacked ? '试装通过' : `未装 ${plan.trial?.unpackedCount || 0} 件`;
+        const shelfText = plan.layerPlan?.needsShelf
+            ? `搁板 ${plan.layerPlan?.usableLayers || 1}层 / ${plan.layerPlan?.shelfThickness || 0}mm`
+            : (plan.layerPlan?.hasShelf ? '少层放置' : '无搁板');
+        const heightText = `${Math.round(plan.maxItemHeight || 0)}mm件 / ${Math.round(plan.layerPlan?.layerHeight || 0)}mm层`;
+        const statePill = active ? '<span class="htr-adopted-pill">已采用</span>' : `<span class="htr-badge ${plan.riskLevel}">${hmEscape(plan.badge)}</span>`;
+        return `
+            <article class="htr-plan-card htr-card-compact ${plan.riskLevel} ${active ? 'active adopted' : ''}" data-tooling-plan-id="${hmEscape(plan.id)}">
+                <div class="htr-card-head compact-head">
+                    <div>
+                        <div class="htr-title">${hmEscape(plan.title)}</div>
+                        <div class="htr-subtitle">${hmEscape(plan.subtitle)}</div>
+                    </div>
+                    ${statePill}
+                </div>
+                <div class="htr-main-line htr-main-line-compact">
+                    <strong>${hmEscape(getToolingLabel(tpl.toolingType))} × ${plan.count}</strong>
+                    <span>${tpl.width}×${tpl.height}×${tpl.depth} · ${tpl.maxWeight}kg/框</span>
+                </div>
+                <div class="htr-quick-metrics">
+                    <span>重量 <b>${plan.weightRate.toFixed(1)}%</b></span>
+                    <span>空间 <b>${plan.spaceRate.toFixed(1)}%</b></span>
+                    <span>层数 <b>${plan.layerPlan?.usableLayers || 1}</b></span>
+                    <span>${hmEscape(heightText)}</span>
+                </div>
+                <div class="htr-chip-row">
+                    <span>${hmEscape(trialText)}</span>
+                    <span>${hmEscape(shelfText)}</span>
+                    <span>${hmEscape(activeStrategy.title)}</span>
+                </div>
+                <div class="htr-actions htr-actions-compact">
+                    ${active ? `
+                        <button class="hm-mini-btn adopted" type="button" disabled>已采用</button>
+                    ` : `
+                        <button class="hm-mini-btn" type="button" data-action="heat-tooling-adopt" data-tooling-plan-id="${hmEscape(plan.id)}">采用</button>
+                        <button class="hm-mini-btn primary" type="button" data-action="heat-tooling-adopt-generate" data-tooling-plan-id="${hmEscape(plan.id)}">采用并生成</button>
+                    `}
+                </div>
+            </article>
+        `;
+    }).join('');
+
+    panel.innerHTML = `
+        <div class="htr-head htr-head-compact">
+            <div>
+                <div class="htr-kicker">工装推荐</div>
+                <div class="htr-head-title">${hmEscape(groupLabel)} · ${hmEscape(group.line)}</div>
+                <div class="htr-head-subtitle compact-only">${hmEscape(activeStrategy.title)} · ${group.manualMerge ? '人工拼炉需工艺确认' : '按当前策略试装推荐'}</div>
+            </div>
+        </div>
+        <div class="htr-plan-grid single-strategy htr-plan-grid-compact">${cardsHtml}</div>
+        ${isAdoptedGroup ? '<div class="htr-adopted-note">已采用当前工装方案，可直接点击底部「生成方案」。</div>' : ''}
+    `;
+
+    if (force) panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function adoptHeatToolingRecommendation(planId, options = {}) {
+    const plan = getHeatToolingPlanById(planId);
+    if (!plan) {
+        alert('未找到工装推荐方案，请重新推荐。');
+        return;
+    }
+
+    const existingCount = document.querySelectorAll('.furnace-card').length;
+    if (existingCount && !options.skipConfirm) {
+        const ok = confirm('采用 AI 工装推荐会替换当前工装配置，是否继续？');
+        if (!ok) return;
+    }
+
+    document.querySelectorAll('.furnace-card, .furnace-inline-detail').forEach(el => el.remove());
+    setSelectedFurnaceCardId(null);
+    setFurnaceCounter(0);
+
+    plan.toolings.forEach(tool => {
+        createFurnaceCard(
+            tool.name,
+            Number(tool.depth) || 900,
+            Number(tool.width) || 600,
+            Number(tool.height) || 600,
+            Number(tool.maxWeight) || 500,
+            Number(tool.count) || 1,
+            0,
+            5,
+            tool.basketType || 'grid',
+            tool.toolingType || 'standard-basket'
+        );
+    });
+
+    heatMergeState.selectedToolingPlanId = plan.id;
+    heatMergeState.adoptedToolingPlan = clonePlain(plan);
+    if (plan.groupId) {
+        heatMergeState.selectedGroupId = plan.groupId;
+        applyHeatMergeGroupToMaterialCards(plan.groupId, { silent: true });
+    }
+
+    clearFurnaceResults();
+    updateTopSummary();
+    renderHeatMergeDesignPanel();
+    renderCurrentToolingPlanCard();
+    showCapacityFeedback('success', `已采用 ${plan.title}：${getToolingLabel(plan.template.toolingType)} × ${plan.count}，预计 ${plan.layerPlan?.usableLayers || 1} 层${plan.layerPlan?.needsShelf ? '（使用搁板）' : ''}`);
+
+    if (options.generate) {
+        setTimeout(() => showGenerationOptions(), 80);
+    } else {
+        document.querySelector('.left-tab-btn[data-tab="furnace"]')?.click();
+    }
+}
+
+function renderToolingRecommendationBasisCard() {
+    const panel = document.getElementById('plan-analysis-panel');
+    if (!panel) return;
+    const old = document.getElementById('tooling-recommendation-basis-card');
+    if (old) old.remove();
+    const plan = heatMergeState.adoptedToolingPlan;
+    if (!plan || !globalFurnacesResult || globalFurnacesResult.length === 0) return;
+
+    const group = plan.groupId ? (getHeatMergeGroupById(plan.groupId) || getHeatMergeGroupPreset(plan.groupId)) : null;
+    const tool = plan.toolings?.[0] || {};
+    const reasons = (plan.reasons || []).slice(0, 3).map(r => `<span>✓ ${hmEscape(r)}</span>`).join('');
+    const shelfText = plan.layerPlan?.needsShelf ? `搁板 ${plan.layerPlan?.shelfThickness || 0}mm` : '无需搁板';
+    const card = document.createElement('section');
+    card.id = 'tooling-recommendation-basis-card';
+    card.className = 'tooling-recommendation-basis-card analysis-compact-card';
+    card.innerHTML = `
+        <div class="compact-analysis-head">
+            <div>
+                <div class="compact-kicker">工装推荐 V0.7.9</div>
+                <div class="compact-title">${hmEscape(plan.title)} · ${hmEscape(getToolingLabel(tool.toolingType))} × ${Number(tool.count) || plan.count || 1}</div>
+            </div>
+            <span class="compact-pill ${plan.riskLevel || 'mid'}">${hmEscape(plan.badge || '已采用')}</span>
+        </div>
+        <div class="compact-chip-row">
+            <span>重量 ${Number(plan.weightRate || 0).toFixed(1)}%</span>
+            <span>空间 ${Number(plan.spaceRate || 0).toFixed(1)}%</span>
+            <span>${plan.layerPlan?.usableLayers || 1} 层</span>
+            <span>${Math.round(plan.layerPlan?.layerHeight || 0)} / ${Math.round(plan.maxItemHeight || 0)}mm</span>
+            <span>${hmEscape(shelfText)}</span>
+        </div>
+        <div class="compact-reasons">${reasons}</div>
+    `;
+
+    const anchor = document.getElementById('heat-process-risk-card');
+    if (anchor?.parentNode === panel) anchor.insertAdjacentElement('afterend', card);
+    else panel.insertAdjacentElement('afterbegin', card);
+}
+
+
+function renderCurrentToolingPlanCard() {
+    const card = document.getElementById('furnace-current-tooling-card');
+    if (!card) return;
+    const plan = heatMergeState.adoptedToolingPlan;
+    const furnaceCount = document.querySelectorAll('.furnace-card').length;
+
+    if (!plan) {
+        card.innerHTML = `
+            <div class="fcp-empty">
+                <strong>${furnaceCount ? '当前为手动工装组合' : '暂无本次工装组合'}</strong>
+                <span>${furnaceCount ? `已配置 ${furnaceCount} 类工装。可继续手动调整，或回到「合炉设计」重新推荐。` : '请先在「合炉设计」中选择合炉组并点击「推荐工装」，也可以手动添加工装。'}</span>
+            </div>
+        `;
+        return;
+    }
+
+    const group = plan.groupId ? (getHeatMergeGroupById(plan.groupId) || getHeatMergeGroupPreset(plan.groupId)) : null;
+    const tool = plan.toolings?.[0] || {};
+    const reasons = (plan.reasons || []).slice(0, 3).map(r => `<span>✓ ${hmEscape(r)}</span>`).join('');
+    card.innerHTML = `
+        <div class="fcp-head">
+            <div>
+                <div class="fcp-kicker">本次工装组合 · 来源：AI 推荐</div>
+                <div class="fcp-title">${hmEscape(plan.title)} · ${hmEscape(getToolingLabel(tool.toolingType))} × ${Number(tool.count) || plan.count || 1}</div>
+                <div class="fcp-subtitle">${hmEscape(group?.title || '未绑定合炉组')} · ${hmEscape(group?.line || '')}</div>
+            </div>
+            <span class="fcp-pill ${plan.riskLevel || 'mid'}">${hmEscape(plan.badge || '已采用')}</span>
+        </div>
+        <div class="fcp-metrics fcp-metrics-v072">
+            <div><span>重量利用</span><strong>${Number(plan.weightRate || 0).toFixed(1)}%</strong></div>
+            <div><span>空间估算</span><strong>${Number(plan.spaceRate || 0).toFixed(1)}%</strong></div>
+            <div><span>预计层数</span><strong>${plan.layerPlan?.usableLayers || 1} 层</strong></div>
+            <div><span>搁板</span><strong>${plan.layerPlan?.needsShelf ? ('需要 · ' + (plan.layerPlan?.shelfThickness || 0) + 'mm') : '不需要'}</strong></div>
+            <div><span>工装尺寸</span><strong>${tool.width || '-'}×${tool.height || '-'}×${tool.depth || '-'}</strong></div>
+        </div>
+        <div class="fcp-reasons">${reasons}</div>
+        <div class="fcp-actions">
+            <button class="hm-mini-btn" type="button" id="btn-furnace-recommend-again-inline">重新推荐</button>
+        </div>
+    `;
+}
+
+function clearCurrentToolingUse(confirmFirst = true) {
+    const count = document.querySelectorAll('.furnace-card').length;
+    if (!count) return;
+    if (confirmFirst && !confirm('清空本次使用的工装组合？不会删除工件详情里的生产任务数据。')) return;
+    document.querySelectorAll('.furnace-card, .furnace-inline-detail').forEach(el => el.remove());
+    setSelectedFurnaceCardId(null);
+    setFurnaceCounter(0);
+    heatMergeState.selectedToolingPlanId = null;
+    heatMergeState.adoptedToolingPlan = null;
+    heatMergeState.compareToolingStrategies = false;
+    clearFurnaceResults();
+    updateTopSummary();
+    renderCurrentToolingPlanCard();
+    showCapacityFeedback('success', '已清空本次工装使用，生产任务数据已保留');
+}
+
+function restoreDefaultToolingCombination(confirmFirst = true) {
+    const count = document.querySelectorAll('.furnace-card').length;
+    if (count && confirmFirst && !confirm('恢复样板工装会替换当前工装组合，是否继续？')) return;
+    document.querySelectorAll('.furnace-card, .furnace-inline-detail').forEach(el => el.remove());
+    setSelectedFurnaceCardId(null);
+    setFurnaceCounter(0);
+    createFurnaceCard('标准料框', 900, 600, 600, 500, 1, 0, 5, 'grid', 'standard-basket');
+    heatMergeState.selectedToolingPlanId = null;
+    heatMergeState.adoptedToolingPlan = null;
+    heatMergeState.compareToolingStrategies = false;
+    clearFurnaceResults();
+    updateTopSummary();
+    renderCurrentToolingPlanCard();
+    showCapacityFeedback('success', '已恢复样板工装：标准料框 × 1');
+}
+
+function showMaterialTaskCheckSummary() {
+    const items = getHeatMergeItemsFromCards();
+    if (!items.length) {
+        alert('暂无生产任务。请先导入 Excel。');
+        return;
+    }
+    let valid = 0, review = 0, invalid = 0;
+    const problems = [];
+    items.forEach(item => {
+        const st = getHeatMergeItemValidation(item);
+        if (st.level === 'valid') valid += 1;
+        else if (st.level === 'review') review += 1;
+        else invalid += 1;
+        if (st.level !== 'valid') problems.push(`${item.customer || item.itemCode || item.name || '工件'}：${st.text}`);
+    });
+    const detail = problems.length ? `
+
+需处理示例：
+${problems.slice(0, 8).join('\n')}${problems.length > 8 ? '\n...' : ''}` : '';
+    alert(`生产任务数据校验
+
+全部：${items.length} 条
+有效：${valid} 条
+待确认：${review} 条
+异常：${invalid} 条
+
+待确认/异常不会参与合炉计算或生成方案。${detail}`);
+}
+
+function renderMaterialTaskDataStatus() {
+    const grid = document.getElementById('material-task-status-grid');
+    const note = document.getElementById('material-task-status-note');
+    const sourceText = document.getElementById('heat-merge-source-text');
+    const items = getHeatMergeItemsFromCards();
+    const total = items.length;
+    const totalQty = items.reduce((sum, item) => sum + (Number(item.count) || 0), 0);
+    const totalWeight = items.reduce((sum, item) => sum + (Number(item.weight) || 0), 0);
+    const filterLabel = getHeatMergeActiveFilterLabel();
+    let valid = 0, review = 0, invalid = 0;
+    const problems = [];
+    items.forEach(item => {
+        const st = getHeatMergeItemValidation(item);
+        if (st.level === 'valid') valid += 1;
+        else if (st.level === 'review') review += 1;
+        else invalid += 1;
+        if (st.level !== 'valid' && problems.length < 3) {
+            problems.push(`${item.customer || item.itemCode || item.name || '工件'}：${st.text}`);
+        }
+    });
+    if (grid) {
+        const cells = grid.querySelectorAll('strong');
+        const vals = [total, valid, review, invalid];
+        cells.forEach((cell, idx) => { cell.textContent = vals[idx] ?? 0; });
+    }
+    if (note) {
+        if (!total) note.textContent = '暂无生产任务。请点击“导入 Excel”。';
+        else if (problems.length) note.textContent = `已导入 ${total} 条。已排除：${problems.join('；')}`;
+        else note.textContent = `已导入 ${total} 条生产任务，字段完整，可进入合炉设计自动分组。`;
+    }
+    if (total && heatMergeState.dataSource !== 'mock' && heatMergeState.dataSource !== 'excel') {
+        heatMergeState.dataSource = 'materials';
+    }
+    if (sourceText) {
+        const source = getHeatMergeDataSourceInfo();
+        sourceText.textContent = total
+            ? `${source.label}${filterLabel ? '（当前筛选）' : ''}：${total} 条 / ${totalQty} 件 / ${totalWeight.toFixed(1)}kg / ${valid} 有效 / ${review + invalid} 已排除 · ${source.curveLabel}`
+            : (filterLabel ? `当前筛选无物料：${filterLabel}` : '暂无物料，请先在工件详情导入生产任务。');
+    }
+    applyHeatMergeValidationToMaterialCards();
+    syncMaterialTaskUiV075();
+}
+
+
+function syncMaterialTaskUiV075() {
+    const total = document.querySelectorAll('.material-card').length;
+    const sampleBtn = document.getElementById('btn-material-load-sample-inline');
+    const checkBtn = document.getElementById('btn-material-check-inline');
+    document.body.classList.toggle('material-has-tasks', total > 0);
+
+    // V0.7.17：导入后已经自动校验，并且异常已直接标在工件卡片上；
+    // “数据校验”弹窗按钮不再作为主流程入口，避免重复解释与遮挡操作。
+    if (checkBtn) {
+        checkBtn.hidden = true;
+        checkBtn.style.display = 'none';
+        checkBtn.title = '已改为自动校验：异常会直接显示在工件卡片上。';
+    }
+
+    // V0.7.8：正式流程只保留 Excel 导入。示例入口不再默认展示，避免用户误认为这是生产入口。
+    if (sampleBtn) {
+        sampleBtn.hidden = true;
+        sampleBtn.style.display = 'none';
+        sampleBtn.title = '示例数据入口已隐藏；测试时可使用专门测试 Excel。';
+    }
+
+    const actions = document.querySelector('.mts-actions');
+    if (actions && !document.getElementById('btn-material-filter-toggle')) {
+        const toggle = document.createElement('button');
+        toggle.className = 'hm-mini-btn ghost';
+        toggle.id = 'btn-material-filter-toggle';
+        toggle.type = 'button';
+        toggle.textContent = '筛选物料';
+        toggle.addEventListener('click', () => {
+            if (document.querySelectorAll('.material-card').length === 0) return;
+            const strip = document.querySelector('.material-filter-strip');
+            if (!strip) return;
+            const open = strip.classList.toggle('filter-open');
+            document.body.classList.toggle('material-filter-open', open);
+            toggle.textContent = open ? '收起筛选' : '筛选物料';
+        });
+        actions.appendChild(toggle);
+    }
+
+    const toggle = document.getElementById('btn-material-filter-toggle');
+    if (toggle) {
+        toggle.hidden = total === 0;
+        toggle.style.display = total > 0 ? '' : 'none';
+        if (total === 0) toggle.textContent = '筛选物料';
+    }
+
+    const strip = document.querySelector('.material-filter-strip');
+    if (strip) {
+        if (total === 0) {
+            strip.classList.remove('filter-open');
+            document.body.classList.remove('material-filter-open');
+        } else if (!strip.classList.contains('filter-open')) {
+            document.body.classList.remove('material-filter-open');
+        }
+    }
+}
+
+
+let heatMergeFilterSyncTimer = null;
+function scheduleHeatMergeAfterMaterialFilterChange() {
+    if (heatMergeFilterSyncTimer) clearTimeout(heatMergeFilterSyncTimer);
+    heatMergeFilterSyncTimer = setTimeout(() => {
+        heatMergeFilterSyncTimer = null;
+        renderMaterialTaskDataStatus();
+        if (getActiveLeftPanelTab && getActiveLeftPanelTab() === 'merge') {
+            heatMergeState.selectedGroupId = null;
+            heatMergeState.appliedGroupId = null;
+            heatMergeState.selectedToolingPlanId = null;
+            heatMergeState.adoptedToolingPlan = null;
+            heatMergeState.lastToolingRecommendations = [];
+            heatMergeState.manualMergeDraftGroupIds = [];
+            if (heatMergeState.strategy !== 'cost') heatMergeState.manualMergeGroups = [];
+            renderHeatMergeDesignPanel();
+        }
+    }, 0);
+}
+
 function renderHeatMergeDesignPanel() {
+    renderMaterialTaskDataStatus();
     renderHeatMergeGroups();
+    renderHeatToolingRecommendationsPanel();
+    renderCurrentToolingPlanCard();
 }
 
 function loadHeatMergeMockData(force = false) {
@@ -4804,15 +6346,20 @@ function loadHeatMergeMockData(force = false) {
 
     heatMergeState.selectedGroupId = null;
     heatMergeState.appliedGroupId = null;
+    heatMergeState.selectedToolingPlanId = null;
+    heatMergeState.adoptedToolingPlan = null;
+    heatMergeState.lastToolingRecommendations = [];
+    heatMergeState.compareToolingStrategies = false;
+    heatMergeState.dataSource = 'mock';
     renderFilterBars(clearFurnaceResults);
     applyHeatMergeGroupToMaterialCards(null, { silent: true });
     renderHeatMergeDesignPanel();
     updateTopSummary();
     updateWorkbenchUiMode();
-    showCapacityFeedback('success', '已载入“测试用例二”Mock 物料，可在合炉设计页查看自动分组');
+    showCapacityFeedback('success', '已载入“测试用例二”示例物料。真实使用时请在工件详情导入生产任务 Excel');
 }
 
-function applyHeatMergeGroupToMaterialCards(groupId, options = {}) {
+function filterHeatMergeMaterialCards(groupId = null) {
     const cards = [...document.querySelectorAll('.material-card')];
     cards.forEach(card => {
         const d = getMaterialDataFromCard(card);
@@ -4828,19 +6375,89 @@ function applyHeatMergeGroupToMaterialCards(groupId, options = {}) {
         card.style.display = visible ? '' : 'none';
         card.toggleAttribute('data-heat-merge-hidden', !visible);
     });
+    document.querySelector('.left-tab-btn[data-tab="material"]')?.click();
+    document.body.classList.add('material-filter-open');
+    document.querySelector('.material-filter-strip')?.classList.add('filter-open');
+    const toggle = document.getElementById('btn-material-filter-toggle');
+    if (toggle) toggle.textContent = '收起筛选';
+    const msg = groupId === 'G-INVALID' ? '已跳到工件详情并筛选异常物料，请补全字段后重新分组' : '已跳到工件详情并显示全部物料';
+    showCapacityFeedback('success', msg);
+}
 
+function getHeatMergeCardMatchKeyFromData(d) {
+    return [
+        String(d.itemCode || '').trim(),
+        String(d.customer || '').trim(),
+        String(d.showName || d.name || '').trim(),
+        String(d.material || '').trim(),
+        String(d.process || '').trim(),
+        String(d.hardness || '').trim(),
+        String(d.count || '').trim(),
+        String(d.totalWeight || '').trim()
+    ].join('|');
+}
+
+function getHeatMergeItemMatchKey(item) {
+    return [
+        String(item.itemCode || '').trim(),
+        String(item.customer || '').trim(),
+        String(item.showName || item.name || '').trim(),
+        String(item.materialRaw || item.material || '').trim(),
+        String(item.process || '').trim(),
+        String(item.hardnessRaw || item.hardness || '').trim(),
+        String(item.count || '').trim(),
+        String(item.weight || item.totalWeight || item.totalWeightKg || '').trim()
+    ].join('|');
+}
+
+function applyHeatMergeGroupToMaterialCards(groupId, options = {}) {
+    const cards = [...document.querySelectorAll('.material-card')];
+    const group = groupId ? getHeatMergeGroupById(groupId) : null;
+    const groupKeys = new Set((group?.items || []).map(getHeatMergeItemMatchKey));
+
+    cards.forEach(card => {
+        let visible = !groupId;
+        const d = getMaterialDataFromCard(card);
+
+        if (groupId && groupKeys.size > 0) {
+            visible = groupKeys.has(getHeatMergeCardMatchKeyFromData(d));
+        } else if (groupId) {
+            // 兜底：仅在找不到 group.items 时退回旧规则。
+            const h = parseHardnessRange(d.hardness);
+            const item = {
+                material: normalizeMaterialName(d.material),
+                process: normalizeHeatText(d.process),
+                hardness: h ? h.label : '',
+                hardnessRange: h,
+                customer: d.customer || '',
+                deliveryDate: d.deliveryDate || '',
+                caseDepth: extractCaseDepth(d.hardness)
+            };
+            const cardGroupId = classifyHeatMergeItem(item, heatMergeState.strategy || 'quality');
+            visible = cardGroupId === groupId;
+        }
+
+        card.style.display = visible ? '' : 'none';
+        card.toggleAttribute('data-heat-merge-hidden', !visible);
+    });
+
+    const previousAppliedToolingGroupId = heatMergeState.adoptedToolingPlan?.groupId || null;
     heatMergeState.appliedGroupId = groupId || null;
+    if (previousAppliedToolingGroupId && previousAppliedToolingGroupId !== heatMergeState.appliedGroupId) {
+        heatMergeState.selectedToolingPlanId = null;
+        heatMergeState.adoptedToolingPlan = null;
+    }
     if (!options.silent) {
         clearFurnaceResults();
         renderHeatMergeDesignPanel();
-        const group = groupId ? getHeatMergeGroupPreset(groupId) : null;
-        showCapacityFeedback('success', group ? `已锁定 ${group.title}：生成方案将只使用该合炉组物料` : '已恢复全部物料参与装炉方案');
+        const appliedGroup = groupId ? (getHeatMergeGroupById(groupId) || getHeatMergeGroupPreset(groupId)) : null;
+        showCapacityFeedback('success', appliedGroup ? `已锁定 ${appliedGroup.title}：生成方案将只使用该合炉组物料` : '已恢复全部物料参与装炉方案');
     }
 }
 
 function showHeatCurveModal(groupId) {
     const group = getHeatMergeGroupById(groupId) || getHeatMergeGroupPreset(groupId);
-    const curve = HEAT_MERGE_CURVES[group.curveKey] || HEAT_MERGE_CURVES['PENDING-MANUAL'];
+    const curve = getHeatMergeCurveForGroup(group);
     const existing = document.getElementById('heat-curve-modal-overlay');
     if (existing) existing.remove();
 
@@ -4859,14 +6476,14 @@ function showHeatCurveModal(groupId) {
         <div class="heat-curve-modal">
             <div class="hcm-head">
                 <div>
-                    <div class="hcm-kicker">推荐历史曲线</div>
+                    <div class="hcm-kicker">工艺曲线状态</div>
                     <div class="hcm-title">${hmEscape(curve.title)}</div>
                 </div>
                 <button class="hcm-close" type="button" aria-label="关闭">×</button>
             </div>
             <div class="hcm-scope">${hmEscape(curve.scope)}</div>
             <div class="hcm-grid">
-                <div><span>历史相似炉次</span><strong>${curve.historyCount || '-'}</strong></div>
+                <div><span>历史炉次状态</span><strong>${curve.historyCount || '-'}</strong></div>
                 <div><span>最近使用</span><strong>${hmEscape(curve.recentUse)}</strong></div>
                 <div><span>适用设备</span><strong>${hmEscape(curve.equipment)}</strong></div>
                 <div><span>典型重量</span><strong>${hmEscape(curve.typicalWeight)}</strong></div>
@@ -4918,25 +6535,28 @@ function renderHeatProcessRiskCard() {
     if (!groupId) return;
 
     const group = getHeatMergeGroupById(groupId) || getHeatMergeGroupPreset(groupId);
-    const curve = HEAT_MERGE_CURVES[group.curveKey] || HEAT_MERGE_CURVES['PENDING-MANUAL'];
+    const curve = getHeatMergeCurveForGroup(group);
+    const source = getHeatMergeDataSourceInfo();
+    const displayTitle = source.key === 'mock' ? group.title : '规则工艺组';
+    const displayRisk = getHeatMergeGroupDisplayRisk(group);
     const card = document.createElement('section');
     card.id = 'heat-process-risk-card';
-    card.className = 'heat-process-risk-card';
+    card.className = 'heat-process-risk-card analysis-compact-card';
+    const sourceLabel = source.key === 'mock' ? '示例曲线' : '待接入曲线库';
     card.innerHTML = `
-        <div class="hpr-head">
+        <div class="compact-analysis-head">
             <div>
-                <div class="hpr-kicker">工艺匹配 V0.5</div>
-                <div class="hpr-title">${hmEscape(group.title)} · ${hmEscape(group.line)}</div>
+                <div class="compact-kicker">工艺匹配 V0.7.9</div>
+                <div class="compact-title">${hmEscape(displayTitle)} · ${hmEscape(group.line)}</div>
             </div>
-            <span class="hpr-pill ${group.statusClass}">${hmEscape(group.status)}</span>
+            <span class="compact-pill ${group.statusClass}">${hmEscape(group.status)}</span>
         </div>
-        <div class="hpr-grid">
-            <div><span>推荐曲线</span><strong>${hmEscape(curve.title)}</strong></div>
-            <div><span>历史相似炉次</span><strong>${curve.historyCount || '-'}</strong></div>
-            <div><span>典型重量</span><strong>${hmEscape(curve.typicalWeight)}</strong></div>
-            <div><span>本组重量</span><strong>${group.weight ? group.weight.toFixed(1) + 'kg' : '-'}</strong></div>
+        <div class="compact-chip-row">
+            <span>${hmEscape(sourceLabel)}</span>
+            <span>本组 ${group.weight ? group.weight.toFixed(1) + 'kg' : '-'}</span>
+            <span>${hmEscape(curve.title)}</span>
         </div>
-        <div class="hpr-note">${hmEscape(group.risk)} ${hmEscape(curve.suggestion)}</div>
+        <div class="compact-note">${hmEscape(displayRisk)}</div>
     `;
     panel.insertAdjacentElement('afterbegin', card);
 }
@@ -5010,7 +6630,7 @@ function getPlanCompareTotals(furnaces = [], unpackedItems = [], role = 'current
 function getActivePlanCompareHeatContext() {
     const groupId = heatMergeState.appliedGroupId || planCompareV05Baseline?.heatGroupId || null;
     const group = groupId ? (getHeatMergeGroupById(groupId) || getHeatMergeGroupPreset(groupId)) : null;
-    const curve = group ? (HEAT_MERGE_CURVES[group.curveKey] || HEAT_MERGE_CURVES['PENDING-MANUAL']) : null;
+    const curve = group ? getHeatMergeCurveForGroup(group) : null;
     return { groupId, group, curve };
 }
 
@@ -5131,66 +6751,84 @@ function updatePlanCompareV05Delta(card, baseSummary, currentSummary, context) {
 }
 
 function renderPlanCompareV05Card() {
-    const panel = document.getElementById('plan-analysis-panel');
-    if (!panel) return;
+    // V0.7.5：方案对比 V0.5 暂时隐藏。
+    // 原因：当前对比仍是摘要级规则展示，设计和使用链路尚未成熟；
+    // 先避免在方案分析页占用过多空间，后续做成熟后再恢复。
     const old = document.getElementById('plan-compare-v05-card');
     if (old) old.remove();
-
-    if (!globalFurnacesResult || globalFurnacesResult.length === 0) return;
-
-    const baseline = ensurePlanCompareV05Baseline();
-    const context = getActivePlanCompareHeatContext();
-    const baseSummary = getPlanCompareTotals(baseline?.furnaces || globalFurnacesResult, baseline?.unpackedItems || [], 'ai');
-    const currentSummary = getPlanCompareTotals(globalFurnacesResult, globalUnpackedItems || [], 'current');
-
-    const baseRisk = getPlanCompareRisk(baseSummary, context, 'ai');
-    const currentRisk = getPlanCompareRisk(currentSummary, context, 'current');
-    const currentTitle = currentSummary.editedCount > 0 ? '人工调整方案' : '当前方案';
-    const currentSub = currentSummary.editedCount > 0 ? `已调整 ${currentSummary.editedCount} 件，可继续运行仿真验证` : '尚未人工编辑，作为当前执行候选';
-
-    const card = document.createElement('section');
-    card.id = 'plan-compare-v05-card';
-    card.className = 'plan-compare-v05-card';
-    card.innerHTML = `
-        <div class="pcv05-head">
-            <div>
-                <div class="pcv05-kicker">方案对比 V0.5</div>
-                <div class="pcv05-title">AI 原始方案 / 人工调整方案 / 历史相似方案</div>
-            </div>
-            <span class="pcv05-badge">摘要对比</span>
-        </div>
-        <div class="pcv05-grid">
-            ${buildPlanCompareColumnHtml('AI 原始方案', baseline?.label || '当前候选策略初始结果', baseSummary, baseRisk, 'ai')}
-            ${buildPlanCompareColumnHtml(currentTitle, currentSub, currentSummary, currentRisk, 'manual')}
-            ${buildHistoricalPlanCompareColumn(context)}
-        </div>
-        <div class="pcv05-delta-row"></div>
-        <div class="pcv05-actions">
-            <button type="button" class="hm-mini-btn" data-action="pcv05-refresh">刷新对比</button>
-            <button type="button" class="hm-mini-btn primary" data-action="pcv05-run-sim">去仿真验证</button>
-        </div>
-    `;
-
-    const anchor = document.getElementById('heat-process-risk-card');
-    if (anchor?.parentNode === panel) {
-        anchor.insertAdjacentElement('afterend', card);
-    } else {
-        panel.insertAdjacentElement('afterbegin', card);
-    }
-
-    updatePlanCompareV05Delta(card, baseSummary, currentSummary, context);
 }
+
 
 
 function initHeatMergeDesign() {
     const loadBtn = document.getElementById('btn-load-merge-mock');
     if (loadBtn) loadBtn.addEventListener('click', () => loadHeatMergeMockData(false));
+    const loadSampleInlineBtn = document.getElementById('btn-material-load-sample-inline');
+    if (loadSampleInlineBtn) loadSampleInlineBtn.addEventListener('click', () => loadHeatMergeMockData(false));
 
     const refreshBtn = document.getElementById('btn-refresh-merge-groups');
     if (refreshBtn) refreshBtn.addEventListener('click', () => renderHeatMergeDesignPanel());
 
+    const syncBtn = document.getElementById('btn-sync-merge-from-materials');
+    if (syncBtn) syncBtn.addEventListener('click', () => {
+        heatMergeState.dataSource = 'materials';
+        heatMergeState.compareToolingStrategies = false;
+        heatMergeState.selectedToolingPlanId = null;
+        heatMergeState.lastToolingRecommendations = [];
+        renderHeatMergeDesignPanel();
+        const firstGroup = document.querySelector('#heat-merge-groups .hm-group-card');
+        if (firstGroup) {
+            firstGroup.classList.add('hm-regroup-flash');
+            firstGroup.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            setTimeout(() => firstGroup.classList.remove('hm-regroup-flash'), 900);
+        }
+        const oldText = syncBtn.textContent;
+        syncBtn.textContent = '已重新分组';
+        syncBtn.disabled = true;
+        setTimeout(() => {
+            syncBtn.textContent = oldText || '重新分组';
+            syncBtn.disabled = false;
+        }, 900);
+        const filterLabel = getHeatMergeActiveFilterLabel();
+        showCapacityFeedback('success', filterLabel ? `已按当前筛选重新分组：${filterLabel}` : '已根据全部工件详情重新分组');
+    });
+
+    const inlineImportBtn = document.getElementById('btn-material-import-inline');
+    if (inlineImportBtn) inlineImportBtn.addEventListener('click', () => {
+        heatMergeState.dataSource = 'excel';
+        document.getElementById('excel-file-input')?.click();
+    });
+    const excelInputForMerge = document.getElementById('excel-file-input');
+    if (excelInputForMerge && excelInputForMerge.dataset.heatMergeSourceBound !== '1') {
+        excelInputForMerge.dataset.heatMergeSourceBound = '1';
+        excelInputForMerge.addEventListener('change', () => {
+            heatMergeState.dataSource = 'excel';
+            heatMergeState.selectedGroupId = null;
+            heatMergeState.appliedGroupId = null;
+            heatMergeState.compareToolingStrategies = false;
+            heatMergeState.manualMergeGroups = [];
+            heatMergeState.manualMergeDraftGroupIds = [];
+        });
+    }
+    const inlineClearBtn = document.getElementById('btn-material-clear-inline');
+    if (inlineClearBtn) inlineClearBtn.addEventListener('click', () => clearAllMaterials());
+    const inlineCheckBtn = document.getElementById('btn-material-check-inline');
+    if (inlineCheckBtn) inlineCheckBtn.addEventListener('click', showMaterialTaskCheckSummary);
+
+    // V0.7.8：材质/工艺/硬度筛选改变后，同步刷新合炉设计的数据来源和分组结果。
+    if (document.body.dataset.heatMergeFilterSyncBound !== '1') {
+        document.body.dataset.heatMergeFilterSyncBound = '1';
+        document.addEventListener('click', (event) => {
+            if (event.target.closest('.material-filter-strip .filter-tag')) {
+                scheduleHeatMergeAfterMaterialFilterChange();
+            }
+        }, true);
+    }
+
     const showAllBtn = document.getElementById('btn-show-all-merge-materials');
-    if (showAllBtn) showAllBtn.addEventListener('click', () => applyHeatMergeGroupToMaterialCards(null));
+    if (showAllBtn) showAllBtn.addEventListener('click', () => filterHeatMergeMaterialCards(null));
+    const showInvalidBtn = document.getElementById('btn-show-invalid-merge-materials');
+    if (showInvalidBtn) showInvalidBtn.addEventListener('click', () => filterHeatMergeMaterialCards('G-INVALID'));
 
     const analysisPanel = document.getElementById('plan-analysis-panel');
     if (analysisPanel && analysisPanel.dataset.planCompareV05Bound !== '1') {
@@ -5215,20 +6853,52 @@ function initHeatMergeDesign() {
             document.querySelectorAll('.hm-strategy-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             heatMergeState.strategy = btn.getAttribute('data-merge-strategy') || 'quality';
+            heatMergeState.compareToolingStrategies = false;
+            heatMergeState.selectedGroupId = null;
+            heatMergeState.appliedGroupId = null;
+            heatMergeState.selectedToolingPlanId = null;
+            heatMergeState.adoptedToolingPlan = null;
+            heatMergeState.lastToolingRecommendations = [];
             renderHeatMergeDesignPanel();
+            const profile = getHeatMergeStrategyProfile(heatMergeState.strategy);
+            showCapacityFeedback('success', `已切换为${profile.label}：${profile.groupMode}`);
         });
     });
 
     const groups = document.getElementById('heat-merge-groups');
     if (groups) {
         groups.addEventListener('click', event => {
+            const card = event.target.closest('.hm-group-card');
             const btn = event.target.closest('[data-action]');
-            if (!btn) return;
-            const action = btn.getAttribute('data-action');
-            const groupId = btn.getAttribute('data-merge-group-id');
+            const action = btn?.getAttribute('data-action') || '';
+
+            if (action === 'heat-manual-create-group') {
+                createHeatManualMergeGroupFromDraft();
+                return;
+            }
+            if (action === 'heat-manual-clear-draft') {
+                clearHeatManualMergeDraft();
+                return;
+            }
+
+            const groupId = btn?.getAttribute('data-merge-group-id') || card?.getAttribute('data-merge-group-id');
             if (!groupId) return;
 
+            if (action === 'heat-merge-add-manual') {
+                toggleHeatManualMergeDraftGroup(groupId);
+                return;
+            }
+            if (action === 'heat-merge-remove-manual') {
+                removeHeatManualMergeGroup(groupId);
+                return;
+            }
+
             heatMergeState.selectedGroupId = groupId;
+
+            if (!btn) {
+                renderHeatMergeDesignPanel();
+                return;
+            }
 
             if (action === 'heat-merge-view-curve') {
                 renderHeatMergeDesignPanel();
@@ -5241,6 +6911,13 @@ function initHeatMergeDesign() {
                 return;
             }
 
+            if (action === 'heat-merge-recommend-tooling') {
+                heatMergeState.compareToolingStrategies = false;
+                renderHeatMergeDesignPanel();
+                renderHeatToolingRecommendationsPanel(true);
+                return;
+            }
+
             if (action === 'heat-merge-generate-group') {
                 applyHeatMergeGroupToMaterialCards(groupId, { silent: true });
                 renderHeatMergeDesignPanel();
@@ -5249,9 +6926,57 @@ function initHeatMergeDesign() {
         });
     }
 
+
+
+    const mergePane = document.getElementById('left-tab-merge');
+    if (mergePane && mergePane.dataset.toolingRecommendationBound !== '1') {
+        mergePane.dataset.toolingRecommendationBound = '1';
+        mergePane.addEventListener('click', event => {
+            const btn = event.target.closest('[data-action]');
+            if (!btn) return;
+            const action = btn.getAttribute('data-action');
+            if (action === 'heat-tooling-refresh') {
+                renderHeatToolingRecommendationsPanel(true);
+                return;
+            }
+            if (action === 'heat-tooling-compare-toggle') {
+                heatMergeState.compareToolingStrategies = !heatMergeState.compareToolingStrategies;
+                renderHeatToolingRecommendationsPanel(true);
+                return;
+            }
+            if (action === 'heat-tooling-adopt' || action === 'heat-tooling-adopt-generate') {
+                const planId = btn.getAttribute('data-tooling-plan-id');
+                adoptHeatToolingRecommendation(planId, { generate: action === 'heat-tooling-adopt-generate' });
+            }
+        });
+    }
+
+    const furnaceAddInline = document.getElementById('btn-furnace-add-inline');
+    if (furnaceAddInline) furnaceAddInline.addEventListener('click', () => toolingModal.openToolingAddModal());
+    const furnaceClearInline = document.getElementById('btn-furnace-clear-use-inline');
+    if (furnaceClearInline) furnaceClearInline.addEventListener('click', () => clearCurrentToolingUse(true));
+    const furnaceRestoreInline = document.getElementById('btn-furnace-restore-default-inline');
+    if (furnaceRestoreInline) furnaceRestoreInline.addEventListener('click', () => restoreDefaultToolingCombination(true));
+    const furnacePlanCard = document.getElementById('furnace-current-tooling-card');
+    if (furnacePlanCard && furnacePlanCard.dataset.v071Bound !== '1') {
+        furnacePlanCard.dataset.v071Bound = '1';
+        furnacePlanCard.addEventListener('click', event => {
+            const btn = event.target.closest('button');
+            if (!btn) return;
+            if (btn.id === 'btn-furnace-recommend-again-inline') {
+                document.querySelector('.left-tab-btn[data-tab="merge"]')?.click();
+                setTimeout(() => renderHeatToolingRecommendationsPanel(true), 40);
+            }
+            if (btn.id === 'btn-furnace-generate-inline') {
+                showGenerationOptions();
+            }
+        });
+    }
+
     const materialContainer = document.getElementById('material-cards-container');
     if (materialContainer && window.MutationObserver) {
         const observer = new MutationObserver(() => {
+            renderMaterialTaskDataStatus();
             if (getActiveLeftPanelTab() === 'merge') renderHeatMergeDesignPanel();
         });
         observer.observe(materialContainer, { childList: true });
@@ -5278,54 +7003,27 @@ function syncLeftPanelActionButton() {
     document.body.classList.toggle('left-tab-material-active', tab === 'material');
     document.body.classList.toggle('left-tab-merge-active', tab === 'merge');
 
-    if (!addBtn || !clearBtn) return;
-
-    addBtn.disabled = false;
-    clearBtn.style.display = 'inline-flex';
-
-    if (tab === 'merge') {
-        addBtn.textContent = '载入Mock';
-        addBtn.title = '载入测试用例二 Mock 物料';
-        if (importBtn) importBtn.style.display = 'none';
-        clearBtn.textContent = '全部物料';
-        clearBtn.title = '解除合炉组锁定，恢复全部物料参与方案';
-        return;
-    }
-
-    if (tab === 'material') {
-        addBtn.textContent = '增加';
-        addBtn.title = '新增待热处理工件';
-        if (importBtn) {
-            importBtn.textContent = '导入';
-            importBtn.title = '从 Excel 导入工件';
-            importBtn.style.display = 'inline-flex';
-        }
-        clearBtn.textContent = '清空';
-        clearBtn.title = '清空所有待装工件，保留工装';
-        return;
-    }
-
-    if (tab === 'tooling') {
-        addBtn.textContent = '待链接';
-        addBtn.title = '生产车间后续用于链接真实工厂设备';
-        addBtn.disabled = true;
-        if (importBtn) importBtn.style.display = 'none';
-        clearBtn.style.display = 'none';
-        return;
-    }
-
-    addBtn.textContent = '增加工装';
-    addBtn.title = '新增标准料框、料盘、网篮或环形工装';
-    if (importBtn) importBtn.style.display = 'none';
-    clearBtn.textContent = '清空';
-    clearBtn.title = '清空所有工装、工件和装炉结果';
+    // V0.7.1 UI cleanup: the old panel-header action buttons are now redundant.
+    // Each page has its own local actions:
+    // - 装载工装：添加工装 / 清空本次使用 / 恢复样板工装
+    // - 工件详情：导入 Excel / 清空任务 / 筛选物料
+    // - 合炉设计：自动合炉分组 / 查看全部物料 / 查看异常物料
+    // Keep these legacy buttons hidden to avoid duplicated or misleading actions.
+    [addBtn, importBtn, clearBtn].forEach(btn => {
+        if (!btn) return;
+        btn.style.display = 'none';
+        btn.disabled = false;
+    });
 }
 
 function handleLeftPanelPrimaryAction() {
     const tab = getActiveLeftPanelTab();
 
     if (tab === 'merge') {
-        loadHeatMergeMockData(false);
+        heatMergeState.dataSource = 'materials';
+        renderHeatMergeDesignPanel();
+        const filterLabel = getHeatMergeActiveFilterLabel();
+        showCapacityFeedback('success', filterLabel ? `已按当前筛选重新生成合炉分组：${filterLabel}` : '已从工件详情重新生成合炉分组');
         return;
     }
 
@@ -5353,7 +7051,7 @@ function handleLeftPanelClearAction() {
     }
 
     if (tab === 'furnace') {
-        clearAllFurnaces();
+        clearCurrentToolingUse(true);
     }
 }
 
@@ -5630,12 +7328,22 @@ function init() {
     const btnImportReplace = document.getElementById("btn-import-replace");
     if (btnImportReplace) btnImportReplace.addEventListener("click", () => {
         applyImportData(true);
+        heatMergeState.appliedGroupId = null;
+        heatMergeState.selectedGroupId = null;
+        heatMergeState.dataSource = 'materials';
+        renderMaterialTaskDataStatus();
+        renderHeatMergeDesignPanel();
         scheduleWorkbenchUiModeUpdate();
     });
 
     const btnImportAppend = document.getElementById("btn-import-append");
     if (btnImportAppend) btnImportAppend.addEventListener("click", () => {
         applyImportData(false);
+        heatMergeState.appliedGroupId = null;
+        heatMergeState.selectedGroupId = null;
+        heatMergeState.dataSource = 'materials';
+        renderMaterialTaskDataStatus();
+        renderHeatMergeDesignPanel();
         scheduleWorkbenchUiModeUpdate();
     });
     const btnPdfCancel = document.getElementById("btn-pdf-cancel");
@@ -5795,6 +7503,7 @@ function init() {
 
     // 渲染筛选条（物料卡片变化时会自动刷新，但初始需要调用一次）
     renderFilterBars(clearFurnaceResults);
+    renderMaterialTaskDataStatus();
     syncLeftPanelActionButton();
 }
 
@@ -5815,6 +7524,7 @@ function initLeftPanelTabs() {
             if (pane) pane.classList.add('active');
             syncLeftPanelActionButton();
             if (tab === 'merge') renderHeatMergeDesignPanel();
+            if (tab === 'furnace') renderCurrentToolingPlanCard();
         });
     });
 }
@@ -5904,11 +7614,12 @@ function initGenerationOptions() {
 function showGenerationOptions() {
     if (isAnimating) return;
 
-    // 检查是否有炉膛和物料数据
-    let hasFurnaces = document.querySelectorAll(".furnace-card").length > 0;
-    let hasMaterials = document.querySelectorAll(".material-card").length > 0;
-    if (!hasFurnaces || !hasMaterials) {
-        alert("请先在左侧添加料框配置，在右侧添加待处理物料");
+    // 检查是否有炉膛和有效生成物料。采用合炉组后，物料可能被筛选隐藏，
+    // 因此这里读取实际生成输入，而不是只数 material-card DOM。
+    const hasFurnaces = document.querySelectorAll('.furnace-card').length > 0;
+    const effectiveItems = collectPackingItemsForCurrentGeneration();
+    if (!hasFurnaces || effectiveItems.length === 0) {
+        alert('请先配置本次工装，并在工件详情/合炉设计中选择有效物料');
         return;
     }
 
@@ -5930,32 +7641,133 @@ function hideGenerationOptions() {
  * 执行装炉算法并播放逐帧装框动画。
  * @returns {void}
  */
-function executeWithAnimation() {
-    executeAndRender();
+async function executeWithAnimation() {
+    showPlanGenerationProgress('装炉仿真');
+    setPlanGenerationProgress(8, '读取生产任务与工装配置');
+    setGenerateButtonBusy(true);
+    await nextPaint();
+
+    try {
+        setPlanGenerationProgress(32, '生成摆放路径与分层数据');
+        await nextPaint();
+        executeAndRender();
+        setPlanGenerationProgress(78, '准备逐步装炉动画');
+        await sleep(220);
+        setPlanGenerationProgress(100, '开始播放装炉仿真');
+        await sleep(120);
+    } finally {
+        hidePlanGenerationProgress();
+        setGenerateButtonBusy(false);
+    }
 
     setTimeout(() => {
         playCurrentSimulation();
-    }, 300);
+    }, 120);
 }
 
 /**
- * 执行装炉算法，显示 AI 思考加载动画，然后直接呈现结果，跳过逐帧动画。
+ * 执行装炉算法，显示生成进度，然后直接呈现结果，跳过逐帧动画。
  * @returns {Promise<void>}
  */
 async function executeWithAILoading() {
-    // 显示 AI 思考加载动画
-    showAILoadingLoading();
+    // V0.7.21：恢复 V0.7.19 的视觉结构，同时保留生成方案进度反馈。
+    // 先让浏览器完成一次绘制，再执行同步装炉计算，避免点击后数秒无反馈。
+    showPlanGenerationProgress('生成装炉方案');
+    setPlanGenerationProgress(8, '读取生产任务与工装配置');
+    setGenerateButtonBusy(true);
 
-    // 在后台执行装炉算法
-    executeAndRender();
+    await nextPaint();
 
-    // AI 思考模拟：1~3 秒随机（单位 ms）
-    const aiThinkDuration = 2000 + Math.floor(Math.random() * 2000);
+    try {
+        setPlanGenerationProgress(28, '执行装炉算法试算');
+        await nextPaint();
 
-    await sleep(aiThinkDuration);
+        executeAndRender();
 
-    // 隐藏加载动画
-    hideAILoadingLoading();
+        setPlanGenerationProgress(82, '渲染 3D 装炉结果');
+        await sleep(220);
+
+        setPlanGenerationProgress(100, '方案生成完成');
+        await sleep(160);
+    } finally {
+        hidePlanGenerationProgress();
+        setGenerateButtonBusy(false);
+    }
+}
+
+function nextPaint() {
+    return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+}
+
+function ensurePlanGenerationProgressOverlay() {
+    let overlay = document.getElementById('plan-generation-progress-overlay');
+    if (overlay) return overlay;
+
+    overlay = document.createElement('div');
+    overlay.id = 'plan-generation-progress-overlay';
+    overlay.innerHTML = `
+        <div class="pgp-card">
+            <div class="pgp-head">
+                <div class="pgp-kicker">正在生成装炉方案</div>
+                <div class="pgp-percent" id="pgp-percent">0%</div>
+            </div>
+            <div class="pgp-title" id="pgp-title">准备计算</div>
+            <div class="pgp-bar"><div class="pgp-bar-fill" id="pgp-bar-fill"></div></div>
+            <div class="pgp-steps">
+                <span data-step="read" class="active">读取数据</span>
+                <span data-step="pack">试算排布</span>
+                <span data-step="render">渲染结果</span>
+                <span data-step="done">完成</span>
+            </div>
+            <div class="pgp-hint">计算期间页面可能短暂停顿，请勿重复点击。</div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    return overlay;
+}
+
+function showPlanGenerationProgress(modeLabel = '生成方案') {
+    const overlay = ensurePlanGenerationProgressOverlay();
+    const kicker = overlay.querySelector('.pgp-kicker');
+    if (kicker) kicker.textContent = `正在${modeLabel}`;
+    overlay.classList.add('active');
+    setPlanGenerationProgress(0, '准备计算');
+}
+
+function setPlanGenerationProgress(value, title) {
+    const overlay = ensurePlanGenerationProgressOverlay();
+    const pct = Math.max(0, Math.min(100, Math.round(value || 0)));
+    const percentEl = overlay.querySelector('#pgp-percent');
+    const fillEl = overlay.querySelector('#pgp-bar-fill');
+    const titleEl = overlay.querySelector('#pgp-title');
+    if (percentEl) percentEl.textContent = `${pct}%`;
+    if (fillEl) fillEl.style.width = `${pct}%`;
+    if (titleEl && title) titleEl.textContent = title;
+
+    const stepKey = pct >= 100 ? 'done' : pct >= 70 ? 'render' : pct >= 22 ? 'pack' : 'read';
+    const order = ['read', 'pack', 'render', 'done'];
+    overlay.querySelectorAll('.pgp-steps span').forEach(step => {
+        const key = step.getAttribute('data-step');
+        step.classList.toggle('active', order.indexOf(key) <= order.indexOf(stepKey));
+    });
+}
+
+function hidePlanGenerationProgress() {
+    const overlay = document.getElementById('plan-generation-progress-overlay');
+    if (overlay) overlay.classList.remove('active');
+}
+
+function setGenerateButtonBusy(isBusy) {
+    const btn = document.getElementById('btn-generate-plan');
+    if (!btn) return;
+    btn.disabled = !!isBusy;
+    btn.classList.toggle('is-generating', !!isBusy);
+    if (isBusy) {
+        btn.dataset.originalText = btn.dataset.originalText || btn.textContent;
+        btn.textContent = '生成中…';
+    } else if (btn.dataset.originalText) {
+        btn.textContent = btn.dataset.originalText;
+    }
 }
 
 /**
@@ -6295,6 +8107,28 @@ function showPlacementEditStatus(level, message) {
     statusEl.textContent = message || '';
 }
 
+function syncPlacementEditEntryButtons() {
+    const active = !!placementEditModeActive;
+    const dockBtn = document.getElementById('dock-placement-edit');
+    if (dockBtn) {
+        dockBtn.classList.toggle('active', active);
+        dockBtn.title = active ? '退出人工摆放编辑' : '进入人工摆放编辑';
+        const label = dockBtn.querySelector('.dock-label');
+        const icon = dockBtn.querySelector('.dock-icon');
+        if (label) label.textContent = active ? '退出' : '编辑';
+        if (icon) icon.textContent = active ? '✓' : '✋';
+    }
+
+    // 旧 HUD 内按钮保留事件兼容，但不再作为主入口显示。
+    const hudBtn = document.getElementById('btn-placement-edit');
+    if (hudBtn) {
+        hudBtn.classList.toggle('active', active);
+        hudBtn.textContent = active ? '退出编辑' : '编辑摆放';
+        hudBtn.setAttribute('aria-hidden', 'true');
+        hudBtn.tabIndex = -1;
+    }
+}
+
 function ensurePlacementOriginal(item) {
     if (!item) return;
     if (!item.aiOriginalPosition) {
@@ -6553,6 +8387,7 @@ function setPlacementEditModeActive(active) {
             btn.classList.remove('active');
             btn.textContent = '编辑摆放';
         }
+        syncPlacementEditEntryButtons();
 
         setPlacementEditMode(false);
         restorePlacementEditControlsLock();
@@ -6585,6 +8420,7 @@ function setPlacementEditModeActive(active) {
         btn.classList.toggle('active', placementEditModeActive);
         btn.textContent = placementEditModeActive ? '退出编辑' : '编辑摆放';
     }
+    syncPlacementEditEntryButtons();
 
     if (placementEditModeActive) {
         suspendProcessSimulationForPlacementEdit();
@@ -7013,6 +8849,8 @@ function bindPlacementEditMode() {
 
     const dockRotate45 = ensureDockButton('dock-rotate-45', '↺', '45°', '绕当前工装中心旋转 45°', dockSideView || dockFrontView || dockTopView);
     const dockCenterView = ensureDockButton('dock-center-view', '◎', '居中', '将当前工装重新居中到画面', dockRotate45);
+    const dockPlacementEdit = ensureDockButton('dock-placement-edit', '✋', '编辑', '进入/退出人工摆放编辑', dockCenterView);
+    if (dockPlacementEdit) dockPlacementEdit.classList.add('placement-edit-dock-btn');
     const dockExplodeVertical = ensureDockButton('dock-explode-vertical', '↕', '纵爆', '垂直方向爆炸图 / 再次点击关闭', dockExplode);
     const dockExplodeHorizontal = ensureDockButton('dock-explode-horizontal', '↔', '横爆', '水平方向爆炸图 / 再次点击关闭', dockExplodeVertical);
     if (dockExplode) {
@@ -7071,7 +8909,7 @@ function bindPlacementEditMode() {
                 dockThermal.classList.remove('active');
                 return;
             }
-            renderCurrentThermalSimulation(0.18, true);
+            renderCurrentThermalSimulation(0, true);
             dockThermal.classList.add('active');
         });
     }
@@ -7086,6 +8924,15 @@ function bindPlacementEditMode() {
         dockCenterView.addEventListener('click', () => {
             centerCurrentFurnaceView();
             highlightDockBtn(dockCenterView);
+        });
+    }
+    if (dockPlacementEdit) {
+        dockPlacementEdit.addEventListener('click', () => {
+            if (!globalFurnacesResult || globalFurnacesResult.length === 0) {
+                showCapacityFeedback?.('warning', '请先生成装炉方案，再进入编辑摆放。');
+                return;
+            }
+            setPlacementEditModeActive(!placementEditModeActive);
         });
     }
     if (dockFrontView) {

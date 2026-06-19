@@ -7353,3 +7353,1807 @@ body.placement-edit-mode .current-tooling-hud {
 @media (max-width: 1280px) {
     .pcv05-grid { grid-template-columns: 1fr; }
 }
+
+/* ==================== Heat Merge Design V0.6: Excel Data Pool ==================== */
+.material-task-status,
+.hm-data-source-card {
+    margin: 10px 0;
+    padding: 10px;
+    border: 1px solid rgba(37, 99, 235, 0.14);
+    border-radius: 14px;
+    background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,250,252,.94));
+    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.04);
+}
+.mts-head,
+.hm-data-source-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 10px;
+}
+.mts-head strong,
+.hm-data-source-card strong {
+    display: block;
+    font-size: 12px;
+    color: #0F172A;
+    font-weight: 900;
+    margin-bottom: 3px;
+}
+.mts-head span,
+.hm-data-source-card span {
+    display: block;
+    font-size: 10px;
+    line-height: 1.45;
+    color: #64748B;
+}
+.mts-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    margin-top: 9px;
+}
+.mts-grid div {
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    background: #fff;
+    border-radius: 11px;
+    padding: 7px 6px;
+    min-width: 0;
+}
+.mts-grid span {
+    display: block;
+    color: #64748B;
+    font-size: 10px;
+    margin-bottom: 2px;
+}
+.mts-grid strong {
+    display: block;
+    color: #0F172A;
+    font-size: 14px;
+    font-weight: 950;
+}
+.mts-grid div:nth-child(3) strong { color: #B45309; }
+.mts-grid div:nth-child(4) strong { color: #DC2626; }
+.mts-note {
+    margin-top: 8px;
+    padding: 7px 8px;
+    border-radius: 10px;
+    background: #F8FAFC;
+    color: #475569;
+    font-size: 11px;
+    line-height: 1.45;
+}
+.hm-toolbar-actions-v06 {
+    grid-template-columns: 1.3fr 1fr 1fr;
+}
+.left-tab-merge-active .left-generate-hint::after {
+    content: ' · 当前仅装载已锁定合炉组';
+    color: #2563EB;
+    font-weight: 800;
+}
+
+/* ==================== Heat Merge Tooling Recommendation V0.7 ==================== */
+.heat-tooling-recommendations {
+    margin: 12px 0 10px;
+    padding: 10px;
+    border: 1px solid rgba(37, 99, 235, 0.16);
+    border-radius: 16px;
+    background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,250,252,.96));
+    box-shadow: 0 8px 20px rgba(15,23,42,.05);
+}
+.htr-empty {
+    padding: 10px;
+    border: 1px dashed #CBD5E1;
+    border-radius: 13px;
+    background: #F8FAFC;
+}
+.htr-empty strong {
+    display: block;
+    color: #0F172A;
+    font-size: 12px;
+    font-weight: 950;
+    margin-bottom: 3px;
+}
+.htr-empty span {
+    display: block;
+    color: #64748B;
+    font-size: 10px;
+    line-height: 1.45;
+}
+.htr-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 9px;
+}
+.htr-kicker {
+    font-size: 9px;
+    color: #2563EB;
+    font-weight: 950;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    margin-bottom: 2px;
+}
+.htr-head-title {
+    color: #0F172A;
+    font-size: 12px;
+    font-weight: 950;
+    line-height: 1.25;
+}
+.htr-head-subtitle {
+    margin-top: 3px;
+    color: #64748B;
+    font-size: 10px;
+    line-height: 1.45;
+}
+.htr-plan-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+}
+.htr-plan-card {
+    padding: 10px;
+    border: 1px solid #E2E8F0;
+    border-radius: 14px;
+    background: #FFFFFF;
+    box-shadow: 0 5px 14px rgba(15,23,42,.04);
+}
+.htr-plan-card.active {
+    border-color: #2563EB;
+    box-shadow: 0 0 0 2px rgba(37,99,235,.08), 0 8px 18px rgba(15,23,42,.06);
+}
+.htr-plan-card.ok { border-left: 4px solid #10B981; }
+.htr-plan-card.mid { border-left: 4px solid #F59E0B; }
+.htr-plan-card.warn { border-left: 4px solid #F97316; }
+.htr-card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+}
+.htr-title {
+    color: #0F172A;
+    font-size: 12px;
+    font-weight: 950;
+}
+.htr-subtitle {
+    margin-top: 2px;
+    color: #64748B;
+    font-size: 10px;
+    line-height: 1.35;
+}
+.htr-badge {
+    flex: 0 0 auto;
+    padding: 3px 7px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 950;
+    border: 1px solid #CBD5E1;
+    background: #F8FAFC;
+    color: #475569;
+}
+.htr-badge.ok { color: #047857; background: #ECFDF5; border-color: #A7F3D0; }
+.htr-badge.mid { color: #B45309; background: #FFFBEB; border-color: #FDE68A; }
+.htr-badge.warn { color: #C2410C; background: #FFF7ED; border-color: #FDBA74; }
+.htr-main-line {
+    margin-top: 8px;
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    align-items: center;
+    padding: 7px 8px;
+    border-radius: 10px;
+    background: #F8FAFC;
+    border: 1px solid #EEF2F7;
+}
+.htr-main-line strong {
+    color: #0F172A;
+    font-size: 12px;
+    font-weight: 950;
+    white-space: nowrap;
+}
+.htr-main-line span {
+    color: #64748B;
+    font-size: 10px;
+    text-align: right;
+}
+.htr-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    margin-top: 8px;
+}
+.htr-metrics div {
+    padding: 6px;
+    border-radius: 10px;
+    border: 1px solid #EEF2F7;
+    background: #FFFFFF;
+}
+.htr-metrics span {
+    display: block;
+    font-size: 9px;
+    color: #94A3B8;
+    margin-bottom: 2px;
+}
+.htr-metrics strong {
+    display: block;
+    font-size: 11px;
+    color: #0F172A;
+    font-weight: 950;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.htr-reasons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 8px;
+}
+.htr-reasons span {
+    padding: 3px 6px;
+    border-radius: 999px;
+    background: #EFF6FF;
+    color: #1D4ED8;
+    font-size: 9px;
+    font-weight: 800;
+}
+.htr-note,
+.htr-footer {
+    margin-top: 8px;
+    color: #64748B;
+    font-size: 10px;
+    line-height: 1.45;
+}
+.htr-actions {
+    display: grid;
+    grid-template-columns: 1fr 1.1fr;
+    gap: 6px;
+    margin-top: 9px;
+}
+.tooling-recommendation-basis-card {
+    margin: 0 0 12px;
+    padding: 12px;
+    border: 1px solid #DCEBFF;
+    border-radius: 14px;
+    background: linear-gradient(180deg, #FFFFFF, #F8FBFF);
+    box-shadow: 0 8px 18px rgba(15,23,42,.05);
+}
+.trb-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 9px;
+}
+.trb-kicker {
+    font-size: 9px;
+    color: #2563EB;
+    font-weight: 950;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+.trb-title {
+    margin-top: 2px;
+    color: #0F172A;
+    font-size: 13px;
+    line-height: 1.25;
+    font-weight: 950;
+}
+.trb-pill {
+    flex: 0 0 auto;
+    padding: 4px 8px;
+    border-radius: 999px;
+    border: 1px solid #CBD5E1;
+    background: #F8FAFC;
+    color: #475569;
+    font-size: 10px;
+    font-weight: 950;
+}
+.trb-pill.ok { color: #047857; background: #ECFDF5; border-color: #A7F3D0; }
+.trb-pill.mid { color: #B45309; background: #FFFBEB; border-color: #FDE68A; }
+.trb-pill.warn { color: #C2410C; background: #FFF7ED; border-color: #FDBA74; }
+.trb-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 7px;
+}
+.trb-grid div {
+    padding: 7px;
+    border: 1px solid #EEF2F7;
+    border-radius: 10px;
+    background: #FFFFFF;
+}
+.trb-grid span {
+    display: block;
+    font-size: 9px;
+    color: #94A3B8;
+    margin-bottom: 2px;
+}
+.trb-grid strong {
+    display: block;
+    font-size: 11px;
+    color: #0F172A;
+    font-weight: 950;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.trb-reasons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 8px;
+}
+.trb-reasons span {
+    padding: 3px 7px;
+    border-radius: 999px;
+    background: #EFF6FF;
+    color: #1D4ED8;
+    font-size: 10px;
+    font-weight: 800;
+}
+.trb-note {
+    margin-top: 8px;
+    padding: 8px;
+    border-radius: 10px;
+    color: #475569;
+    background: #F8FAFC;
+    font-size: 10px;
+    line-height: 1.45;
+}
+@media (max-width: 1280px) {
+    .trb-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ==================== V0.7.1 UI 整理：工件详情 / 合炉设计 / 装载工装 ==================== */
+.furnace-resource-intro span,
+.heat-merge-intro span {
+    line-height: 1.5;
+}
+.furnace-current-plan-card {
+    margin: 10px 0;
+    padding: 10px;
+    border: 1px solid rgba(37, 99, 235, .16);
+    border-radius: 15px;
+    background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,250,252,.95));
+    box-shadow: 0 6px 16px rgba(15, 23, 42, .045);
+}
+.fcp-empty {
+    padding: 9px;
+    border: 1px dashed rgba(148, 163, 184, .45);
+    border-radius: 12px;
+    background: #F8FAFC;
+}
+.fcp-empty strong {
+    display: block;
+    font-size: 12px;
+    font-weight: 950;
+    color: #0F172A;
+    margin-bottom: 3px;
+}
+.fcp-empty span {
+    display: block;
+    font-size: 10px;
+    color: #64748B;
+    line-height: 1.45;
+}
+.fcp-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+}
+.fcp-kicker {
+    font-size: 9px;
+    color: #2563EB;
+    font-weight: 950;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+.fcp-title {
+    margin-top: 2px;
+    font-size: 13px;
+    font-weight: 950;
+    color: #0F172A;
+    line-height: 1.25;
+}
+.fcp-subtitle {
+    margin-top: 2px;
+    font-size: 10px;
+    color: #64748B;
+    line-height: 1.35;
+}
+.fcp-pill {
+    flex: 0 0 auto;
+    border-radius: 999px;
+    border: 1px solid #CBD5E1;
+    background: #F8FAFC;
+    color: #475569;
+    padding: 3px 7px;
+    font-size: 10px;
+    font-weight: 950;
+}
+.fcp-pill.ok { color: #047857; background: #ECFDF5; border-color: #A7F3D0; }
+.fcp-pill.mid { color: #B45309; background: #FFFBEB; border-color: #FDE68A; }
+.fcp-pill.warn { color: #C2410C; background: #FFF7ED; border-color: #FDBA74; }
+.fcp-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    margin-top: 9px;
+}
+.fcp-metrics div {
+    padding: 6px;
+    border-radius: 10px;
+    border: 1px solid #EEF2F7;
+    background: #fff;
+    min-width: 0;
+}
+.fcp-metrics span {
+    display: block;
+    color: #94A3B8;
+    font-size: 9px;
+    margin-bottom: 2px;
+}
+.fcp-metrics strong {
+    display: block;
+    color: #0F172A;
+    font-size: 10px;
+    font-weight: 950;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.fcp-reasons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 8px;
+}
+.fcp-reasons span {
+    padding: 3px 6px;
+    border-radius: 999px;
+    background: #EFF6FF;
+    color: #1D4ED8;
+    font-size: 9px;
+    font-weight: 800;
+}
+.fcp-actions,
+.furnace-local-actions,
+.mts-actions {
+    display: grid;
+    gap: 6px;
+}
+.fcp-actions {
+    grid-template-columns: 1fr 1fr;
+    margin-top: 9px;
+}
+.furnace-local-actions {
+    grid-template-columns: 1.1fr 1fr 1.1fr;
+    margin: 8px 0 10px;
+}
+.mts-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-width: 160px;
+}
+.hm-mini-btn.ghost {
+    color: #64748B;
+    background: #F8FAFC;
+}
+.compact-sort-bar {
+    margin-top: 6px;
+}
+.hm-toolbar-actions-v071 {
+    grid-template-columns: 1.2fr 1fr 1fr;
+}
+.hm-card-actions.compact {
+    grid-template-columns: 1fr 1.15fr;
+}
+.hm-group-card {
+    cursor: pointer;
+}
+.hm-group-card .hm-card-actions button {
+    cursor: pointer;
+}
+.hm-group-card.active::after {
+    content: '当前选中';
+    display: inline-block;
+    margin-top: 7px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: #EFF6FF;
+    color: #1D4ED8;
+    font-size: 10px;
+    font-weight: 900;
+}
+/* V0.7.1 UI cleanup: left-panel header keeps only fold/expand controls.
+   Page-specific actions live inside each tab to avoid duplicate buttons. */
+#left-panel .panel-header-actions #btn-add-furnace,
+#left-panel .panel-header-actions #btn-import-excel,
+#left-panel .panel-header-actions #btn-clear-all-furnaces {
+    display: none !important;
+}
+.hm-data-source-card {
+    align-items: center;
+}
+.hm-data-source-card > div {
+    min-width: 0;
+}
+@media (max-width: 1280px) {
+    .furnace-local-actions,
+    .hm-toolbar-actions-v071 {
+        grid-template-columns: 1fr;
+    }
+    .mts-actions {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* V0.7.2: 高度与搁板感知的工装推荐补充布局 */
+.htr-metrics-v072 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.fcp-metrics-v072 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.trb-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+@media (max-width: 1440px) {
+    .trb-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* V0.7.3: 合炉设计真实/示例数据状态与策略推荐按钮整理 */
+.hm-source-note {
+    margin-top: 6px;
+    padding: 5px 7px;
+    border-radius: 10px;
+    background: rgba(239, 246, 255, 0.72);
+    border: 1px dashed rgba(59, 130, 246, 0.28);
+    color: #64748B;
+    font-size: 10px;
+    font-weight: 750;
+    line-height: 1.35;
+}
+.htr-head-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 0 0 auto;
+    min-width: 96px;
+}
+.htr-head-actions .hm-mini-btn {
+    width: 100%;
+    justify-content: center;
+    white-space: nowrap;
+}
+.htr-plan-grid.single-strategy .htr-plan-card {
+    border-left-width: 5px;
+}
+.htr-plan-grid.compare-all .htr-plan-card {
+    opacity: .96;
+}
+
+/* ==================== V0.7.4: 方案分析页瘦身 ==================== */
+/* 方案对比 V0.5 暂时隐藏：功能链路未成熟，避免占用方案分析页。 */
+#plan-compare-v05-card,
+.plan-compare-v05-card,
+[data-action="compare-plan"],
+.plan-card-action.compare {
+    display: none !important;
+}
+
+/* 右侧候选策略卡暂时隐藏：策略选择前移到合炉设计 / 工装推荐，方案分析只保留当前执行方案。 */
+#right-tab-analysis #candidate-plan-list {
+    display: none !important;
+}
+
+#right-tab-analysis .plan-analysis-panel {
+    gap: 8px;
+}
+
+.analysis-compact-card {
+    background: #FFFFFF;
+    border: 1px solid rgba(191, 219, 254, 0.92);
+    border-radius: 16px;
+    padding: 10px 12px;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+}
+
+.compact-analysis-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.compact-kicker {
+    font-size: 11px;
+    font-weight: 900;
+    color: #2563EB;
+    letter-spacing: .02em;
+}
+
+.compact-title {
+    margin-top: 2px;
+    font-size: 13px;
+    line-height: 1.35;
+    font-weight: 900;
+    color: #0F172A;
+}
+
+.compact-pill {
+    flex-shrink: 0;
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 900;
+    background: #EFF6FF;
+    color: #2563EB;
+    border: 1px solid #BFDBFE;
+}
+.compact-pill.ok { background: #DCFCE7; color: #15803D; border-color: #BBF7D0; }
+.compact-pill.warn, .compact-pill.mid { background: #FFF7ED; color: #C2410C; border-color: #FED7AA; }
+.compact-pill.danger { background: #FEF2F2; color: #DC2626; border-color: #FECACA; }
+
+.compact-chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 7px;
+}
+
+.compact-chip-row span,
+.compact-reasons span {
+    display: inline-flex;
+    align-items: center;
+    min-height: 22px;
+    padding: 3px 7px;
+    border-radius: 999px;
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    color: #475569;
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.compact-reasons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.compact-note {
+    font-size: 11px;
+    line-height: 1.45;
+    color: #64748B;
+    background: #F8FAFC;
+    border-radius: 10px;
+    padding: 7px 8px;
+}
+
+/* ==================== V0.7.5: 流程瘦身 + 少框多层推荐 ==================== */
+/* 工件详情：默认隐藏解释性筛选区，只在用户点击“筛选物料”后展开。 */
+.material-filter-strip {
+    display: none;
+}
+.material-filter-strip.filter-open,
+body.material-filter-open .material-filter-strip {
+    display: block;
+}
+#btn-material-filter-toggle {
+    white-space: nowrap;
+}
+/* 已有生产任务时，示例入口由 JS 隐藏；这里降低默认视觉权重。 */
+#btn-material-load-sample-inline {
+    opacity: .72;
+}
+
+/* 合炉设计：减少说明文字和二级按钮干扰。 */
+.heat-merge-intro,
+.heat-merge-footer-note,
+#btn-show-all-merge-materials,
+#btn-show-invalid-merge-materials,
+#btn-go-material-import {
+    display: none !important;
+}
+.hm-toolbar-actions-v071 {
+    grid-template-columns: 1fr !important;
+}
+.hm-data-source-card {
+    padding: 10px 12px !important;
+}
+.hm-data-source-card span {
+    line-height: 1.35;
+}
+.hm-group-card .hm-reason-list,
+.hm-group-card .hm-item-preview {
+    display: none !important;
+}
+.hm-source-note-slim,
+.hm-risk-note-slim {
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+    margin-top: 6px !important;
+}
+.hm-score-row-slim {
+    margin-top: 8px !important;
+}
+.hm-card-actions.single-action {
+    grid-template-columns: 1fr !important;
+}
+.hm-card-actions.single-action .hm-mini-btn.primary {
+    width: 100%;
+}
+
+/* 工装推荐：强调少框多层/搁板估算，减少长文案压迫。 */
+.htr-head-subtitle,
+.htr-footer,
+.htr-note {
+    font-size: 11px !important;
+    line-height: 1.45 !important;
+}
+.htr-reasons span:nth-child(n+5) {
+    display: none;
+}
+.htr-plan-card .htr-metrics-v072 {
+    gap: 6px !important;
+}
+
+/* 方案分析继续保持瘦身状态。 */
+#plan-compare-v05-card,
+.candidate-plan-section,
+.candidate-plan-cards,
+[data-action="compare-plan"] {
+    display: none !important;
+}
+
+/* ==================== V0.7.6: 合炉页进一步瘦身与示例入口修复 ==================== */
+body.material-has-tasks #btn-material-load-sample-inline,
+body.ui-has-materials #btn-material-load-sample-inline,
+#btn-material-load-sample-inline[hidden] {
+    display: none !important;
+}
+
+/* 工件详情：只保留导入、清空、校验、筛选；示例只在空数据时可见。 */
+.mts-actions {
+    gap: 8px !important;
+}
+#btn-material-filter-toggle {
+    order: 10;
+}
+
+/* 合炉设计：分组按钮有反馈，卡片压缩为决策卡。 */
+#btn-sync-merge-from-materials {
+    min-height: 34px;
+}
+.hm-regroup-flash {
+    animation: hmRegroupFlash .9s ease-out;
+}
+@keyframes hmRegroupFlash {
+    0% { box-shadow: 0 0 0 0 rgba(37,99,235,.38); transform: translateY(-1px); }
+    100% { box-shadow: 0 0 0 12px rgba(37,99,235,0); transform: translateY(0); }
+}
+
+.hm-group-card {
+    padding: 10px 12px !important;
+}
+.hm-card-head {
+    margin-bottom: 7px !important;
+}
+.hm-card-title {
+    font-size: 14px !important;
+    line-height: 1.2 !important;
+}
+.hm-card-line {
+    font-size: 11px !important;
+    line-height: 1.25 !important;
+    margin-top: 2px !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 210px;
+}
+.hm-status-pill {
+    font-size: 10px !important;
+    padding: 4px 8px !important;
+    white-space: nowrap;
+}
+.hm-card-meta.hm-card-meta-compact,
+.hm-card-meta-compact {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px !important;
+    margin: 6px 0 !important;
+}
+.hm-card-meta-compact span {
+    min-height: 24px !important;
+    padding: 4px 6px !important;
+    font-size: 11px !important;
+    justify-content: center;
+}
+.hm-compact-line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin: 6px 0 8px;
+}
+.hm-compact-line span,
+.hm-compact-line strong {
+    display: inline-flex;
+    align-items: center;
+    min-height: 22px;
+    padding: 3px 7px;
+    border-radius: 999px;
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    color: #475569;
+    font-size: 10px;
+    font-weight: 800;
+}
+.hm-compact-line strong {
+    color: #2563EB;
+    background: #EFF6FF;
+    border-color: #BFDBFE;
+}
+.hm-group-card .hm-source-note,
+.hm-group-card .hm-risk-note,
+.hm-group-card .hm-score-row,
+.hm-group-card .hm-reason-list,
+.hm-group-card .hm-item-preview {
+    display: none !important;
+}
+.hm-card-actions.single-action {
+    margin-top: 6px !important;
+}
+.hm-card-actions.single-action .hm-mini-btn.primary {
+    min-height: 32px !important;
+}
+.hm-active-group {
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+    padding: 6px 8px !important;
+}
+
+/* ==================== V0.7.7: 合炉设计信息密度优化 + 筛选联动 ==================== */
+/* 数据来源卡已经包含物料/数量/重量/有效/需确认，下面不再重复显示 KPI 方块。 */
+.heat-merge-summary {
+    display: block !important;
+    margin: 6px 0 8px !important;
+}
+.heat-merge-summary .hm-summary-kpi {
+    display: none !important;
+}
+.heat-merge-summary .hm-active-group {
+    margin: 0 !important;
+    padding: 6px 8px !important;
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+    border-radius: 10px !important;
+}
+
+/* 合炉组卡片进一步瘦身：每屏尽量显示更多组。 */
+.hm-group-card {
+    padding: 9px 10px !important;
+    margin-bottom: 8px !important;
+}
+.hm-card-meta.hm-card-meta-compact,
+.hm-card-meta-compact {
+    margin: 5px 0 !important;
+}
+.hm-compact-line {
+    margin: 5px 0 6px !important;
+}
+.hm-card-actions.single-action {
+    margin-top: 4px !important;
+}
+
+/* 筛选物料影响合炉设计：合炉数据来源文案需要更醒目。 */
+.hm-data-source-card span#heat-merge-source-text,
+#heat-merge-source-text {
+    font-weight: 700;
+    color: #475569;
+}
+
+/* ==================== V0.7.8: 工件筛选与示例入口修复 ==================== */
+/* 正式流程只保留 Excel 导入；示例数据不作为默认入口展示。 */
+#btn-material-load-sample-inline {
+    display: none !important;
+}
+/* 空任务时不显示筛选入口和筛选条，避免“按钮看起来能点但没有内容”。 */
+body:not(.ui-has-materials) #btn-material-filter-toggle,
+body:not(.material-has-tasks) #btn-material-filter-toggle,
+body:not(.ui-has-materials) .material-filter-strip,
+body:not(.material-has-tasks) .material-filter-strip {
+    display: none !important;
+}
+/* 有任务时，筛选条仍默认收起；只有点击“筛选物料”后才展开。 */
+body.ui-has-materials .material-filter-strip:not(.filter-open),
+body.material-has-tasks .material-filter-strip:not(.filter-open) {
+    display: none !important;
+}
+body.ui-has-materials .material-filter-strip.filter-open,
+body.material-has-tasks .material-filter-strip.filter-open,
+body.material-filter-open .material-filter-strip {
+    display: grid !important;
+}
+
+/* ==================== V0.7.12 人工拼炉 Beta ==================== */
+.hm-manual-draft-bar {
+    margin: 10px 0 10px;
+    padding: 10px 12px;
+    border: 1px solid rgba(245, 158, 11, .35);
+    border-radius: 14px;
+    background: linear-gradient(180deg, rgba(255, 251, 235, .95), rgba(255, 247, 237, .88));
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    box-shadow: 0 8px 20px rgba(245, 158, 11, .08);
+}
+.hm-manual-draft-bar strong {
+    display: block;
+    font-size: 12px;
+    font-weight: 900;
+    color: #92400e;
+    margin-bottom: 2px;
+}
+.hm-manual-draft-bar span {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    color: #78350f;
+    line-height: 1.35;
+}
+.hm-manual-draft-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+}
+.hm-group-card.warn[data-merge-group-id^="MANUAL-"] {
+    border-left-color: #f97316;
+    background: linear-gradient(180deg, rgba(255, 251, 235, .98), rgba(255, 255, 255, .96));
+}
+.hm-card-actions.manual-actions,
+.hm-card-actions.compact.manual-actions {
+    grid-template-columns: minmax(0, .75fr) minmax(0, 1fr);
+    display: grid;
+    gap: 8px;
+}
+.hm-mini-btn.ghost {
+    background: #fff;
+    color: #475569;
+    border: 1px solid #cbd5e1;
+    box-shadow: none;
+}
+.hm-mini-btn.ghost:hover {
+    border-color: #60a5fa;
+    color: #2563eb;
+    background: #eff6ff;
+}
+.hm-group-card .hm-mini-btn[data-action="heat-merge-add-manual"] {
+    border-color: #fed7aa;
+    color: #c2410c;
+    background: #fff7ed;
+}
+.hm-group-card .hm-mini-btn[data-action="heat-merge-add-manual"]:hover {
+    background: #ffedd5;
+    border-color: #fb923c;
+}
+
+/* ==================== V0.7.14: 人工拼炉组视觉区分 + 来源规则组隐藏 ==================== */
+.hm-group-card.manual-merge-card,
+.hm-group-card.warn.manual-merge-card,
+.hm-group-card.warn[data-merge-group-id^="MANUAL-"] {
+    position: relative;
+    border-left-color: #ea580c !important;
+    border-color: rgba(251, 146, 60, .48) !important;
+    background:
+        linear-gradient(180deg, rgba(255, 247, 237, .98), rgba(255, 255, 255, .98)) !important;
+    box-shadow: 0 12px 28px rgba(234, 88, 12, .12) !important;
+}
+.hm-group-card.manual-merge-card::before {
+    content: "人工";
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    min-width: 34px;
+    height: 20px;
+    padding: 0 7px;
+    border-radius: 999px;
+    background: #ea580c;
+    color: #fff;
+    font-size: 10px;
+    line-height: 20px;
+    font-weight: 900;
+    text-align: center;
+    box-shadow: 0 6px 14px rgba(234, 88, 12, .2);
+}
+.hm-group-card.manual-merge-card .hm-card-head {
+    padding-right: 46px;
+}
+.hm-manual-kicker {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 3px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: #ffedd5;
+    border: 1px solid #fed7aa;
+    color: #c2410c;
+    font-size: 10px;
+    line-height: 1.2;
+    font-weight: 900;
+}
+.hm-status-pill.manual,
+.hm-group-card.manual-merge-card .hm-status-pill {
+    background: #fff7ed !important;
+    color: #c2410c !important;
+    border-color: #fdba74 !important;
+}
+.hm-group-card.manual-merge-card .hm-card-title {
+    color: #9a3412 !important;
+}
+.hm-group-card.manual-merge-card .hm-compact-line span,
+.hm-group-card.manual-merge-card .hm-compact-line strong {
+    background: #fff7ed;
+    border-color: #fed7aa;
+    color: #9a3412;
+}
+.hm-group-card.manual-merge-card .hm-mini-btn.primary {
+    background: linear-gradient(135deg, #f97316, #ea580c) !important;
+    box-shadow: 0 10px 20px rgba(234, 88, 12, .18) !important;
+}
+
+/* ==================== V0.7.15: 人工拼炉 / 工装推荐页面减负 ==================== */
+.hm-group-card.manual-merge-card::before {
+    display: none !important;
+    content: none !important;
+}
+.hm-group-card.manual-merge-card .hm-card-head {
+    padding-right: 0 !important;
+}
+.hm-group-card.manual-merge-card .hm-manual-kicker {
+    display: block;
+    width: fit-content;
+    padding: 0;
+    margin: 0 0 3px;
+    border: 0;
+    background: transparent;
+    color: #ea580c;
+    font-size: 10px;
+    font-weight: 900;
+}
+.hm-card-actions.manual-actions,
+.hm-card-actions.compact.manual-actions {
+    grid-template-columns: .8fr 1fr !important;
+}
+
+.heat-tooling-recommendations.htr-compact-v0715 {
+    padding: 12px;
+    margin-top: 10px;
+}
+.htr-compact-v0715 .htr-head-compact {
+    padding: 0 0 8px;
+    margin: 0 0 8px;
+    border-bottom: 1px solid rgba(226,232,240,.9);
+    display: block;
+}
+.htr-compact-v0715 .htr-kicker {
+    font-size: 11px;
+    font-weight: 900;
+    color: #2563eb;
+    margin-bottom: 2px;
+}
+.htr-compact-v0715 .htr-head-title {
+    font-size: 13px;
+    line-height: 1.25;
+    font-weight: 900;
+    color: #0f172a;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.htr-compact-v0715 .htr-head-subtitle.compact-only {
+    margin-top: 3px;
+    font-size: 11px;
+    line-height: 1.35;
+    color: #64748b;
+}
+.htr-compact-v0715 .htr-plan-grid-compact {
+    display: block;
+}
+.htr-compact-v0715 .htr-card-compact {
+    padding: 12px;
+    border-radius: 16px;
+    margin-bottom: 8px;
+}
+.htr-compact-v0715 .compact-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.htr-compact-v0715 .htr-title {
+    font-size: 14px;
+    font-weight: 900;
+    line-height: 1.2;
+}
+.htr-compact-v0715 .htr-subtitle {
+    font-size: 11px;
+    line-height: 1.3;
+    margin-top: 2px;
+    color: #64748b;
+}
+.htr-compact-v0715 .htr-badge,
+.htr-compact-v0715 .htr-adopted-pill {
+    flex-shrink: 0;
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 900;
+}
+.htr-compact-v0715 .htr-adopted-pill {
+    color: #047857;
+    background: #d1fae5;
+    border: 1px solid #86efac;
+}
+.htr-compact-v0715 .htr-main-line-compact {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 12px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    margin-bottom: 8px;
+}
+.htr-compact-v0715 .htr-main-line-compact strong {
+    font-size: 13px;
+    color: #0f172a;
+    white-space: nowrap;
+}
+.htr-compact-v0715 .htr-main-line-compact span {
+    font-size: 11px;
+    color: #64748b;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.htr-compact-v0715 .htr-quick-metrics {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    margin-bottom: 7px;
+}
+.htr-compact-v0715 .htr-quick-metrics span {
+    min-width: 0;
+    padding: 7px 8px;
+    border-radius: 10px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 800;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.htr-compact-v0715 .htr-quick-metrics b {
+    color: #0f172a;
+}
+.htr-compact-v0715 .htr-chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-bottom: 9px;
+}
+.htr-compact-v0715 .htr-chip-row span {
+    padding: 3px 7px;
+    border-radius: 999px;
+    background: #eff6ff;
+    color: #2563eb;
+    border: 1px solid #dbeafe;
+    font-size: 10px;
+    font-weight: 900;
+}
+.htr-compact-v0715 .htr-actions-compact {
+    display: grid;
+    grid-template-columns: .9fr 1.15fr;
+    gap: 8px;
+    margin-top: 0;
+}
+.htr-compact-v0715 .htr-actions-compact .hm-mini-btn {
+    height: 34px;
+    border-radius: 11px;
+}
+.htr-compact-v0715 .hm-mini-btn.adopted {
+    grid-column: 1 / -1;
+    color: #047857;
+    background: #ecfdf5;
+    border: 1px solid #bbf7d0;
+}
+.htr-compact-v0715 .htr-adopted-note {
+    margin-top: 6px;
+    padding: 7px 9px;
+    border-radius: 11px;
+    background: #f0fdf4;
+    color: #15803d;
+    font-size: 11px;
+    line-height: 1.35;
+    font-weight: 800;
+}
+.htr-compact-v0715 .htr-reasons,
+.htr-compact-v0715 .htr-note,
+.htr-compact-v0715 .htr-footer,
+.htr-compact-v0715 .htr-head-actions,
+.htr-compact-v0715 [data-action="heat-tooling-refresh"],
+.htr-compact-v0715 [data-action="heat-tooling-compare-toggle"] {
+    display: none !important;
+}
+
+/* V0.7.16: 数据校验异常物料明显标记，不参与合炉/生成 */
+.material-card.heat-item-excluded {
+    position: relative;
+    opacity: 0.72;
+    background: linear-gradient(135deg, rgba(254,242,242,0.96), rgba(255,255,255,0.98));
+    border: 1px solid rgba(248,113,113,0.38) !important;
+    border-left-width: 4px !important;
+    border-left-color: #ef4444 !important;
+    box-shadow: 0 8px 22px rgba(239,68,68,0.08);
+}
+
+.material-card.heat-item-review {
+    background: linear-gradient(135deg, rgba(255,251,235,0.96), rgba(255,255,255,0.98));
+    border-color: rgba(245,158,11,0.38) !important;
+    border-left-color: #f59e0b !important;
+    box-shadow: 0 8px 22px rgba(245,158,11,0.08);
+}
+
+.material-card.heat-item-excluded::after {
+    content: '不参与计算';
+    position: absolute;
+    top: 8px;
+    right: 26px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 900;
+    color: #b91c1c;
+    background: #fee2e2;
+    border: 1px solid rgba(239,68,68,0.22);
+}
+
+.material-card.heat-item-review::after {
+    content: '待确认';
+    color: #92400e;
+    background: #fef3c7;
+    border-color: rgba(245,158,11,0.24);
+}
+
+.heat-validation-badge {
+    margin-top: 7px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    padding: 4px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1.3;
+    border: 1px solid rgba(239,68,68,0.18);
+    background: rgba(254,226,226,0.86);
+    color: #991b1b;
+}
+
+.heat-validation-badge.review {
+    border-color: rgba(245,158,11,0.2);
+    background: rgba(254,243,199,0.9);
+    color: #92400e;
+}
+
+.heat-validation-badge span {
+    font-weight: 700;
+    color: inherit;
+    white-space: normal;
+}
+
+.hm-empty {
+    border: 1px dashed rgba(248,113,113,0.36);
+    background: rgba(254,242,242,0.62);
+    color: #991b1b;
+}
+
+/* ==================== V0.7.17: 工件详情状态区极简化 ==================== */
+/* 数据已经自动校验，异常也已在每张工件卡片上标出；顶部不再重复展示统计解释。 */
+.material-task-status {
+    padding: 8px 10px !important;
+    margin-bottom: 8px !important;
+}
+.material-task-status .mts-head {
+    align-items: center !important;
+    gap: 8px !important;
+}
+.material-task-status .mts-head > div:first-child,
+#material-task-status-grid,
+#material-task-status-note,
+#btn-material-check-inline,
+#btn-material-load-sample-inline {
+    display: none !important;
+}
+.material-task-status .mts-actions {
+    width: 100% !important;
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+    min-width: 0 !important;
+}
+.material-task-status .mts-actions .hm-mini-btn,
+#btn-material-filter-toggle {
+    min-height: 34px !important;
+    justify-content: center !important;
+    border-radius: 12px !important;
+    font-size: 12px !important;
+    font-weight: 900 !important;
+    white-space: nowrap !important;
+}
+body:not(.material-has-tasks) .material-task-status .mts-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+body:not(.material-has-tasks) #btn-material-filter-toggle {
+    display: none !important;
+}
+/* 工件卡片已有异常/待确认标记，列表本身承担状态反馈。 */
+.material-card .heat-validation-badge {
+    margin-top: 5px;
+}
+
+/* ==================== V0.7.18 HUD / 编辑入口收敛 ==================== */
+/* HUD 收起后只保留标题与切换，不露出任何操作按钮。 */
+.current-tooling-hud.collapsed .cth-actions {
+    display: none !important;
+}
+
+/* 编辑摆放主入口迁移到底部 Dock；旧 HUD 按钮保留事件兼容但不显示。 */
+.current-tooling-hud #btn-placement-edit {
+    display: none !important;
+}
+
+#dock-placement-edit.placement-edit-dock-btn {
+    display: inline-flex;
+}
+
+body.placement-edit-mode #dock-placement-edit,
+#dock-placement-edit.active {
+    background: #2563EB !important;
+    border-color: #2563EB !important;
+    color: #FFFFFF !important;
+    box-shadow: 0 8px 22px rgba(37, 99, 235, 0.26) !important;
+}
+
+/* ==================== V0.7.19: 工件详情 / 合炉设计视觉重构 ==================== */
+body.left-tab-material-active #left-tab-material .left-tab-intro,
+body.left-tab-merge-active #left-tab-merge .heat-merge-intro,
+body.left-tab-merge-active #left-tab-merge .left-tab-intro {
+    display: none !important;
+}
+
+/* 工件详情：顶部主操作保持轻量，去掉状态卡感 */
+body.left-tab-material-active .material-task-status {
+    margin: 0 0 8px !important;
+    padding: 8px 10px !important;
+    border: 0 !important;
+    border-bottom: 1px solid rgba(226,232,240,.86) !important;
+    border-radius: 0 !important;
+    background: rgba(255,255,255,.88) !important;
+    box-shadow: none !important;
+}
+body.left-tab-material-active .material-task-status .mts-actions {
+    display: flex !important;
+    gap: 8px !important;
+    width: 100% !important;
+}
+body.left-tab-material-active .material-task-status .mts-actions .hm-mini-btn,
+body.left-tab-material-active #btn-material-filter-toggle {
+    flex: 1 1 0 !important;
+    min-height: 34px !important;
+    border-radius: 12px !important;
+}
+body.left-tab-material-active #btn-material-filter-toggle {
+    display: inline-flex !important;
+}
+body:not(.material-has-tasks).left-tab-material-active #btn-material-filter-toggle {
+    display: none !important;
+}
+
+/* 筛选不再弹层遮挡列表：展开后成为正常文档流中的横向筛选条 */
+body.left-tab-material-active .material-filter-strip {
+    display: none !important;
+    position: relative !important;
+    z-index: 1 !important;
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+    padding: 8px 10px 10px !important;
+    margin: 0 0 8px !important;
+    border: 0 !important;
+    border-bottom: 1px solid rgba(226,232,240,.9) !important;
+    background: linear-gradient(180deg, rgba(248,250,252,.98), rgba(255,255,255,.96)) !important;
+}
+body.left-tab-material-active.material-filter-open .material-filter-strip {
+    display: grid !important;
+}
+body.left-tab-material-active .material-filter-strip .filter-bar {
+    display: grid !important;
+    grid-template-columns: 56px minmax(0, 1fr) !important;
+    align-items: start !important;
+    gap: 8px !important;
+    padding: 7px 8px !important;
+    border: 1px solid rgba(226,232,240,.9) !important;
+    border-radius: 12px !important;
+    background: #fff !important;
+    min-height: 0 !important;
+}
+body.left-tab-material-active .material-filter-strip .filter-bar-header {
+    height: auto !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    cursor: default !important;
+}
+body.left-tab-material-active .material-filter-strip .filter-bar-title {
+    font-size: 11px !important;
+    color: #64748b !important;
+    font-weight: 900 !important;
+}
+body.left-tab-material-active .material-filter-strip .filter-collapse-btn {
+    display: none !important;
+}
+body.left-tab-material-active .material-filter-strip .filter-tags {
+    display: flex !important;
+    position: static !important;
+    max-height: 58px !important;
+    overflow-y: auto !important;
+    padding: 0 !important;
+    background: transparent !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    gap: 5px !important;
+    flex-wrap: wrap !important;
+}
+body.left-tab-material-active .material-filter-strip .filter-tag {
+    padding: 4px 8px !important;
+    border-radius: 999px !important;
+    font-size: 11px !important;
+    font-weight: 850 !important;
+    border: 1px solid rgba(226,232,240,.9) !important;
+    background: #f8fafc !important;
+    color: #475569 !important;
+}
+body.left-tab-material-active .material-filter-strip .filter-tag.active {
+    border-color: rgba(37,99,235,.45) !important;
+    background: #eff6ff !important;
+    color: #1d4ed8 !important;
+}
+
+/* 工件列表：从“大卡片”压缩为生产任务行 */
+body.left-tab-material-active #material-cards-container {
+    padding: 0 10px 110px !important;
+}
+body.left-tab-material-active .material-card {
+    min-height: 56px !important;
+    padding: 9px 36px 9px 12px !important;
+    margin: 0 0 7px !important;
+    border-radius: 13px !important;
+    box-shadow: 0 4px 12px rgba(15,23,42,.035) !important;
+}
+body.left-tab-material-active .material-card .m-color-swatch {
+    width: 22px !important;
+    height: 22px !important;
+    border-radius: 7px !important;
+    margin-right: 10px !important;
+}
+body.left-tab-material-active .material-card .m-name {
+    font-size: 13px !important;
+    line-height: 1.15 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+}
+body.left-tab-material-active .material-card .m-meta,
+body.left-tab-material-active .material-card .item-meta {
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+    display: -webkit-box !important;
+    -webkit-line-clamp: 2 !important;
+    -webkit-box-orient: vertical !important;
+    overflow: hidden !important;
+}
+body.left-tab-material-active .material-card .heat-validation-badge {
+    margin-top: 4px !important;
+    padding: 3px 7px !important;
+    font-size: 10px !important;
+    border-radius: 999px !important;
+}
+body.left-tab-material-active .material-card.heat-item-excluded::after,
+body.left-tab-material-active .material-card.heat-item-review::after {
+    top: 8px !important;
+    right: 28px !important;
+    font-size: 9px !important;
+}
+
+/* 合炉设计：状态从卡片变成单行，不占主视觉 */
+body.left-tab-merge-active .hm-data-source-card {
+    margin: 0 0 8px !important;
+    padding: 8px 10px !important;
+    border: 0 !important;
+    border-bottom: 1px solid rgba(226,232,240,.9) !important;
+    border-radius: 0 !important;
+    background: rgba(255,255,255,.92) !important;
+    box-shadow: none !important;
+}
+body.left-tab-merge-active .hm-data-source-card strong {
+    display: none !important;
+}
+body.left-tab-merge-active .hm-data-source-card span#heat-merge-source-text,
+body.left-tab-merge-active #heat-merge-source-text {
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+    color: #475569 !important;
+    font-weight: 800 !important;
+}
+body.left-tab-merge-active .hm-toolbar-actions-v071,
+body.left-tab-merge-active .hm-toolbar-actions-v06 {
+    margin: 0 10px 8px !important;
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+}
+body.left-tab-merge-active #btn-sync-merge-from-materials {
+    grid-column: 1 / -1 !important;
+    min-height: 36px !important;
+    border-radius: 12px !important;
+}
+
+.hm-status-line.v0719 {
+    margin: 0 10px 8px;
+    padding: 8px 10px;
+    border: 1px solid rgba(191,219,254,.9);
+    border-radius: 12px;
+    background: #f8fbff;
+    display: grid;
+    gap: 4px;
+}
+.hm-status-line.v0719 .hm-status-main {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+.hm-status-line.v0719 strong {
+    font-size: 12px;
+    color: #0f172a;
+    font-weight: 950;
+    white-space: nowrap;
+}
+.hm-status-line.v0719 span,
+.hm-status-line.v0719 .hm-status-active {
+    font-size: 10px;
+    color: #64748b;
+    line-height: 1.25;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.hm-status-line.v0719 .hm-status-active {
+    color: #2563eb;
+    font-weight: 850;
+}
+
+.heat-merge-groups {
+    gap: 7px !important;
+    padding: 0 10px 110px !important;
+}
+.hm-group-card.v0719 {
+    padding: 10px !important;
+    border-radius: 15px !important;
+    margin: 0 0 7px !important;
+    box-shadow: 0 6px 16px rgba(15,23,42,.045) !important;
+}
+.hm-group-card.v0719 .hm-card-topline {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+}
+.hm-group-card.v0719 .hm-card-title {
+    font-size: 13px !important;
+    line-height: 1.15 !important;
+    font-weight: 950 !important;
+}
+.hm-group-card.v0719 .hm-card-line {
+    margin-top: 2px !important;
+    font-size: 11px !important;
+    line-height: 1.25 !important;
+    color: #475569 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    max-width: 210px !important;
+}
+.hm-group-card.v0719 .hm-status-pill {
+    flex-shrink: 0;
+    padding: 3px 8px !important;
+    font-size: 10px !important;
+}
+.hm-group-card.v0719 .hm-card-meta-compact {
+    margin: 8px 0 6px !important;
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    gap: 5px !important;
+}
+.hm-group-card.v0719 .hm-card-meta-compact span,
+.hm-group-card.v0719 .hm-card-meta-compact strong,
+.hm-group-card.v0719 .hm-card-footline span {
+    min-width: 0;
+    padding: 4px 7px !important;
+    border-radius: 999px !important;
+    background: #f8fafc !important;
+    border: 1px solid #e2e8f0 !important;
+    color: #475569 !important;
+    font-size: 10px !important;
+    font-weight: 900 !important;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.hm-group-card.v0719 .hm-card-meta-compact strong {
+    color: #2563eb !important;
+    background: #eff6ff !important;
+    border-color: #bfdbfe !important;
+}
+.hm-group-card.v0719 .hm-card-footline {
+    display: flex;
+    gap: 5px;
+    margin-bottom: 8px;
+}
+.hm-group-card.v0719 .hm-card-actions.compact {
+    gap: 7px !important;
+}
+.hm-group-card.v0719 .hm-card-actions.single-action {
+    grid-template-columns: 1fr !important;
+}
+.hm-group-card.v0719 .hm-mini-btn {
+    min-height: 32px !important;
+    border-radius: 11px !important;
+}
+.hm-group-card.v0719.active::after {
+    display: none !important;
+}
+.hm-group-card.v0719.active {
+    border-color: rgba(37,99,235,.45) !important;
+    box-shadow: 0 0 0 2px rgba(37,99,235,.08), 0 8px 18px rgba(15,23,42,.07) !important;
+}
+.hm-group-card.v0719.manual-merge-card {
+    background: linear-gradient(180deg, #fff7ed, #fff) !important;
+    border-color: rgba(251,146,60,.45) !important;
+}
+.hm-group-card.v0719.manual-merge-card .hm-card-title {
+    color: #9a3412 !important;
+}
+
+/* 工装推荐卡：只显示摘要，依据折叠到后续版本 */
+.htr-compact-v0715 .htr-head-subtitle.compact-only,
+.htr-compact-v0715 .htr-kicker {
+    display: none !important;
+}
+.htr-compact-v0715 .htr-head-title {
+    font-size: 13px !important;
+}
+.htr-compact-v0715 .htr-card-compact {
+    padding: 10px !important;
+}
+.htr-compact-v0715 .htr-subtitle {
+    display: none !important;
+}
+.htr-compact-v0715 .htr-actions-compact {
+    grid-template-columns: 1fr !important;
+}
+.htr-compact-v0715 [data-action="heat-tooling-adopt-generate"] {
+    display: none !important;
+}
+
+/* V0.7.21: 生成方案进度反馈层（基于 V0.7.19 视觉结构恢复） */
+#plan-generation-progress-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 23, 42, 0.18);
+    backdrop-filter: blur(4px);
+}
+#plan-generation-progress-overlay.active { display: flex; }
+.pgp-card {
+    width: min(420px, calc(100vw - 48px));
+    padding: 22px 24px 20px;
+    border-radius: 22px;
+    background: rgba(255,255,255,0.94);
+    border: 1px solid rgba(191, 219, 254, 0.9);
+    box-shadow: 0 24px 80px rgba(15, 23, 42, 0.20);
+    color: #0f172a;
+}
+.pgp-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 8px;
+}
+.pgp-kicker {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: .02em;
+    color: #2563eb;
+}
+.pgp-percent {
+    font-size: 20px;
+    font-weight: 900;
+    color: #1d4ed8;
+}
+.pgp-title {
+    font-size: 18px;
+    font-weight: 900;
+    margin-bottom: 14px;
+}
+.pgp-bar {
+    height: 10px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: #e5edf8;
+    margin-bottom: 14px;
+}
+.pgp-bar-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #2563eb, #06b6d4);
+    transition: width .24s ease;
+}
+.pgp-steps {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    margin-bottom: 10px;
+}
+.pgp-steps span {
+    padding: 7px 6px;
+    border-radius: 999px;
+    text-align: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: #8aa0bd;
+    background: #f4f7fb;
+}
+.pgp-steps span.active {
+    color: #1d4ed8;
+    background: #dbeafe;
+}
+.pgp-hint {
+    font-size: 12px;
+    color: #64748b;
+    text-align: center;
+}
+#btn-generate-plan.is-generating {
+    opacity: .82;
+    cursor: wait;
+}
