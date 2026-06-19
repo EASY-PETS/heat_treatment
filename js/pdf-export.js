@@ -28,6 +28,25 @@ import {
     rgbToHex
 } from './ui.js';
 
+
+// ==================== V0.7.34 PDF i18n helpers ====================
+function getPdfUiLanguage() {
+    try { return localStorage.getItem('heat_furnace_ui_language_v0731') === 'en' ? 'en' : 'zh'; }
+    catch (_) { return 'zh'; }
+}
+function pdfT(zh, en) { return getPdfUiLanguage() === 'en' ? en : zh; }
+function localizePdfText(text) {
+    if (getPdfUiLanguage() !== 'en') return text;
+    const map = {
+        '打印现场摆料施工单': 'Print Field Loading Work Sheet',
+        '取消': 'Cancel',
+        '导出 PDF': 'Export PDF',
+        '生成 PDF V2.8': 'Generate PDF V2.8',
+        'PDF 内包含工件坐标清单': 'Include coordinate list in PDF'
+    };
+    return map[text] || text;
+}
+
 // ==================== RULER OVERLAY ====================
 
 /**
@@ -685,7 +704,7 @@ export function exportFurnaceJSON(furnaceIndex) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `装炉方案_${furnace.instanceId.replace(/[^\w\u4e00-\u9fa5]/g,'_')}_${Date.now()}.json`;
+    a.download = `${pdfT('装炉方案', 'loading_plan')}_${furnace.instanceId.replace(/[^\w\u4e00-\u9fa5]/g,'_')}_${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
 }
@@ -705,9 +724,9 @@ export function showPdfSelectModal() {
         const summary = {};
         globalUnpackedItems.forEach(u => { summary[u.name] = (summary[u.name] || 0) + 1; });
         unpackedWarning.style.display = 'block';
-        unpackedWarning.innerHTML = `<strong>⚠️ 有 ${globalUnpackedItems.length} 件工件无法装入当前炉膛：</strong><br>
+        unpackedWarning.innerHTML = `<strong>⚠️ ${pdfT('有', '')} ${globalUnpackedItems.length} ${pdfT('件工件无法装入当前炉膛：', 'items cannot be loaded into the current furnace:')}</strong><br>
             ${Object.entries(summary).map(([k,v]) => `${k}×${v}`).join(' · ')}<br>
-            <span style="color:#ffaaaa;font-size:10px;margin-top:4px;display:block;">当前 PDF 将导出已装炉方案；未装炉工件请结合页面容量提示另行安排后续炉次。</span>`;
+            <span style="color:#ffaaaa;font-size:10px;margin-top:4px;display:block;">${pdfT('当前 PDF 将导出已装炉方案；未装炉工件请结合页面容量提示另行安排后续炉次。', 'The PDF exports loaded furnaces only. Arrange unpacked items in later heats according to capacity hints.')}</span>`;
     } else {
         unpackedWarning.style.display = 'none';
     }
@@ -721,7 +740,7 @@ export function showPdfSelectModal() {
             <input type="checkbox" name="pdf-furnace" value="${idx}" ${idx===currentFurnaceIndex?'checked':''}>
             <div>
                 <div class="pfo-name">${f.instanceId}</div>
-                <div class="pfo-meta">${f.packedItems.length}件 · ${f.totalWeight.toFixed(1)}kg · 利用率${((packedVol/totalVol)*100).toFixed(1)}%</div>
+                <div class="pfo-meta">${f.packedItems.length}${pdfT('件', ' pcs')} · ${f.totalWeight.toFixed(1)}kg · ${pdfT('利用率', 'Utilization ')}${((packedVol/totalVol)*100).toFixed(1)}%</div>
             </div>
         `;
         div.addEventListener('click', (e) => {
@@ -775,7 +794,7 @@ export function exportSingleFurnacePDF(furnaceIndex, options) {
     pdfWrapper.style.display = 'block';
     const opt = {
         margin: 0,
-        filename: `装炉方案_${furnace.instanceId.replace(/[^\w\u4e00-\u9fa5]/g,'_')}_${Date.now()}.pdf`,
+        filename: `${pdfT('装炉方案', 'loading_plan')}_${furnace.instanceId.replace(/[^\w\u4e00-\u9fa5]/g,'_')}_${Date.now()}.pdf`,
         image: { type: 'jpeg', quality: 1 },
         html2canvas: { scale: 2, useCORS: true, logging: false },
         jsPDF: { unit: 'px', format: [794, 1123], orientation: 'portrait' }

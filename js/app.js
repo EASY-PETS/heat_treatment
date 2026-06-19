@@ -18,6 +18,7 @@ import { renderPlanAnalysisPanel, renderCandidatePlanCards, renderLoadingSimulat
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
+    scene,
     isAnimating, animPaused, animStopped,
     globalFurnacesResult, globalUnpackedItems, aggregationStats,
     currentFurnaceIndex, selectedFurnaceCardId,
@@ -582,6 +583,17 @@ function executeAndRender() {
             toolingParams.isRadialTooling = true;
         }
         // ====================================================
+
+        // V0.7.35：料盘启用搁板时默认带四角支撑杆，参数同时传给算法、3D 和施工单。
+        if (d.toolingType === 'material-tray' || d.basketType === 'tray') {
+            toolingParams.trayCornerPosts = {
+                enabled: true,
+                diameter: Number(toolingParams.trayCornerPosts?.diameter || 16),
+                offset: Number(toolingParams.trayCornerPosts?.offset || 22),
+                safetyGap: Number(toolingParams.trayCornerPosts?.safetyGap || 8),
+                ...(toolingParams.trayCornerPosts || {})
+            };
+        }
 
         furnacePoolInput.push({
             name: d.name, count: d.count,
@@ -3813,11 +3825,11 @@ function setupDockViewSettingsMenu() {
             </button>
         `).join('') + `
             <div style="height:1px;background:#e2e8f0;margin:8px 2px;"></div>
-            <label style="display:block;font-size:10px;font-weight:900;color:#64748b;padding:0 4px 5px;">颜色模式</label>
-            <select id="item-color-mode-select" style="width:100%;height:34px;border:1px solid #cbd5e1;border-radius:10px;background:white;color:#0f172a;font-size:12px;font-weight:800;padding:0 8px;">
-                ${colorModeOptions.map(opt => `<option value="${opt.value}" ${opt.value === colorMode ? 'selected' : ''}>${opt.label}</option>`).join('')}
-            </select>
-            <div style="font-size:10px;color:#94a3b8;line-height:1.35;padding:7px 6px 2px;">默认保留材质主色，同时用客户/批次辅助标识区分相似工件。</div>
+            <label style="display:block;font-size:10px;font-weight:900;color:#64748b;padding:0 4px 6px;">颜色模式</label>
+            <div class="dock-color-mode-grid">
+                ${colorModeOptions.map(opt => `<button type="button" data-color-mode="${opt.value}" class="dock-color-mode-btn ${opt.value === colorMode ? 'active' : ''}">${opt.label}</button>`).join('')}
+            </div>
+            <div style="font-size:10px;color:#94a3b8;line-height:1.35;padding:7px 6px 2px;">可按材质、客户、工艺切换；默认用客户小标识区分同材质相似工件。</div>
         `;
     }
 
@@ -3843,6 +3855,21 @@ function setupDockViewSettingsMenu() {
     });
 
     pop.addEventListener('click', (event) => {
+        const colorBtn = event.target.closest('[data-color-mode]');
+        if (colorBtn) {
+            event.preventDefault();
+            event.stopPropagation();
+            const mode = colorBtn.getAttribute('data-color-mode') || 'materialCustomer';
+            if (typeof setItemColorMode === 'function') setItemColorMode(mode);
+            if (globalFurnacesResult && globalFurnacesResult.length > 0) {
+                renderSingleFurnace(currentFurnaceIndex || 0, getSelectedMaterialName());
+                renderFurnaceThumbnails(globalFurnacesResult, currentFurnaceIndex || 0, handleThumbFurnaceClick);
+                updateCurrentToolingHud();
+            }
+            renderMenu();
+            return;
+        }
+
         const proxy = event.target.closest('[data-dock-proxy]');
         if (!proxy) return;
         event.preventDefault();
@@ -7055,6 +7082,566 @@ function handleLeftPanelClearAction() {
     }
 }
 
+
+// ==================== V0.7.31: Language + Theme Controls ====================
+const UI_LANGUAGE_KEY = 'heat_furnace_ui_language_v0731';
+const UI_THEME_KEY = 'heat_furnace_ui_theme_v0731';
+let uiI18nApplying = false;
+let uiI18nObserver = null;
+
+const UI_I18N_EN = {
+    'AI热处理装炉智能体': 'AI Furnace Loading Agent',
+    'AI Furnace Loading Agent': 'AI Furnace Loading Agent',
+    '资源配置': 'Resources',
+    '方案工作台': 'Plan Workbench',
+    '装载工装': 'Tooling',
+    '生产车间': 'Workshop',
+    '工件详情': 'Workpieces',
+    '合炉设计': 'Batch Merge',
+    '方案库': 'Library',
+    '方案分析': 'Analysis',
+    '装炉仿真': 'Loading Sim',
+    '工艺仿真': 'Process Sim',
+    '摆放编辑': 'Placement Edit',
+    '保存': 'Save',
+    '退出编辑': 'Exit Edit',
+    '装炉规则': 'Rules',
+    '导入 Excel': 'Import Excel',
+    '导入Excel': 'Import Excel',
+    '从飞书同步': 'Sync from Feishu',
+    '清空任务': 'Clear Tasks',
+    '收起筛选': 'Collapse Filters',
+    '筛选物料': 'Filter Items',
+    '生成方案': 'Generate Plan',
+    '生成中…': 'Generating…',
+    '生成中...': 'Generating...',
+    '查看施工清单': 'View Work Sheet',
+    '查看施工单': 'View Work Sheet',
+    '查看历史': 'View History',
+    '删除': 'Delete',
+    '新增方案': 'New Plan',
+    '新生成方案': 'New Plan',
+    '添加工装': 'Add Tooling',
+    '清空本次使用': 'Clear Current Use',
+    '恢复样板工装': 'Restore Templates',
+    '暂无本次工装组合': 'No tooling selected',
+    '暂无炉膛或工装，请点击上方“增加”创建料框': 'No tooling yet. Click Add above to create tooling.',
+    '当前仅装载已锁定合炉组': 'Only the locked merge group is loaded',
+    '历史方案只读查看中': 'Viewing historical plan',
+    '历史方案 · 当前工装': 'History · Current Tooling',
+    '当前工装': 'Current Tooling',
+    '已装工件': 'Loaded Items',
+    '装载重量': 'Load Weight',
+    '重量利用率': 'Weight Utilization',
+    '空间利用率': 'Space Utilization',
+    '层数': 'Layers',
+    '承重上限': 'Max Load',
+    '展开': 'Expand',
+    '收起': 'Collapse',
+    '上一层': 'Prev Layer',
+    '下一层': 'Next Layer',
+    '仅本层': 'This Layer',
+    '全层': 'All Layers',
+    '全层参考': 'All Layers',
+    '编辑层显示': 'Layer Display',
+    '当前编辑：': 'Editing: ',
+    '只显示当前层，避免上下层互相遮挡。': 'Only show the current layer to avoid overlap.',
+    '模具': 'Item',
+    '移动步长': 'Step',
+    '位置微调': 'Move',
+    '方向与状态': 'Orientation',
+    '前': 'Forward',
+    '后': 'Back',
+    '左': 'Left',
+    '右': 'Right',
+    '水平': 'Rotate',
+    '立放': 'Upright',
+    '锁定': 'Lock',
+    '还原': 'Restore',
+    '微视': 'Top',
+    '俯视': 'Top',
+    '正视': 'Front',
+    '侧视': 'Side',
+    '居中': 'Center',
+    '纵爆': 'V-Explode',
+    '横爆': 'H-Explode',
+    '视图': 'View',
+    '方向轴': 'Axes',
+    '尺寸标注': 'Rulers',
+    '网格': 'Grid',
+    '材质主色 + 客户标识': 'Material + Customer Marker',
+    '按材质着色': 'By Material',
+    '按客户着色': 'By Customer',
+    '按工艺着色': 'By Process',
+    '升温热场': 'Heating Field',
+    '辐射暴露': 'Radiation Exposure',
+    '气流冷却': 'Airflow Cooling',
+    '气氛覆盖': 'Atmosphere Coverage',
+    '淬火介质': 'Quench Medium',
+    '重新计算': 'Recalculate',
+    '退出仿真': 'Exit Simulation',
+    '背景：自动推荐': 'Background: Auto',
+    '静态诊断': 'Static Diagnosis',
+    '质量优先': 'Quality First',
+    '交付优先': 'Delivery First',
+    '成本优先': 'Cost First',
+    '自动合炉分组': 'Auto Merge Groups',
+    '推荐工装': 'Recommend Tooling',
+    '可合炉': 'Mergeable',
+    '不可合炉': 'Not Mergeable',
+    '可执行': 'Executable',
+    '不参与计算': 'Excluded',
+    '异常': 'Exception',
+    '全部': 'All',
+    '材质': 'Material',
+    '工艺': 'Process',
+    '硬度': 'Hardness',
+    '已按全局安全间距 5mm 校验': 'Checked with global 5mm safety clearance',
+    '方向键移动 · R旋转 · S保存 · Esc退出': 'Arrow keys move · R rotate · S save · Esc exit',
+    '点选 3D 工件后，使用方向键或右侧按钮微调；相机已锁定，保留滚轮缩放。': 'Select a 3D item, then use arrow keys or buttons to adjust. Camera is locked; wheel zoom remains available.',
+    '相机已锁定：屏幕向上 = Z- 前移；屏幕向右 = X+ 右移': 'Camera locked: screen up = Z- forward; screen right = X+ right.',
+    '垂直旋转会校验当前层可用高度；超高会自动阻止。': 'Upright rotation checks available layer height and blocks over-height placement.',
+    '浅': 'Light',
+    '暗': 'Dark',
+    '热场仿真': 'Thermal Sim',
+    '暂无本次工装组合': 'No tooling selected',
+    '请先在「合炉设计」中选择合炉组并点击「推荐工装」，也可以手动添加工装。': 'Select a merge group in Batch Merge and click Recommend Tooling, or add tooling manually.',
+    '暂无炉膛或工装，请点击上方“增加”创建料框': 'No furnace/tooling yet. Click Add above to create tooling.',
+    '开始创建装炉方案': 'Start creating a loading plan',
+    '左侧“装载工装”增加料框/网篮/环形工装': 'Add baskets, mesh baskets, or ring tooling on the left.',
+    '左侧“工件详情”添加或导入工件': 'Add or import workpieces on the left.',
+    '点击右下角“生成方案”': 'Click Generate Plan at the lower right.',
+    '保存、加载、删除历史装炉方案': 'Save, load, and delete historical loading plans.',
+    '保存后的方案快照会显示在这里': 'Saved plan snapshots will appear here.',
+    '历史方案': 'History',
+    '暂无历史方案': 'No history yet',
+    '导入JSON到工作台': 'Import JSON to Workbench',
+    '暂无': 'None',
+    '数量': 'Qty',
+    '标准料框': 'Standard Basket',
+    '网篮': 'Mesh Basket',
+    '料盘': 'Tray',
+    '环形工装': 'Ring Tooling',
+    '点击选择': 'Click to select',
+    '数量可直接修改': 'Quantity can be edited directly',
+    '返回编辑': 'Back to Edit',
+    '退出': 'Exit'
+};
+
+const UI_I18N_PATTERNS = [
+    [/^共\s*(\d+)\s*个方案$/, 'Total $1 plans'],
+    [/^第\s*(\d+)\s*\/\s*(\d+)\s*层$/, 'Layer $1 / $2'],
+    [/^第\s*(\d+)\s*层\s*\/\s*共\s*(\d+)\s*层$/, 'Layer $1 / $2'],
+    [/^当前编辑：\s*第\s*(\d+)\s*层\s*\/\s*共\s*(\d+)\s*层$/, 'Editing: Layer $1 / $2'],
+    [/^已装工件\s*(\d+)\s*件$/, 'Loaded $1 items'],
+    [/^装载重量\s*([\d.]+)\s*kg$/, 'Load $1 kg'],
+    [/^承重上限\s*([\d.]+)\s*kg$/, 'Max Load $1 kg'],
+    [/^空间利用率\s*([\d.]+)%$/, 'Space $1%'],
+    [/^重量利用率\s*([\d.]+)%$/, 'Weight $1%'],
+    [/^层数\s*(\d+)\s*层$/, '$1 layer(s)'],
+    [/^尺寸\s*[:：]?\s*(.*)$/i, 'Size: $1'],
+    [/^编号\s*[:：]?\s*(.*)$/i, 'ID: $1'],
+    [/^客户\s*[:：]?\s*(.*)$/i, 'Customer: $1'],
+    [/^工艺\s*[:：]?\s*(.*)$/i, 'Process: $1'],
+    [/^材质\s*[:：]?\s*(.*)$/i, 'Material: $1'],
+    [/^硬度\s*[:：]?\s*(.*)$/i, 'Hardness: $1']
+];
+
+
+
+// V0.7.33：补充主要业务面板英文翻译。客户名、工件名和导入数据仍保持原文。
+Object.assign(UI_I18N_EN, {
+    '工艺规则配置': 'Loading Rule Settings',
+    '装炉策略选择': 'Loading Strategy',
+    '热场均衡装载': 'Thermal Balance Loading',
+    '温度均匀，避免中心聚集，控制局部密度': 'Keep temperature uniform, avoid center clustering, and control local density.',
+    '重量与安全规则': 'Weight & Safety Rules',
+    '承重安全余量 (%)': 'Load Safety Margin (%)',
+    '搁板分层平铺算法 (Shelf-Layered 3D Bin Packing)': 'Shelf-Layered 3D Bin Packing',
+    '启用搁板分层平铺算法': 'Enable shelf-layered packing',
+    '重量+体积优先排序 → 底部平铺 → 动态搁板 → 分层填充': 'Weight + volume priority → bottom layout → dynamic shelf → layered fill',
+    '搁板厚度 (mm)': 'Shelf Thickness (mm)',
+    '工件摆放姿态优化 (V2.0 新增)': 'Workpiece Orientation Optimization',
+    '立放': 'Upright',
+    '自动旋转长方体(最小面积面朝下，提高单层堆叠密度。': 'Auto-rotate cuboids with the smallest footprint down to improve layer density.',
+    '圆盘翻转阈值': 'Disc Flip Threshold',
+    '取消': 'Cancel',
+    '保存规则': 'Save Rules',
+    '重新推荐': 'Recommend Again',
+    '风险低': 'Low Risk',
+    '风险中': 'Medium Risk',
+    '风险高': 'High Risk',
+    '质量优先方案': 'Quality-First Plan',
+    '本次工装组合 · 来源：AI 推荐': 'Current Tooling · AI Recommended',
+    '规则工艺组': 'Rule Process Group',
+    '人工拼炉组': 'Manual Merge Group',
+    '待曲线确认': 'Curve Pending',
+    '曲线状态：未接入真实曲线库': 'Curve: real process curve library not connected',
+    '曲线状态：未接入真实曲线库': 'Curve: not connected to curve library',
+    '可进入工装推荐': 'Ready for tooling recommendation',
+    '本次工装组合': 'Current Tooling Set',
+    '来源：AI 推荐': 'Source: AI Recommended',
+    '工装推荐': 'Tooling Recommendation',
+    '先选择一个工艺组，再点击「推荐工装」。': 'Select a process group, then click Recommend Tooling.',
+    '重新推荐': 'Recommend Again',
+    '采用': 'Apply',
+    '已采用': 'Applied',
+    '当前工作台方案': 'Current Workbench Plan',
+    '正在查看历史方案': 'Viewing Historical Plan',
+    '历史查看': 'History View',
+    '保存到方案库': 'Save to Library',
+    '打印方案': 'Print Plan',
+    '当前选中方案': 'Selected Plan',
+    'AI 诊断': 'AI Diagnosis',
+    '方案状态': 'Plan Status',
+    '主要瓶颈': 'Main Bottleneck',
+    '空间': 'Space',
+    '重量': 'Weight',
+    '炉次数量': 'Furnace Count',
+    '未装工件': 'Unpacked Items',
+    '总装载量': 'Total Load',
+    '总重量': 'Total Weight',
+    '工装': 'Tooling',
+    '标准料框': 'Standard Basket',
+    '数量': 'Qty',
+    '点击选择': 'Click to select',
+    '工件': 'Item',
+    '当前层': 'Current Layer',
+    '等待选择工件': 'Waiting for item selection',
+    '位置': 'Position',
+    '可执行 · 已按全局安全间距 5mm 校验': 'Executable · Checked with global 5mm clearance',
+    '点选 3D 工件后，使用方向键或右侧按钮微调；相机已锁定，保留滚轮缩放。': 'Select a 3D workpiece, then use arrow keys or the side buttons to adjust. Camera orbit is locked; wheel zoom remains.',
+    '方向键移动 · R旋转 · S保存 · Esc退出': 'Arrow keys move · R rotate · S save · Esc exit',
+    '炉内阶段 + 淬火阶段': 'Furnace Stage + Quench Stage',
+    '当前操作 · 辐射暴露': 'Current Action · Radiation Exposure',
+    '辐射暴露是静态诊断：可点击 3D 工件或左侧物料卡查看单件/批次遮挡原因。': 'Radiation exposure is a static diagnosis. Click a 3D workpiece or material card to inspect shielding reasons.',
+    '低暴露工件': 'Lowest Exposure Item',
+    '严重遮挡': 'Severe Shielding',
+    '充分': 'Good',
+    '遮挡': 'Blocked',
+    '热源': 'Heat Source',
+    '可达路径': 'Reachable Path',
+    '被遮挡路径': 'Blocked Path',
+    '装炉规则': 'Rules',
+    '热场仿真': 'Thermal Simulation',
+    '工艺仿真': 'Process Simulation',
+    '装炉仿真': 'Loading Simulation',
+    '方案分析': 'Plan Analysis',
+    '方案库': 'Plan Library',
+    '保存、加载、删除历史装炉方案': 'Save, load, and delete historical loading plans',
+    '保存后的方案快照会显示在这里': 'Saved plan snapshots will appear here',
+    '当前方案库仅支持新版“装炉数字孪生 JSON”。旧格式历史方案暂不支持直接导入工作台。': 'The library supports the new Digital Twin JSON format. Legacy plan records cannot be imported directly yet.'
+});
+
+function getUiLanguage() {
+    const saved = localStorage.getItem(UI_LANGUAGE_KEY);
+    return saved === 'en' ? 'en' : 'zh';
+}
+
+function getUiTheme() {
+    const saved = localStorage.getItem(UI_THEME_KEY);
+    return ['light', 'dark'].includes(saved) ? saved : 'light';
+}
+
+function setSceneThemeBackground(theme) {
+    if (!scene || processSimulationActive) return;
+    const colorMap = {
+        light: 0xf5f7fa,
+        dark: 0x0b1120,
+    };
+    try {
+        scene.background = new THREE.Color(colorMap[theme] || colorMap.light);
+    } catch (err) {
+        console.warn('[theme] failed to set scene background', err);
+    }
+}
+
+function setUiTheme(theme) {
+    const nextTheme = ['light', 'dark'].includes(theme) ? theme : 'light';
+    localStorage.setItem(UI_THEME_KEY, nextTheme);
+    document.documentElement.setAttribute('data-ui-theme', nextTheme);
+    document.body?.setAttribute('data-ui-theme', nextTheme);
+    document.querySelectorAll('[data-ui-theme-btn]').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-ui-theme-btn') === nextTheme);
+    });
+    setSceneThemeBackground(nextTheme);
+}
+
+function translateRawText(raw, lang) {
+    if (lang !== 'en') return raw;
+    const source = String(raw || '');
+    const trimmed = source.trim();
+    if (!trimmed) return raw;
+    let translated = UI_I18N_EN[trimmed];
+    if (!translated && Array.isArray(UI_I18N_PATTERNS)) {
+        for (const [pattern, replacement] of UI_I18N_PATTERNS) {
+            if (pattern.test(trimmed)) {
+                translated = trimmed.replace(pattern, replacement);
+                break;
+            }
+        }
+    }
+    if (!translated) return raw;
+    const leading = source.match(/^\s*/)?.[0] || '';
+    const trailing = source.match(/\s*$/)?.[0] || '';
+    return leading + translated + trailing;
+}
+
+function applyI18nToTextNode(node, lang) {
+    if (!node || node.nodeType !== Node.TEXT_NODE) return;
+    const parent = node.parentElement;
+    if (!parent || parent.closest('.no-i18n, script, style, textarea, input, select')) return;
+    if (!node.__i18nOriginal) node.__i18nOriginal = node.nodeValue;
+    const nextValue = lang === 'zh' ? node.__i18nOriginal : translateRawText(node.__i18nOriginal, lang);
+    if (node.nodeValue !== nextValue) node.nodeValue = nextValue;
+}
+
+function applyI18nToAttributes(el, lang) {
+    if (!el || el.closest?.('.no-i18n')) return;
+    ['title', 'placeholder', 'aria-label'].forEach(attr => {
+        if (!el.hasAttribute(attr)) return;
+        const raw = el.getAttribute(attr) || '';
+        if (!el.__i18nOriginalAttrs) el.__i18nOriginalAttrs = {};
+        if (!Object.prototype.hasOwnProperty.call(el.__i18nOriginalAttrs, attr)) {
+            el.__i18nOriginalAttrs[attr] = raw;
+        }
+        const original = el.__i18nOriginalAttrs[attr];
+        const nextValue = lang === 'zh' ? original : translateRawText(original, lang);
+        if (el.getAttribute(attr) !== nextValue) el.setAttribute(attr, nextValue);
+    });
+}
+
+function applyUiLanguage(lang = getUiLanguage()) {
+    const nextLang = lang === 'en' ? 'en' : 'zh';
+    localStorage.setItem(UI_LANGUAGE_KEY, nextLang);
+    document.documentElement.setAttribute('lang', nextLang === 'en' ? 'en' : 'zh-CN');
+    document.documentElement.setAttribute('data-ui-lang', nextLang);
+    document.body?.setAttribute('data-ui-lang', nextLang);
+    document.querySelectorAll('[data-ui-lang-btn]').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-ui-lang-btn') === nextLang);
+    });
+
+    uiI18nApplying = true;
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(node => applyI18nToTextNode(node, nextLang));
+    document.querySelectorAll('[title], [placeholder], [aria-label]').forEach(el => applyI18nToAttributes(el, nextLang));
+    uiI18nApplying = false;
+}
+
+function scheduleUiLanguageRefresh() {
+    if (uiI18nApplying || getUiLanguage() !== 'en') return;
+    clearTimeout(scheduleUiLanguageRefresh._timer);
+    scheduleUiLanguageRefresh._timer = setTimeout(() => applyUiLanguage('en'), 60);
+}
+
+function observeUiLanguageMutations() {
+    if (uiI18nObserver || !document.body) return;
+    uiI18nObserver = new MutationObserver(() => scheduleUiLanguageRefresh());
+    uiI18nObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
+}
+
+
+
+// ==================== V0.7.34: Full i18n polish helpers ====================
+Object.assign(UI_I18N_EN, {
+    'Excel 导入预览': 'Excel Import Preview',
+    '请核对以下数据，确认后选择追加或替换当前列表': 'Review the data below, then append or replace the current list.',
+    '产品名称': 'Product',
+    '产品名': 'Product',
+    '客户': 'Customer',
+    '客户名称': 'Customer',
+    '物料编码': 'Item Code',
+    '形态': 'Shape',
+    '尺寸': 'Size',
+    '数量': 'Qty',
+    '单重(kg)': 'Unit Wt. (kg)',
+    '总重(kg)': 'Total Wt. (kg)',
+    '材质': 'Material',
+    '工艺': 'Process',
+    '硬度': 'Hardness',
+    '下单日期': 'Order Date',
+    '交付日期': 'Due Date',
+    '备注': 'Remarks',
+    '状态': 'Status',
+    '尺寸不足': 'Invalid size',
+    '替换列表': 'Replace List',
+    '追加到列表': 'Append to List',
+    '取消': 'Cancel',
+    '正常': 'Normal',
+    '快速': 'Fast',
+    '慢速': 'Slow',
+    '极速': 'Max',
+    '速度：': 'Speed:',
+    '速度:': 'Speed:',
+    '继续': 'Continue',
+    '停止': 'Stop',
+    '暂停': 'Pause',
+    '播放': 'Play',
+    '播放装炉仿真': 'Play Loading Simulation',
+    '装炉仿真中': 'Loading Simulation',
+    '累计到此步': 'Up to Step',
+    '仅看本层': 'This Layer Only',
+    '显示全部': 'Show All',
+    '显示全部层': 'Show All Layers',
+    '底层摆放': 'Bottom Layer Placement',
+    '第': 'No.',
+    '件': 'pcs',
+    '炉': 'Furnace',
+    '炉次': 'Heat',
+    '热场': 'Thermal Field',
+    '速度': 'Speed',
+    '当前操作': 'Current Action',
+    '当前操作 · 辐射暴露': 'Current Action · Radiation Exposure',
+    '正在生成装炉方案': 'Generating Loading Plan',
+    '渲染 3D 装炉结果': 'Rendering 3D Loading Result',
+    '读取数据': 'Read Data',
+    '试算排布': 'Calculate Layout',
+    '渲染结果': 'Render Result',
+    '完成': 'Done',
+    '计算期间页面可能短暂停顿，请勿重复点击。': 'The page may pause briefly during calculation. Do not click repeatedly.',
+    '打印现场摆料施工单': 'Print Field Loading Work Sheet',
+    'PDF V2.8 支持横版施工图、竖版归档单、区域局部放大与现场试用小修。建议现场摆料选择“自动推荐”或“横版施工图”。': 'PDF V2.8 supports landscape field drawings, portrait archives, regional zoom and field-ready refinements. For shop-floor loading, choose Auto or Landscape Drawing.',
+    '打印版式': 'Print Layout',
+    '自动推荐': 'Auto',
+    '系统按件数、层数和是否导出步骤图自动选择。': 'The system chooses by item count, layers and step drawings.',
+    '横版施工图': 'Landscape Drawing',
+    '大图、分步骤，推荐现场照图摆料。': 'Large drawings with steps; recommended for shop-floor loading.',
+    '竖版归档单': 'Portrait Archive',
+    '表格、签字、审核留档更方便。': 'Tables, signatures and review records.',
+    '输出模式': 'Output Mode',
+    '标准版': 'Standard',
+    '封面、图例、步骤图和坐标清单。': 'Cover, legend, step drawings and coordinate list.',
+    '精简现场版': 'Compact Field',
+    '只输出封面 + 步骤图；默认关闭图例、坐标表和区域拆分，页数最少。': 'Cover + step drawings only; fewer pages.',
+    '完整归档版': 'Full Archive',
+    '偏向竖版和清单，方便签字留档。': 'Portrait-oriented records for signature/archive.',
+    '页面内容': 'Pages',
+    '任务封面': 'Cover',
+    '工装、工艺、KPI、签字确认。': 'Tooling, process, KPI and sign-off.',
+    '工件图例 / 工件包': 'Item Legend / Batch',
+    '颜色、尺寸、数量说明。': 'Color, size and quantity notes.',
+    '分步摆放图': 'Step Drawings',
+    '每步新增件高亮，已放置件灰化。': 'New items highlighted per step; placed items dimmed.',
+    '工件坐标清单': 'Coordinate List',
+    'X / Y / Z 坐标复核与归档。': 'X / Y / Z coordinate review and archive.',
+    '高密度区域放大': 'High-density Zoom',
+    '单层件数过多时自动拆 A/B/C/D 区。': 'Split A/B/C/D zones for dense layers.',
+    '同时导出 JSON': 'Export JSON too',
+    '用于备份、回写或后续导入。': 'For backup, write-back or later import.',
+    '图纸密度': 'Drawing Density',
+    '自动': 'Auto',
+    '按复杂度拆分步骤。': 'Split steps by complexity.',
+    '大图优先': 'Larger Drawings',
+    '每步件数更少，更清楚。': 'Fewer items per step, clearer drawings.',
+    '节省纸张': 'Save Paper',
+    '每页放更多件，页数更少。': 'More items per page, fewer pages.',
+    '生成 PDF V2.8': 'Generate PDF V2.8',
+    '正在生成 PDF': 'Generating PDF',
+    '正在渲染第': 'Rendering page',
+    '页': 'page',
+    'PDF V2.8 使用逐页截图方式生成。页数较多时请等待，不要关闭页面。': 'PDF V2.8 is generated page by page. Please wait and do not close the page.',
+    '方案库背景': 'Plan Library Background',
+    '当前工作台方案': 'Current Workbench Plan',
+    '暂无当前方案': 'No current plan',
+    '正在只读查看': 'Read-only view',
+    '历史查看': 'History View',
+    '保存到方案库': 'Save to Library',
+    '保存后进入历史方案，可用于查看、复用和对比。': 'Save as a history snapshot for review, reuse and comparison.',
+    '打印方案': 'Print Plan',
+    '生成方案后显示方案分析': 'Plan analysis appears after generation',
+    '生成方案后显示装炉步骤仿真': 'Loading simulation appears after generation',
+    '生成方案后显示真空淬火工艺仿真': 'Vacuum quench simulation appears after generation',
+    '正在分析物料组合…': 'Analyzing material combination…',
+    '暂无历史方案': 'No history yet',
+    '选择历史方案后显示差异摘要': 'Select a history plan to view the comparison summary',
+    '选择左侧方案查看详情': 'Select a plan on the left to view details',
+    'PDF 内包含工件坐标清单': 'Include coordinate list in PDF',
+    '在作业指导书中展示每件工件的 X / Y / Z 坐标，便于现场复核。': 'Show X / Y / Z coordinates for each item for field verification.',
+    '导出 PDF': 'Export PDF',
+    '请至少选择一个炉膛方案': 'Please select at least one furnace plan.',
+    '未找到有效数据，请检查文件格式': 'No valid data found. Check the file format.',
+    '文件解析失败：': 'File parsing failed: ',
+    '当前没有可导出的装炉方案，请先生成方案。': 'No loading plan can be exported. Generate a plan first.',
+    'PDF 导出组件未加载，请检查 html2pdf.js 是否正常引入。': 'PDF export component is not loaded. Check html2pdf.js.',
+    'PDF 导出失败：': 'PDF export failed: ',
+    '现场摆料施工单': 'Field Loading Work Sheet',
+    '热处理装炉作业指导书': 'Heat Treatment Loading Work Instruction',
+    '工件清单': 'Item List',
+    '任务总览': 'Task Overview',
+    '现场执行确认': 'Field Execution Confirmation',
+    '现场注意事项': 'Field Notes',
+    '坐标清单': 'Coordinate List',
+    '编号': 'No.',
+    '层': 'Layer',
+    '客户/图号': 'Customer / Drawing',
+    '尺寸 mm': 'Size mm',
+    '坐标 mm': 'Coordinates mm',
+    '单重': 'Unit Weight',
+    '方体': 'Cuboid',
+    '圆柱': 'Cylinder',
+    '均衡方案': 'Balanced Plan',
+    '空间优先': 'Space First',
+    '表面均匀': 'Surface Uniformity'
+});
+
+UI_I18N_PATTERNS.push(
+    [/^装炉仿真中\s*\((\d+)\/(\d+)\)\s*·\s*(.*?)\s*·\s*工件\s*(\d+)\/(\d+)\s*·\s*(.*)$/,
+        'Loading Simulation ($1/$2) · $3 · Items $4/$5 · $6'],
+    [/^正在渲染第\s*(\d+)\s*\/\s*(\d+)\s*页\.\.\.$/, 'Rendering page $1 / $2...'],
+    [/^有\s*(\d+)\s*件工件无法装入当前炉膛：$/, '$1 items cannot be loaded into the current furnace:'],
+    [/^当前 PDF 将导出已装炉方案；未装炉工件请结合页面容量提示另行安排后续炉次。$/, 'The PDF exports loaded furnaces only. Arrange unpacked items in later heats according to capacity hints.'],
+    [/^(.+?)件\s*·\s*([\d.]+)kg\s*·\s*利用率([\d.]+)%$/, '$1 pcs · $2 kg · Utilization $3%'],
+    [/^第\s*(\d+)\s*层\s*\/\s*底层$/, 'Layer $1 / Bottom'],
+    [/^清单\s*(\d+)\/(\d+)$/, 'List $1/$2'],
+    [/^步骤\s*(\d+)\/(\d+)$/, 'Step $1/$2'],
+    [/^层\s*(\d+)$/, 'Layer $1'],
+    [/^工件\s*(\d+)\/(\d+)$/, 'Items $1/$2'],
+    [/^(.+?)\s*·\s*(\d+)\s*件$/, '$1 · $2 pcs'],
+    [/^(.+?)\s*(\d+)\s*件$/, '$1 $2 pcs'],
+    [/^X=([\d.]+) mm \/ Z=([\d.]+) mm \/ 间距=(.*?)mm$/, 'X=$1 mm / Z=$2 mm / Clearance=$3mm']
+);
+
+function ensureLanguageThemeControls() {
+    const topBar = document.getElementById('top-bar');
+    if (!topBar || document.getElementById('language-theme-controls')) return;
+
+    const controls = document.createElement('div');
+    controls.id = 'language-theme-controls';
+    controls.className = 'language-theme-controls no-i18n';
+    controls.innerHTML = `
+        <div class="ltc-group" title="Language / 语言">
+            <button type="button" data-ui-lang-btn="zh" title="中文" aria-label="中文界面">中</button>
+            <button type="button" data-ui-lang-btn="en" title="English" aria-label="English UI">EN</button>
+        </div>
+        <div class="ltc-group" title="Theme / 主题">
+            <button type="button" data-ui-theme-btn="light" title="Light" aria-label="Light theme">☀</button>
+            <button type="button" data-ui-theme-btn="dark" title="Dark" aria-label="Dark theme">☾</button>
+        </div>`;
+
+    const spacer = topBar.querySelector('.top-spacer');
+    const summary = document.getElementById('top-summary');
+    if (spacer && summary && summary.parentNode === topBar) {
+        topBar.insertBefore(controls, summary);
+    } else if (spacer && spacer.nextSibling) {
+        topBar.insertBefore(controls, spacer.nextSibling);
+    } else {
+        topBar.appendChild(controls);
+    }
+
+    controls.querySelectorAll('[data-ui-lang-btn]').forEach(btn => {
+        btn.addEventListener('click', () => applyUiLanguage(btn.getAttribute('data-ui-lang-btn')));
+    });
+    controls.querySelectorAll('[data-ui-theme-btn]').forEach(btn => {
+        btn.addEventListener('click', () => setUiTheme(btn.getAttribute('data-ui-theme-btn')));
+    });
+
+    setUiTheme(getUiTheme());
+    applyUiLanguage(getUiLanguage());
+    observeUiLanguageMutations();
+}
+
 /**
  * 初始化应用程序，设置 Three.js 场景、创建默认炉膛卡片和物料卡片，并绑定所有事件监听器。
  * @returns {void}
@@ -7072,7 +7659,9 @@ function init() {
     updateTopSummary();
     hideExplodeBOMButtons();
     initLeftPanelTabs();
+    ensurePlacementEditRightPanel();
     initRightPanelTabs();
+    ensureLanguageThemeControls();
     initHeatMergeDesign();
 
     bindWorkbenchUiModeAutoRefresh();
@@ -7986,6 +8575,7 @@ let placementEditControlsSnapshot = null;
 let placementEditSessionSnapshot = null;
 let placementEditSavedInSession = false;
 let placementEditOriginalStateByKey = new Map();
+let placementEditPreviousRightTab = 'analysis';
 
 function getPlacementSnapshotKey(furnaceIndex, itemId) {
     return String(furnaceIndex) + '::' + String(itemId || '');
@@ -8241,6 +8831,56 @@ function formatPlacementCoord(item) {
     return `X ${Number(item.x || 0).toFixed(0)} / Y ${Number(item.y || 0).toFixed(0)} / Z ${Number(item.z || 0).toFixed(0)} mm`;
 }
 
+function getActiveRightPanelTabKey() {
+    return document.querySelector('.right-tab-btn.active')?.getAttribute('data-tab') || 'analysis';
+}
+
+function ensurePlacementEditRightPanel() {
+    const tabs = document.querySelector('.right-panel-tabs');
+    const rightPanel = document.getElementById('right-panel');
+    if (!tabs || !rightPanel) return null;
+
+    let tabBtn = document.querySelector('.right-tab-btn[data-tab="placement-edit"]');
+    if (!tabBtn) {
+        tabBtn = document.createElement('button');
+        tabBtn.className = 'right-tab-btn placement-edit-tab';
+        tabBtn.type = 'button';
+        tabBtn.setAttribute('data-tab', 'placement-edit');
+        tabBtn.textContent = '摆放编辑';
+        tabs.appendChild(tabBtn);
+    }
+
+    let pane = document.getElementById('right-tab-placement-edit');
+    if (!pane) {
+        pane = document.createElement('div');
+        pane.className = 'right-tab-pane placement-edit-workbench-pane';
+        pane.id = 'right-tab-placement-edit';
+        rightPanel.appendChild(pane);
+    }
+
+    const panel = document.getElementById('placement-edit-panel');
+    if (panel && panel.parentElement !== pane) {
+        pane.appendChild(panel);
+    }
+    if (panel) {
+        panel.classList.remove('pep-bottom-ribbon', 'pep-mini', 'pep-dragging');
+        panel.classList.add('pep-side-panel');
+        panel.style.left = '';
+        panel.style.top = '';
+        panel.style.right = '';
+        panel.style.bottom = '';
+        panel.style.width = '';
+    }
+
+    if (pane) {
+        // V0.7.29：快捷键说明不再以折叠卡片插在控制区内，避免遮挡“锁定/还原/保存”。
+        const shortcuts = document.getElementById('pep-shortcuts-card');
+        if (shortcuts) shortcuts.remove();
+    }
+
+    return pane;
+}
+
 function updatePlacementEditPanel(selection) {
     updatePlacementLayerControls();
     const empty = document.getElementById('pep-empty');
@@ -8253,8 +8893,10 @@ function updatePlacementEditPanel(selection) {
 
     const item = selection?.item || getPlacementItemById(placementEditSelectedItemId);
     const furnace = getCurrentPlacementFurnace();
+    const panel = document.getElementById('placement-edit-panel');
 
     if (!item) {
+        if (panel) panel.classList.remove('pep-has-selection');
         if (empty) empty.style.display = 'block';
         if (body) body.style.display = 'none';
         if (statusEl) {
@@ -8264,8 +8906,9 @@ function updatePlacementEditPanel(selection) {
         return;
     }
 
+    if (panel) panel.classList.add('pep-has-selection');
     if (empty) empty.style.display = 'none';
-    if (body) body.style.display = 'block';
+    if (body) body.style.display = 'grid';
 
     const layer = getPlacementItemLayer(item, furnace);
     if (nameEl) nameEl.textContent = item.name || item.showName || item.id || '未命名工件';
@@ -8280,7 +8923,7 @@ function updatePlacementEditPanel(selection) {
         statusEl.className = `pep-status ${validation.level}`;
         statusEl.textContent = validation.message + (item.locked ? ' · 已锁定' : '');
     }
-    if (lockBtn) lockBtn.textContent = item.locked ? '解除锁定' : '锁定位置';
+    if (lockBtn) lockBtn.textContent = item.locked ? '解锁' : '锁定';
 }
 
 
@@ -8303,17 +8946,26 @@ function updatePlacementLayerControls() {
     if (layerLabel) {
         layerLabel.textContent = state.showAllLayers
             ? `全层参考 · 共 ${layerCount} 层`
-            : `当前编辑：第 ${activeLayer} 层 / 共 ${layerCount} 层`;
+            : `第 ${activeLayer} / ${layerCount} 层`;
     }
     if (layerMode) {
         layerMode.textContent = state.showAllLayers
-            ? '当前显示全部层，仅建议查看；移动前请切回仅本层。'
-            : '仅显示当前层，避免上下层互相遮挡。';
+            ? '全层参考中，移动前建议切回仅本层。'
+            : '仅本层编辑，避免层间遮挡。';
     }
     if (prevBtn) prevBtn.disabled = state.showAllLayers || activeIndex <= 0;
     if (nextBtn) nextBtn.disabled = state.showAllLayers || activeIndex >= layerCount - 1;
     if (currentBtn) currentBtn.classList.toggle('active', !state.showAllLayers);
     if (allBtn) allBtn.classList.toggle('active', !!state.showAllLayers);
+}
+
+function setPlacementEditStep(step, silent = false) {
+    const normalized = Number(step) || 10;
+    placementEditStepMm = normalized;
+    document.querySelectorAll('.pep-step-btn').forEach(btn => {
+        btn.classList.toggle('active', Number(btn.getAttribute('data-step')) === normalized);
+    });
+    if (!silent) showPlacementEditStatus('ok', `移动步长已切换为 ${normalized}mm。`);
 }
 
 function setPlacementPointerEventConsumed(event) {
@@ -8383,6 +9035,9 @@ function setPlacementEditModeActive(active) {
         const panel = document.getElementById('placement-edit-panel');
         const btn = document.getElementById('btn-placement-edit');
         if (panel) panel.style.display = 'none';
+        if (getActiveRightPanelTabKey() === 'placement-edit') {
+            activateRightPanelTab(placementEditPreviousRightTab || 'analysis');
+        }
         if (btn) {
             btn.classList.remove('active');
             btn.textContent = '编辑摆放';
@@ -8413,9 +9068,16 @@ function setPlacementEditModeActive(active) {
 
     placementEditModeActive = nextActive;
     document.body.classList.toggle('placement-edit-mode', placementEditModeActive);
+    ensurePlacementEditRightPanel();
     const panel = document.getElementById('placement-edit-panel');
     const btn = document.getElementById('btn-placement-edit');
     if (panel) panel.style.display = placementEditModeActive ? 'block' : 'none';
+    if (placementEditModeActive) {
+        const currentTab = getActiveRightPanelTabKey();
+        if (currentTab !== 'placement-edit') placementEditPreviousRightTab = currentTab || 'analysis';
+        if (typeof expandRightPanel === 'function') expandRightPanel();
+        activateRightPanelTab('placement-edit');
+    }
     if (btn) {
         btn.classList.toggle('active', placementEditModeActive);
         btn.textContent = placementEditModeActive ? '退出编辑' : '编辑摆放';
@@ -8484,6 +9146,36 @@ function suspendProcessSimulationForPlacementEdit() {
     }
 }
 
+
+function placementRectIntersectsCircle(rect, cx, cz, radius) {
+    const nearestX = Math.max(rect.x, Math.min(cx, rect.x + rect.w));
+    const nearestZ = Math.max(rect.z, Math.min(cz, rect.z + rect.d));
+    const dx = nearestX - cx;
+    const dz = nearestZ - cz;
+    return dx * dx + dz * dz <= radius * radius;
+}
+
+function placementItemWouldHitTrayCornerPost(item, nextX, nextZ, nextW = null, nextD = null) {
+    const furnace = getCurrentPlacementFurnace?.();
+    const blockers = Array.isArray(furnace?.trayCornerPostBlockers) ? furnace.trayCornerPostBlockers : [];
+    if (!item || blockers.length === 0) return false;
+    const rect = {
+        x: Number(nextX || 0),
+        z: Number(nextZ || 0),
+        w: Number(nextW ?? item.w ?? 0),
+        d: Number(nextD ?? item.d ?? 0)
+    };
+    if (rect.w <= 0 || rect.d <= 0) return false;
+    return blockers.some(blocker => {
+        if (blocker.type !== 'circle-post') return false;
+        return placementRectIntersectsCircle(rect, Number(blocker.x || 0), Number(blocker.z || 0), Number(blocker.radius || 0));
+    });
+}
+
+function rejectTrayCornerPostEdit() {
+    showPlacementEditStatus?.('danger', '该位置与料盘四角支撑杆冲突，已阻止移动。');
+}
+
 function movePlacementSelectedItem(dxStep, dzStep) {
     const item = getPlacementItemById(placementEditSelectedItemId);
     if (!item) return;
@@ -8493,8 +9185,15 @@ function movePlacementSelectedItem(dxStep, dzStep) {
     }
 
     ensurePlacementOriginal(item);
-    item.x = Number(item.x || 0) + Number(dxStep || 0) * placementEditStepMm;
-    item.z = Number(item.z || 0) + Number(dzStep || 0) * placementEditStepMm;
+    const nextX = Number(item.x || 0) + Number(dxStep || 0) * placementEditStepMm;
+    const nextZ = Number(item.z || 0) + Number(dzStep || 0) * placementEditStepMm;
+    if (placementItemWouldHitTrayCornerPost(item, nextX, nextZ)) {
+        rejectTrayCornerPostEdit();
+        updatePlacementEditPanel({ itemId: placementEditSelectedItemId, item });
+        return;
+    }
+    item.x = nextX;
+    item.z = nextZ;
     item.manualMoved = true;
     item.finalEdited = true;
     placementEditDirty = true;
@@ -8538,10 +9237,17 @@ function rotatePlacementSelectedItemHorizontal() {
     const nextW = oldD;
     const nextD = oldW;
 
+    const nextX = cx - nextW / 2;
+    const nextZ = cz - nextD / 2;
+    if (placementItemWouldHitTrayCornerPost(item, nextX, nextZ, nextW, nextD)) {
+        rejectTrayCornerPostEdit();
+        return;
+    }
+
     item.w = nextW;
     item.d = nextD;
-    item.x = cx - nextW / 2;
-    item.z = cz - nextD / 2;
+    item.x = nextX;
+    item.z = nextZ;
     item.manualRotation = ((Number(item.manualRotation || item.rotation || 0) + 90) % 360);
     item.rotation = item.manualRotation;
     item.rotationInfo = { ...(item.rotationInfo || {}), manualYawDeg: item.manualRotation };
@@ -8609,11 +9315,18 @@ function rotatePlacementSelectedItemVertical() {
         return;
     }
 
+    const nextX = cx - nextW / 2;
+    const nextZ = cz - nextD / 2;
+    if (placementItemWouldHitTrayCornerPost(item, nextX, nextZ, nextW, nextD)) {
+        rejectTrayCornerPostEdit();
+        return;
+    }
+
     item.w = nextW;
     item.h = nextH;
     item.d = nextD;
-    item.x = cx - nextW / 2;
-    item.z = cz - nextD / 2;
+    item.x = nextX;
+    item.z = nextZ;
     item.verticalRotation = ((Number(item.verticalRotation || 0) + 90) % 180);
     item.rotationInfo = { ...(item.rotationInfo || {}), manualPitchDeg: item.verticalRotation };
     item.pdfFootprintW = item.w;
@@ -8684,7 +9397,145 @@ function isPlacementCanvasEventTarget(event) {
     return true;
 }
 
+
+function setupPlacementEditPanelFloating() {
+    // V0.7.27：人工调整改为右侧“摆放编辑”工作台，不再放在 3D 画面底部。
+    ensurePlacementEditRightPanel();
+    const panel = document.getElementById('placement-edit-panel');
+    if (!panel) return;
+
+    panel.classList.remove('pep-bottom-ribbon', 'pep-mini', 'pep-dragging');
+    panel.classList.add('pep-side-panel');
+    panel.style.left = '';
+    panel.style.top = '';
+    panel.style.right = '';
+    panel.style.bottom = '';
+
+    const header = panel.querySelector('.pep-header');
+    if (header) {
+        header.classList.remove('pep-drag-handle');
+        header.title = '';
+    }
+
+    // 清理 V0.7.22 悬浮面板临时按钮，避免刷新后旧样式残留。
+    ['pep-mini-toggle', 'pep-reset-position'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.remove();
+    });
+
+    if (panel.dataset.sideWorkbenchSetup === '1') return;
+    panel.dataset.sideWorkbenchSetup = '1';
+
+    const closeBtn = document.getElementById('pep-close');
+    if (closeBtn) {
+        closeBtn.textContent = '退出编辑';
+        closeBtn.title = '退出人工调整模式';
+    }
+
+    const title = panel.querySelector('.pep-title');
+    const kicker = panel.querySelector('.pep-kicker');
+    if (title) title.textContent = '摆放编辑';
+    if (kicker) kicker.textContent = '方向键移动 · R旋转 · S保存 · Esc退出';
+
+    // V0.7.30：保存按钮移到标题栏，右侧面板底部不再出现 sticky 保存条，避免遮挡上/下方内容。
+    const saveRow = document.querySelector('#placement-edit-panel .pep-save-row');
+    if (header && saveRow && saveRow.parentElement !== header) {
+        saveRow.classList.add('pep-save-in-header');
+        header.appendChild(saveRow);
+    }
+    const saveBtn = document.getElementById('pep-save-plan');
+    if (saveBtn) saveBtn.textContent = '保存';
+
+    const textMap = {
+        'pep-layer-prev': '上',
+        'pep-layer-next': '下',
+        'pep-layer-current': '本层',
+        'pep-layer-all': '全层',
+        'pep-save-plan': '保存'
+    };
+    Object.entries(textMap).forEach(([id, text]) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text;
+    });
+
+    panel.querySelectorAll('[data-edit-action="move"]').forEach(btn => {
+        const dx = Number(btn.getAttribute('data-dx')) || 0;
+        const dz = Number(btn.getAttribute('data-dz')) || 0;
+        if (dz < 0) btn.textContent = '前';
+        else if (dz > 0) btn.textContent = '后';
+        else if (dx < 0) btn.textContent = '左';
+        else if (dx > 0) btn.textContent = '右';
+    });
+    const rotateH = panel.querySelector('[data-edit-action="rotate-horizontal"]');
+    const rotateV = panel.querySelector('[data-edit-action="rotate-vertical"]');
+    const restore = panel.querySelector('[data-edit-action="restore"]');
+    if (rotateH) rotateH.textContent = '水平';
+    if (rotateV) rotateV.textContent = '立放';
+    if (restore) restore.textContent = '还原';
+
+    const empty = document.getElementById('pep-empty');
+    if (empty) empty.textContent = '点选 3D 工件后，使用方向键或右侧按钮微调；相机已锁定，保留滚轮缩放。';
+}
+
+function isPlacementEditTypingTarget(target) {
+    if (!target) return false;
+    const tag = String(target.tagName || '').toLowerCase();
+    return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable;
+}
+
+function handlePlacementEditKeyboard(event) {
+    if (!placementEditModeActive) return;
+    if (isPlacementEditTypingTarget(event.target)) return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+
+    let handled = true;
+    const key = event.key;
+    const keyLower = String(key || '').toLowerCase();
+    const multiplier = event.shiftKey ? 5 : 1;
+
+    if (key === 'ArrowUp') movePlacementSelectedItem(0, -1 * multiplier);
+    else if (key === 'ArrowDown') movePlacementSelectedItem(0, 1 * multiplier);
+    else if (key === 'ArrowLeft') movePlacementSelectedItem(-1 * multiplier, 0);
+    else if (key === 'ArrowRight') movePlacementSelectedItem(1 * multiplier, 0);
+    else if (keyLower === 'r') rotatePlacementSelectedItemHorizontal();
+    else if (keyLower === 'v') rotatePlacementSelectedItemVertical();
+    else if (keyLower === 'l') togglePlacementLock();
+    else if (keyLower === 'z') restorePlacementSelectedItem();
+    else if (keyLower === 's') savePlacementAdjustedPlan();
+    else if (key === 'Escape') setPlacementEditModeActive(false);
+    else if (key === '1') setPlacementEditStep(10);
+    else if (key === '2') setPlacementEditStep(20);
+    else if (key === '3') setPlacementEditStep(50);
+    else if (key === '[') {
+        if (typeof stepPlacementEditActiveLayer === 'function') stepPlacementEditActiveLayer(-1);
+        placementEditSelectedItemId = null;
+        updatePlacementEditPanel(null);
+    } else if (key === ']') {
+        if (typeof stepPlacementEditActiveLayer === 'function') stepPlacementEditActiveLayer(1);
+        placementEditSelectedItemId = null;
+        updatePlacementEditPanel(null);
+    } else if (keyLower === 'a') {
+        if (typeof setPlacementEditShowAllLayers === 'function') setPlacementEditShowAllLayers(true);
+        updatePlacementEditPanel(refreshPlacementEditSelection());
+    } else if (keyLower === 'c') {
+        if (typeof setPlacementEditShowAllLayers === 'function') setPlacementEditShowAllLayers(false);
+        updatePlacementEditPanel(refreshPlacementEditSelection());
+    } else {
+        handled = false;
+    }
+
+    if (handled) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+}
+
 function bindPlacementEditMode() {
+    setupPlacementEditPanelFloating();
+    if (!window.__placementEditKeyboardBound) {
+        window.__placementEditKeyboardBound = true;
+        document.addEventListener('keydown', handlePlacementEditKeyboard, true);
+    }
     const btn = document.getElementById('btn-placement-edit');
     if (btn) btn.addEventListener('click', () => {
         if (!globalFurnacesResult || globalFurnacesResult.length === 0) return;
@@ -8696,9 +9547,7 @@ function bindPlacementEditMode() {
 
     document.querySelectorAll('.pep-step-btn').forEach(stepBtn => {
         stepBtn.addEventListener('click', () => {
-            placementEditStepMm = Number(stepBtn.getAttribute('data-step')) || 10;
-            document.querySelectorAll('.pep-step-btn').forEach(btn => btn.classList.remove('active'));
-            stepBtn.classList.add('active');
+            setPlacementEditStep(Number(stepBtn.getAttribute('data-step')) || 10, true);
         });
     });
 

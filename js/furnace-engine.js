@@ -129,7 +129,7 @@ export function solveHeterogeneousPacking(furnacePoolInput, itemsInput, spacing)
                 typeName: f.name,
                 instanceId: `${f.name} (炉次 #${i + 1})`,
                 w: f.width, h: f.height, d: f.depth, max_weight: f.maxWeight,
-                spacing: spacing,
+                spacing: f.actualSpacing != null ? f.actualSpacing : spacing,
                 packedItems: [], totalWeight: 0,
                 emptySpaces: [{ x: 0, y: 0, z: 0, w: f.width, h: f.height, d: f.depth }],
                 /** V2.3: 每个炉膛独立存储 basketType */
@@ -484,7 +484,7 @@ export function solveShelfLayeredMultiFurnace(furnacePoolInput, itemsInput, spac
             availableFurnaceInstances.push({
                 typeName: f.name, instanceId: `${f.name} (炉次 #${i + 1})`,
                 w: f.width, h: f.height, d: f.depth, max_weight: f.maxWeight,
-                spacing: spacing,
+                spacing: f.actualSpacing != null ? f.actualSpacing : spacing,
                 packedItems: [], totalWeight: 0,
                 /** V2.3: 每个炉膛独立存储 basketType */
                 basketType: f.basketType || 'grid'
@@ -532,6 +532,7 @@ export function solveShelfLayeredMultiFurnace(furnacePoolInput, itemsInput, spac
         furnace.packedItems = result.packedItems;
         furnace.totalWeight = result.totalWeight;
         furnace.shelvesUsed = result.shelvesUsed || [];
+        furnace.trayCornerPostBlockers = result.trayCornerPostBlockers || [];
         if (furnace.packedItems.length > 0) completedFurnaces.push(furnace);
         flattenedItems = result.unpackedItems;
     }
@@ -1055,7 +1056,7 @@ export function solveCenterOfGravityMultiFurnace(furnacePoolInput, itemsInput, s
             availableFurnaceInstances.push({
                 typeName: f.name, instanceId: `${f.name} (炉次 #${i + 1})`,
                 w: f.width, h: f.height, d: f.depth, max_weight: f.maxWeight,
-                spacing: spacing,
+                spacing: f.actualSpacing != null ? f.actualSpacing : spacing,
                 packedItems: [], totalWeight: 0,
                 /** V2.3: 每个炉膛独立存储 basketType */
                 basketType: f.basketType || 'grid'
@@ -1147,6 +1148,68 @@ export function solveCenterOfGravityMultiFurnace(furnacePoolInput, itemsInput, s
  * @param {Map} itemProcessMap
  * @returns {{ packedItems: Array, totalWeight: number, unpackedItems: Array, shelvesUsed: Array }}
  */
+
+// ==================== MATERIAL TRAY CORNER POST CONSTRAINTS (V0.7.35) ====================
+const TRAY_CORNER_POST_CONSTRAINT = {
+    enabled: true,
+    diameter: 16,
+    radius: 8,
+    offset: 22,
+    safetyGap: 8
+};
+
+function isMaterialTrayWithShelf(furnaceConfig) {
+    if (!furnaceConfig) return false;
+    const isTray = furnaceConfig.toolingType === 'material-tray' || furnaceConfig.basketType === 'tray';
+    const enabled = furnaceConfig.params?.trayCornerPosts?.enabled !== false;
+    return isTray && enabled && placementRules.useShelfLayered !== false;
+}
+
+function buildTrayCornerPostBlockers(furnaceConfig) {
+    if (!isMaterialTrayWithShelf(furnaceConfig)) return [];
+
+    const cfg = {
+        ...TRAY_CORNER_POST_CONSTRAINT,
+        ...(furnaceConfig.params?.trayCornerPosts || {})
+    };
+
+    const fw = Number(furnaceConfig.w || furnaceConfig.width || 0);
+    const fd = Number(furnaceConfig.d || furnaceConfig.depth || 0);
+    if (!Number.isFinite(fw) || !Number.isFinite(fd) || fw <= 0 || fd <= 0) return [];
+
+    const rawRadius = Number(cfg.radius || ((cfg.diameter || 16) / 2) || 8);
+    const radius = rawRadius + Number(cfg.safetyGap || 0);
+    const offset = Number(cfg.offset || 22);
+
+    if (!Number.isFinite(radius) || !Number.isFinite(offset)) return [];
+    if (offset <= 0 || offset >= fw || offset >= fd) return [];
+
+    return [
+        { type: 'circle-post', x: offset, z: offset, radius, visualRadius: rawRadius, offset },
+        { type: 'circle-post', x: fw - offset, z: offset, radius, visualRadius: rawRadius, offset },
+        { type: 'circle-post', x: offset, z: fd - offset, radius, visualRadius: rawRadius, offset },
+        { type: 'circle-post', x: fw - offset, z: fd - offset, radius, visualRadius: rawRadius, offset }
+    ];
+}
+
+function rectIntersectsCircle(rect, cx, cz, radius) {
+    const nearestX = Math.max(rect.x, Math.min(cx, rect.x + rect.w));
+    const nearestZ = Math.max(rect.z, Math.min(cz, rect.z + rect.d));
+    const dx = nearestX - cx;
+    const dz = nearestZ - cz;
+    return dx * dx + dz * dz <= radius * radius;
+}
+
+function rectIntersectsAnyBlocker(rect, blockers = []) {
+    if (!Array.isArray(blockers) || blockers.length === 0) return false;
+    return blockers.some(blocker => {
+        if (blocker.type === 'circle-post') {
+            return rectIntersectsCircle(rect, blocker.x, blocker.z, blocker.radius);
+        }
+        return false;
+    });
+}
+
 function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessMap, strategy = 'balanced') {
     const { w: fw, h: fh, d: fd, max_weight, spacing: sp } = furnaceConfig;
     const shelfThickness = placementRules.shelfThickness || 20;
@@ -1160,6 +1223,7 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
     let currentY = 0;
     const unpacked = [];
     const shelvesUsed = [];
+    const trayCornerPostBlockers = buildTrayCornerPostBlockers(furnaceConfig);
 
     const centerX = fw / 2;
     const centerZ = fd / 2;
@@ -2155,6 +2219,12 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
                 }
                 if (obstacleCollision) continue;
 
+                // V0.7.35：料盘搁板四角支撑杆占位区，物料候选位置不得压柱。
+                if (trayCornerPostBlockers.length > 0) {
+                    const candidateRect = { x: cand.x, z: cand.z, w: iw, d: id_ };
+                    if (rectIntersectsAnyBlocker(candidateRect, trayCornerPostBlockers)) continue;
+                }
+
                 // const score = useCG
                 //     ? scoreCGPlacement(cand.x, cand.z, iw, id_, itemWeight, layerItems, currentY)
                 //     : (cand.x + cand.z); // 无重心居中时用左上优先的贪心策略
@@ -2317,7 +2387,14 @@ function solveUnifiedPacking(items, furnaceConfig, itemMaterialMap, itemProcessM
 
     const shelfCount = useShelf ? (shelvesUsed.length + 1) : 1;
 
-    return { packedItems, totalWeight, shelfCount, unpackedItems: unpacked, shelvesUsed };
+    return {
+        packedItems,
+        totalWeight,
+        shelfCount,
+        unpackedItems: unpacked,
+        shelvesUsed,
+        trayCornerPostBlockers
+    };
 }
 
 /**
@@ -2336,7 +2413,7 @@ function solveUnifiedMultiFurnace(furnacePoolInput, itemsInput, spacing, strateg
             availableFurnaceInstances.push({
                 typeName: f.name, instanceId: `${f.name} (炉次 #${i + 1})`,
                 w: f.width, h: f.height, d: f.depth, max_weight: f.maxWeight,
-                spacing: spacing,
+                spacing: f.actualSpacing != null ? f.actualSpacing : spacing,
                 packedItems: [], totalWeight: 0,
                 basketType: f.basketType || 'grid',
                 /** V4.8: 工装类型字段附加 */
@@ -2393,6 +2470,7 @@ function solveUnifiedMultiFurnace(furnacePoolInput, itemsInput, spacing, strateg
         furnace.packedItems = result.packedItems;
         furnace.totalWeight = result.totalWeight;
         furnace.shelvesUsed = result.shelvesUsed || [];
+        furnace.trayCornerPostBlockers = result.trayCornerPostBlockers || [];
         if (furnace.packedItems.length > 0) completedFurnaces.push(furnace);
         flattenedItems = result.unpackedItems;
     }

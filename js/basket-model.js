@@ -37,6 +37,22 @@ export const TOOLING_TO_BASKET = {
     'ring-tooling': 'ringnode'
 };
 
+
+// ==================== MATERIAL TRAY CORNER SUPPORT POSTS (V0.7.35) ====================
+/**
+ * 料盘搁板四角支撑杆默认参数。
+ * 仅在 material-tray 且存在搁板分层时由 three-scene.js 按需渲染。
+ */
+export const TRAY_CORNER_POST_DEFAULTS = {
+    enabled: true,
+    diameter: 16,
+    radius: 8,
+    offset: 22,
+    safetyGap: 8,
+    minHeight: 80,
+    color: 0x334155
+};
+
 // ==================== HONEYCOMB PANEL ====================
 
 /**
@@ -446,6 +462,68 @@ function createHoneycombBasketFrame(w, h, d) {
     group.add(createEdgeBar(0, 0, d, 0, h, d));
 
     group.userData = { isBasketFrame: true, basketType: 'honeycomb' };
+    return group;
+}
+
+
+/**
+ * 创建料盘四角支撑杆 Group。
+ * 坐标系与 createTrayBasketFrame 一致：左下角为 (0,0,0)，宽度沿 X，深度沿 Z，高度沿 Y。
+ * @param {number} w 料盘宽度 X
+ * @param {number} h 料盘高度 Y
+ * @param {number} d 料盘深度 Z
+ * @param {Object} options 支撑杆参数
+ * @returns {THREE.Group}
+ */
+export function createTrayCornerSupportPosts(w, h, d, options = {}) {
+    const cfg = { ...TRAY_CORNER_POST_DEFAULTS, ...(options || {}) };
+    const group = new THREE.Group();
+    group.name = 'trayCornerSupportPosts';
+
+    if (cfg.enabled === false) return group;
+
+    const postRadius = Number(cfg.radius || ((cfg.diameter || 16) / 2) || 8);
+    const offset = Number(cfg.offset || 22);
+    const postHeight = Math.max(Number(cfg.height || h || 0), Number(cfg.minHeight || 80));
+
+    if (!Number.isFinite(w) || !Number.isFinite(d) || w <= 0 || d <= 0) return group;
+    if (offset <= postRadius || offset >= w || offset >= d) return group;
+
+    const material = new THREE.MeshStandardMaterial({
+        color: cfg.color || 0x334155,
+        roughness: 0.42,
+        metalness: 0.78
+    });
+
+    const geometry = new THREE.CylinderGeometry(postRadius, postRadius, postHeight, 16);
+    const positions = [
+        [offset, postHeight / 2, offset],
+        [w - offset, postHeight / 2, offset],
+        [offset, postHeight / 2, d - offset],
+        [w - offset, postHeight / 2, d - offset]
+    ];
+
+    positions.forEach(([x, y, z], index) => {
+        const post = new THREE.Mesh(geometry.clone(), material.clone());
+        post.position.set(x, y, z);
+        post.castShadow = true;
+        post.receiveShadow = true;
+        post.userData = {
+            isTrayCornerSupportPost: true,
+            postIndex: index,
+            postRadius,
+            postOffset: offset
+        };
+        group.add(post);
+    });
+
+    group.userData = {
+        isTrayCornerSupportPostsGroup: true,
+        postRadius,
+        postOffset: offset,
+        postHeight
+    };
+
     return group;
 }
 

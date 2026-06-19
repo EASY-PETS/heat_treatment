@@ -40,7 +40,14 @@ import {
     setMainDirectionalLight,
     clearFurnaceGroups, setFurnaceGroup
 } from './state.js';
-import { createBasketFrame, createShelfMesh, createEmptyTooling, TOOLING_TO_BASKET } from './basket-model.js';
+import {
+    createBasketFrame,
+    createShelfMesh,
+    createEmptyTooling,
+    TOOLING_TO_BASKET,
+    createTrayCornerSupportPosts,
+    TRAY_CORNER_POST_DEFAULTS
+} from './basket-model.js';
 import { createItemMesh, createAnimItemMesh } from './item-models.js';
 
 const COLOR_PALETTE = [
@@ -205,6 +212,38 @@ export function setItemColorMode(mode = 'materialCustomer') {
 
 export function getItemColorMode() {
     return itemColorMode;
+}
+
+
+// ==================== V0.7.22: Camera upright / no-flip orbit controls ====================
+const SAFE_CAMERA_MIN_POLAR = 0.001;
+const SAFE_CAMERA_MAX_POLAR = Math.PI * 0.49;
+
+function configureSafeOrbitControls(ctrl) {
+    if (!ctrl) return;
+    ctrl.enableDamping = true;
+    ctrl.dampingFactor = 0.05;
+    ctrl.enableRotate = true;
+    ctrl.enablePan = true;
+    ctrl.enableZoom = true;
+    // 禁止鼠标把相机翻到工装下方。保留水平旋转，但最多只能到略高于水平线。
+    ctrl.minPolarAngle = SAFE_CAMERA_MIN_POLAR;
+    ctrl.maxPolarAngle = SAFE_CAMERA_MAX_POLAR;
+    ctrl.screenSpacePanning = true;
+    if (ctrl.mouseButtons && THREE?.MOUSE) {
+        ctrl.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+        ctrl.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY;
+        ctrl.mouseButtons.RIGHT = THREE.MOUSE.PAN;
+    }
+    if (ctrl.touches && THREE?.TOUCH) {
+        ctrl.touches.ONE = THREE.TOUCH.ROTATE;
+        ctrl.touches.TWO = THREE.TOUCH.DOLLY_PAN;
+    }
+}
+
+export function refreshSafeOrbitControlLimits() {
+    configureSafeOrbitControls(controls);
+    configureSafeOrbitControls(masterControls);
 }
 
 // ==================== 工装金属材质处理 ====================
@@ -6531,8 +6570,7 @@ export function initThree() {
     setRenderer(newRenderer);
 
     const newControls = new OrbitControls(newCamera, newRenderer.domElement);
-    newControls.enableDamping = true;
-    newControls.dampingFactor = 0.05;
+    configureSafeOrbitControls(newControls);
     setControls(newControls);
 
     /* 光照 */
@@ -6648,8 +6686,7 @@ export function initMasterThree() {
     setMasterRenderer(msRenderer);
 
     const msControls = new OrbitControls(msCamera, msRenderer.domElement);
-    msControls.enableDamping = true;
-    msControls.dampingFactor = 0.05;
+    configureSafeOrbitControls(msControls);
     setMasterControls(msControls);
 
     msScene.add(new THREE.AmbientLight(0xffffff, 0.65));
@@ -7355,6 +7392,41 @@ function drawRingToolingOutline(furnaceGroup, furnace, baseY) {
     }
 }
 
+
+// ==================== MATERIAL TRAY CORNER SUPPORT POSTS (V0.7.35) ====================
+function shouldRenderTrayCornerPosts(furnace) {
+    if (!furnace) return false;
+    const isTray = furnace.toolingType === 'material-tray' || furnace.basketType === 'tray';
+    const hasShelves = Array.isArray(furnace.shelvesUsed) && furnace.shelvesUsed.length > 0;
+    const hasBlockers = Array.isArray(furnace.trayCornerPostBlockers) && furnace.trayCornerPostBlockers.length > 0;
+    const enabled = furnace.params?.trayCornerPosts?.enabled !== false;
+    return isTray && (hasShelves || hasBlockers) && enabled;
+}
+
+function addTrayCornerSupportPostsToGroup(furnaceGroup, furnace, baseY, furnaceIndex) {
+    if (!shouldRenderTrayCornerPosts(furnace)) return null;
+    const fw = Number(furnace.w || 0);
+    const fh = Number(furnace.h || 0);
+    const fd = Number(furnace.d || 0);
+    if (fw <= 0 || fh <= 0 || fd <= 0) return null;
+
+    const postCfg = {
+        ...TRAY_CORNER_POST_DEFAULTS,
+        ...(furnace.params?.trayCornerPosts || {}),
+        height: fh
+    };
+
+    const posts = createTrayCornerSupportPosts(fw, fh, fd, postCfg);
+    posts.position.set(-fw / 2, baseY, -fd / 2);
+    posts.userData = {
+        ...(posts.userData || {}),
+        furnaceIndex,
+        isTrayCornerSupportPostsRuntime: true
+    };
+    furnaceGroup.add(posts);
+    return posts;
+}
+
 // ==================== TASK 1: 多炉膛原点居中渲染 ====================
 
 /**
@@ -7533,6 +7605,9 @@ export function buildFurnaceGroup(furnace, index, filterMaterialName) {
     if ((placementRules.useShelfLayered || hasSavedShelves) && furnace.packedItems.length > 0) {
         renderShelvesForFurnace(furnace, furnaceGroup, baseY, layerGroups);
     }
+
+    // V0.7.35：料盘搁板四角支撑杆。显示层与算法约束保持一致。
+    addTrayCornerSupportPostsToGroup(furnaceGroup, furnace, baseY, index);
 
     furnaceGroup.visible = false; // 默认隐藏，由 renderSingleFurnace 控制显示
     return furnaceGroup;
@@ -8608,6 +8683,7 @@ export function setTightFitCamera(direction, marginRatio = 0.18) {
     // 7. 根据模型大小设置合理的 Orbit 距离范围
     controls.minDistance = Math.max(sphere.radius * 0.15, 10);
     controls.maxDistance = Math.max(sphere.radius * 8, 3000);
+    configureSafeOrbitControls(controls);
 
     camera.near = Math.max(distance / 1000, 0.1);
     camera.far = Math.max(distance * 10, 10000);
