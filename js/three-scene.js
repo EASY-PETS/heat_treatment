@@ -54,9 +54,13 @@ const COLOR_PALETTE = [
 
 // ==================== 物料材质固定颜色映射 ====================
 const MATERIAL_COLOR_MAP = {
-    'Cr12': 0x1E3A8A,   // 深蓝
-    'H13': 0x4B4B4B,    // 深灰
-    'MOV': 0xFFBF00      // 琥珀色
+    'Cr12': 0x1E3A8A,      // 深蓝
+    'H13': 0x4B4B4B,       // 深灰
+    'MOV': 0xFFBF00,       // 琥珀色
+    '20Cr': 0x0E7490,      // 青蓝
+    '20CrMnTi': 0x2563EB,  // 工业蓝
+    '40Cr': 0x16A34A,      // 绿色
+    '45#': 0x9333EA        // 紫色
 };
 
 /**
@@ -71,6 +75,136 @@ function getFixedColorByMaterial(material) {
         key.toLowerCase() === material.toLowerCase()
     );
     return matchedKey ? MATERIAL_COLOR_MAP[matchedKey] : null;
+}
+
+
+// ==================== V0.7.10: 工件颜色模式 ====================
+// 默认模式：主体颜色表达材质，顶部/边框辅助标识表达客户/批次。
+let itemColorMode = 'materialCustomer'; // materialCustomer | material | customer | process
+
+const CUSTOMER_MARKER_PALETTE = [
+    0xef4444, 0x22c55e, 0xf59e0b, 0x8b5cf6, 0x06b6d4,
+    0xec4899, 0x84cc16, 0xf97316, 0x14b8a6, 0x64748b
+];
+
+const PROCESS_COLOR_MAP = {
+    '真空淬火': 0x0ea5e9,
+    '渗碳淬火': 0xf97316,
+    '渗碳抛丸': 0x2563eb,
+    '碳氮共渗': 0x7c3aed,
+    '氮化': 0x16a34a,
+    '氰化': 0xdc2626
+};
+
+function hashTextToIndex(text, modulo) {
+    const raw = String(text || '').trim();
+    if (!raw || !modulo) return 0;
+    let hash = 0;
+    for (let i = 0; i < raw.length; i++) {
+        hash = ((hash << 5) - hash) + raw.charCodeAt(i);
+        hash |= 0;
+    }
+    return Math.abs(hash) % modulo;
+}
+
+function getHashColor(text, palette = CUSTOMER_MARKER_PALETTE) {
+    return palette[hashTextToIndex(text || 'default', palette.length)] || 0x64748b;
+}
+
+function getCustomerMarkerColor(item) {
+    return getHashColor(item?.customer || item?.itemCode || item?.name || item?.id || 'batch');
+}
+
+function getProcessColor(process) {
+    const raw = String(process || '').trim();
+    const key = Object.keys(PROCESS_COLOR_MAP).find(k => raw.includes(k) || k.includes(raw));
+    return key ? PROCESS_COLOR_MAP[key] : getHashColor(raw || 'process');
+}
+
+function getItemBaseColor(item) {
+    if (itemColorMode === 'customer') return getCustomerMarkerColor(item);
+    if (itemColorMode === 'process') return getProcessColor(item?.process);
+    const materialColor = getFixedColorByMaterial(item?.material);
+    return materialColor != null ? materialColor : (item?.color || getHashColor(item?.material || item?.name || 'material'));
+}
+
+function shouldShowBatchMarker() {
+    return itemColorMode === 'materialCustomer' || itemColorMode === 'material' || itemColorMode === 'process';
+}
+
+function applyItemDisplayColor(object3d, item) {
+    const color = getItemBaseColor(item);
+    if (!object3d || color == null) return;
+    object3d.traverse(obj => {
+        if (!obj.isMesh || !obj.material) return;
+        const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+        materials.forEach(mat => {
+            if (mat && mat.color) {
+                mat.color.setHex(typeof color === 'number' ? color : new THREE.Color(color).getHex());
+                mat.needsUpdate = true;
+            }
+        });
+    });
+}
+
+function createBatchMarkerForItem(item, baseY, sourceObject = null) {
+    if (!item || !shouldShowBatchMarker()) return null;
+    const markerColor = getCustomerMarkerColor(item);
+    const w = Math.max(1, Number(item.w || item.dim1 || 1));
+    const d = Math.max(1, Number(item.d || item.dim2 || 1));
+    const isRound = String(item.shape || '').toLowerCase().includes('cyl') || Math.abs(w - d) < 1;
+    const mat = new THREE.MeshBasicMaterial({
+        color: markerColor,
+        transparent: true,
+        opacity: 0.94,
+        depthWrite: false,
+        depthTest: true
+    });
+    let marker;
+    if (isRound) {
+        const radius = Math.max(6, Math.min(w, d) * 0.13);
+        marker = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 4, 18), mat);
+    } else {
+        const size = Math.max(8, Math.min(w, d, 46) * 0.2);
+        marker = new THREE.Mesh(new THREE.BoxGeometry(size, 4, size), mat);
+    }
+
+    // V0.7.11：不要再用 item.x/y/z 手工猜测标识位置。
+    // createItemMesh 内部会根据形状、旋转、坐标系调整 mesh 的真实位置；
+    // 直接从 mesh 的包围盒取中心和顶部，才能保证客户/批次色点贴在对应工件上。
+    if (sourceObject) {
+        const box = new THREE.Box3().setFromObject(sourceObject);
+        if (!box.isEmpty()) {
+            const center = new THREE.Vector3();
+            box.getCenter(center);
+            marker.position.set(center.x, box.max.y + 4, center.z);
+        }
+    } else {
+        const h = Math.max(1, Number(item.h || item.dim3 || 1));
+        const x = Number(item.x || 0);
+        const y = Number(item.y || 0);
+        const z = Number(item.z || 0);
+        marker.position.set(x, baseY + y + h + 4, z);
+    }
+
+    marker.renderOrder = 9;
+    marker.userData = {
+        isBatchMarker: true,
+        batchForItemId: item.id || item.itemId || '',
+        itemName: item.name || '',
+        customer: item.customer || '',
+        markerColor
+    };
+    return marker;
+}
+
+export function setItemColorMode(mode = 'materialCustomer') {
+    const allowed = new Set(['materialCustomer', 'material', 'customer', 'process']);
+    itemColorMode = allowed.has(mode) ? mode : 'materialCustomer';
+}
+
+export function getItemColorMode() {
+    return itemColorMode;
 }
 
 // ==================== 工装金属材质处理 ====================
@@ -5310,8 +5444,7 @@ export function selectRadiationExposureItemAtClientPoint(clientX, clientY) {
 }
 
 
-
-// ==================== PLACEMENT EDIT MODE V1 ====================
+// ==================== Placement Edit API restore (V0.7.10 compile fix) ====================
 let placementEditRuntime = {
     active: false,
     selectedItemId: null,
@@ -5387,11 +5520,40 @@ function setPlacementEditShelfVisibilityForCurrentGroup() {
 function applyPlacementEditLayerVisibility() {
 
     const layerGroups = getPlacementEditLayerGroups();
-    if (!layerGroups || typeof layerGroups.forEach !== 'function') return;
+    const group = furnaceGroups.get(currentFurnaceIndex);
+
+    function setItemObjectVisibility(showAll, activeLayer = null) {
+        if (!group) return;
+        group.traverse(obj => {
+            if (!obj || !obj.userData) return;
+            if (obj.userData.isShelfMesh) return;
+            const itemId = obj.userData.itemId || obj.userData.itemID || obj.userData.item?.id || obj.userData.itemData?.id;
+            if (!itemId) return;
+            if (showAll || activeLayer == null) {
+                obj.visible = true;
+                return;
+            }
+            const itemLayer = getPlacementEditObjectLayer(obj) || getPlacementEditItemLayer(itemId);
+            obj.visible = Number(itemLayer) === Number(activeLayer);
+        });
+    }
+
+    if (!layerGroups || typeof layerGroups.forEach !== 'function') {
+        if (!placementEditRuntime.active || placementEditRuntime.showAllLayers) {
+            setItemObjectVisibility(true);
+            return;
+        }
+        const activeLayer = normalizePlacementEditActiveLayer();
+        placementEditRuntime.activeLayer = activeLayer;
+        setItemObjectVisibility(false, activeLayer);
+        return;
+    }
+
     if (!placementEditRuntime.active || placementEditRuntime.showAllLayers) {
         layerGroups.forEach(layerGroup => {
             if (layerGroup && layerGroup.userData && layerGroup.userData.isLayerGroup) layerGroup.visible = true;
         });
+        setItemObjectVisibility(true);
         return;
     }
     const activeLayer = normalizePlacementEditActiveLayer();
@@ -5400,6 +5562,11 @@ function applyPlacementEditLayerVisibility() {
         if (!layerGroup || !layerGroup.userData || !layerGroup.userData.isLayerGroup) return;
         layerGroup.visible = Number(layerIndex) === Number(activeLayer);
     });
+
+    // V0.7.18：多层料框里部分物件/客户标识可能不在 layerGroup 下，
+    // 仅切换 layerGroup.visible 会导致“第 2 层仅本层时第 1 层仍显示”。
+    // 因此额外按 itemId 的真实层号逐个隐藏/显示。
+    setItemObjectVisibility(false, activeLayer);
 }
 
 function getPlacementEditLayerStateInternal() {
@@ -5745,7 +5912,7 @@ export function renderVacuumQuenchThermalSimulation(progress = 0.12, options = {
 export function playVacuumQuenchThermalSimulation(options = {}) {
     const furnace = getCurrentThermalFurnace();
     if (!furnace) return null;
-    const startProgress = clamp01(options.startProgress != null ? options.startProgress : 0.03);
+    const startProgress = clamp01(options.startProgress != null ? options.startProgress : 0);
     const initialMetrics = renderVacuumQuenchThermalSimulation(startProgress);
     thermalSimRuntime.isPlaying = true;
     thermalSimRuntime.paused = false;
@@ -5797,7 +5964,7 @@ export function setThermalHeatmapDisplayMode(mode = 'balanced') {
     if (!furnace || thermalSimRuntime.activeMode !== 'thermal') {
         return thermalSimRuntime.metrics || null;
     }
-    return renderVacuumQuenchThermalSimulation(thermalSimRuntime.progress || 0.18, {
+    return renderVacuumQuenchThermalSimulation(thermalSimRuntime.progress || 0, {
         heatmapView: thermalSimRuntime.selectedThermalHeatmapView || 'middle',
         heatmapDisplayMode: thermalSimRuntime.selectedThermalDisplayMode
     });
@@ -5809,7 +5976,7 @@ export function setThermalHeatmapView(viewKey = 'middle') {
     if (!furnace || thermalSimRuntime.activeMode !== 'thermal') {
         return thermalSimRuntime.metrics || null;
     }
-    return renderVacuumQuenchThermalSimulation(thermalSimRuntime.progress || 0.18, {
+    return renderVacuumQuenchThermalSimulation(thermalSimRuntime.progress || 0, {
         heatmapView: thermalSimRuntime.selectedThermalHeatmapView
     });
 }
@@ -5823,7 +5990,7 @@ export function setThermalHeatmapVerticalAxis(axis = 'z') {
     if (!furnace || thermalSimRuntime.activeMode !== 'thermal') {
         return thermalSimRuntime.metrics || null;
     }
-    return renderVacuumQuenchThermalSimulation(thermalSimRuntime.progress || 0.18, {
+    return renderVacuumQuenchThermalSimulation(thermalSimRuntime.progress || 0, {
         heatmapView: 'vertical',
         heatmapVerticalAxis: thermalSimRuntime.selectedThermalVerticalAxis,
         heatmapSectionOffset: thermalSimRuntime.selectedThermalSectionOffset
@@ -5840,7 +6007,7 @@ export function setThermalHeatmapSectionOffset(offset = 0) {
     if (!furnace || thermalSimRuntime.activeMode !== 'thermal') {
         return thermalSimRuntime.metrics || null;
     }
-    return renderVacuumQuenchThermalSimulation(thermalSimRuntime.progress || 0.18, {
+    return renderVacuumQuenchThermalSimulation(thermalSimRuntime.progress || 0, {
         heatmapView: 'vertical',
         heatmapVerticalAxis: thermalSimRuntime.selectedThermalVerticalAxis || 'z',
         heatmapSectionOffset: thermalSimRuntime.selectedThermalSectionOffset
@@ -7318,17 +7485,8 @@ export function buildFurnaceGroup(furnace, index, filterMaterialName) {
         const isFiltered = filterMaterialName && item.material !== filterMaterialName;
         const mesh = createItemMesh(item, furnace, baseY, isFiltered);
 
-        // 【V3.0】按材质固定颜色（覆盖原有动态颜色）
-        const fixedColor = getFixedColorByMaterial(item.material);
-        if (fixedColor !== null && mesh.material) {
-            if (Array.isArray(mesh.material)) {
-                mesh.material.forEach(mat => {
-                    if (mat.color) mat.color.setHex(fixedColor);
-                });
-            } else if (mesh.material.color) {
-                mesh.material.color.setHex(fixedColor);
-            }
-        }
+        // V0.7.10：颜色模式优化。默认保留“材质主色”，并用客户/批次辅助标识区分相似工件。
+        applyItemDisplayColor(mesh, item);
 
         const itemLayer = itemLayerMap.get(item.id) || 1;
         // 补充 userData 中 createItemMesh 未设置的字段。
@@ -7355,9 +7513,13 @@ export function buildFurnaceGroup(furnace, index, filterMaterialName) {
         const targetLayerGroup = layerGroups.get(itemLayer);
         if (targetLayerGroup) {
             targetLayerGroup.add(mesh);
+            const marker = createBatchMarkerForItem(item, baseY, mesh);
+            if (marker) targetLayerGroup.add(marker);
         } else {
             // 回退：如果 LayerGroup 不存在（不应发生），直接加 furnaceGroup
             furnaceGroup.add(mesh);
+            const marker = createBatchMarkerForItem(item, baseY, mesh);
+            if (marker) furnaceGroup.add(marker);
         }
     });
 

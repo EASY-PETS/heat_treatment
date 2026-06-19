@@ -273,9 +273,9 @@
                 <div class="panel-header-actions">
                     <span class="panel-expand-btn-left" id="panel-expand-btn-left" title="展开面板" style="display:none;">▶</span>
                     <button class="btn-sm btn-toggle-panel" id="btn-toggle-left-panel" title="折叠/展开面板">◀</button>
-                    <button class="btn-sm" id="btn-add-furnace" title="按当前页面执行主要操作">增加工装</button>
+                    <button class="btn-sm" id="btn-add-furnace" title="按当前页面执行主要操作" style="display:none;">增加工装</button>
                     <button class="btn-sm left-action-import" id="btn-import-excel" title="导入Excel工件" style="display:none;">导入</button>
-                    <button class="btn-sm btn-reset-danger" id="btn-clear-all-furnaces" title="按当前页面清空数据">清空</button>
+                    <button class="btn-sm btn-reset-danger" id="btn-clear-all-furnaces" title="按当前页面清空数据" style="display:none;">清空</button>
                 </div>
             </div>
 
@@ -288,12 +288,23 @@
             </div>
 
             <div class="left-tab-pane active" id="left-tab-furnace">
-                <div class="left-tab-intro">
-                    <strong>装载工装 = 承载工件的一级载具</strong>
-                    <span>当前阶段不建真实炉膛，只用工装尺寸作为装载空间，测试不同数量、不同类型料框/料盘/网篮的装载效果。</span>
+                <div class="left-tab-intro furnace-resource-intro">
+                    <strong>装载工装 = 可用工装资源 + 本次工装组合</strong>
+                    <span>V0.7.1 后，优先由「合炉设计」推荐工装；这里用于查看当前采用的工装组合，也可以人工覆盖数量和类型。</span>
                 </div>
-                <div class="sort-bar">
-                    <span style="font-size:10px;color:#666;margin-right:2px;"></span>
+                <div class="furnace-current-plan-card" id="furnace-current-tooling-card">
+                    <div class="fcp-empty">
+                        <strong>暂无本次工装组合</strong>
+                        <span>请先在「合炉设计」中选择合炉组并点击「推荐工装」，也可以手动添加工装。</span>
+                    </div>
+                </div>
+                <div class="furnace-local-actions">
+                    <button class="hm-mini-btn primary" id="btn-furnace-add-inline" type="button">添加工装</button>
+                    <button class="hm-mini-btn" id="btn-furnace-clear-use-inline" type="button">清空本次使用</button>
+                    <button class="hm-mini-btn" id="btn-furnace-restore-default-inline" type="button">恢复样板工装</button>
+                </div>
+                <div class="sort-bar compact-sort-bar">
+                    <span style="font-size:10px;color:#666;margin-right:2px;">工装库</span>
                     <button class="sort-btn" id="sort-name" data-field="name">名称</button>
                     <button class="sort-btn" id="sort-volume" data-field="volume">容积</button>
                     <button class="sort-btn" id="sort-weight" data-field="weight">承重</button>
@@ -326,8 +337,29 @@
 
             <div class="left-tab-pane" id="left-tab-material">
                 <div class="left-tab-intro">
-                    <strong>工件详情</strong>
-                    <span>管理待热处理产品 / 模具的尺寸、数量、重量、材质、工艺、硬度、交期与 CAD 图片。</span>
+                    <strong>工件详情 = 生产任务数据池</strong>
+                    <span>先导入真实生产任务 Excel，在这里完成字段校验、异常补全和物料台账管理；合炉设计会从这里读取有效物料。</span>
+                </div>
+                <div class="material-task-status" id="material-task-status">
+                    <div class="mts-head">
+                        <div>
+                            <strong>生产任务数据状态</strong>
+                            <span>导入 Excel 后自动识别材质、工艺、硬度、渗层与重量。</span>
+                        </div>
+                        <div class="mts-actions">
+                            <button class="hm-mini-btn primary" id="btn-material-import-inline" type="button">导入 Excel</button>
+                            <button class="hm-mini-btn" id="btn-material-clear-inline" type="button">清空任务</button>
+                            <button class="hm-mini-btn" id="btn-material-check-inline" type="button">数据校验</button>
+                            <button class="hm-mini-btn ghost" id="btn-material-load-sample-inline" type="button">载入示例</button>
+                        </div>
+                    </div>
+                    <div class="mts-grid" id="material-task-status-grid">
+                        <div><span>全部</span><strong>0</strong></div>
+                        <div><span>有效</span><strong>0</strong></div>
+                        <div><span>待确认</span><strong>0</strong></div>
+                        <div><span>异常</span><strong>0</strong></div>
+                    </div>
+                    <div class="mts-note" id="material-task-status-note">暂无生产任务。请点击“导入 Excel”或手动增加工件。</div>
                 </div>
                 <div class="material-filter-strip" aria-label="工件筛选">
                     <!-- 材质筛选 -->
@@ -367,33 +399,39 @@
                     </div>
                 </div>
             </div>
-
             <div class="left-tab-pane" id="left-tab-merge">
                 <div class="left-tab-intro heat-merge-intro">
-                    <strong>合炉设计 V0.5 Mock</strong>
-                    <span>基于测试用例二数据，按材质、工艺、硬度、渗层和历史曲线编号做合炉分组。当前版本用于验证交互与客户理解，不做最终硬度预测。</span>
+                    <strong>合炉设计 = 基于工件详情的工艺分组</strong>
+                    <span>系统从“工件详情”的真实生产任务池读取物料，按材质、工艺、硬度、渗层和曲线兼容性自动分组；生成方案时只使用当前锁定的合炉组。</span>
                 </div>
 
                 <div class="heat-merge-toolbar">
+                    <div class="hm-data-source-card">
+                        <div>
+                            <strong>数据来源：工件详情</strong>
+                            <span id="heat-merge-source-text">暂无物料，请先在工件详情导入生产任务。</span>
+                        </div>
+                    </div>
+
                     <div class="hm-strategy-group" aria-label="合炉策略">
                         <button class="hm-strategy-btn active" data-merge-strategy="quality" type="button">质量优先</button>
                         <button class="hm-strategy-btn" data-merge-strategy="delivery" type="button">交付优先</button>
                         <button class="hm-strategy-btn" data-merge-strategy="cost" type="button">成本优先</button>
                     </div>
-                    <div class="hm-toolbar-actions">
-                        <button class="hm-mini-btn primary" id="btn-load-merge-mock" type="button">载入测试用例二</button>
-                        <button class="hm-mini-btn" id="btn-refresh-merge-groups" type="button">重新分组</button>
-                        <button class="hm-mini-btn" id="btn-show-all-merge-materials" type="button">全部物料</button>
+
+                    <div class="hm-toolbar-actions hm-toolbar-actions-v071">
+                        <button class="hm-mini-btn primary" id="btn-sync-merge-from-materials" type="button">自动合炉分组</button>
+                        <button class="hm-mini-btn" id="btn-show-all-merge-materials" type="button">查看全部物料</button>
+                        <button class="hm-mini-btn" id="btn-show-invalid-merge-materials" type="button">查看异常物料</button>
                     </div>
                 </div>
 
-                <div id="heat-merge-summary" class="heat-merge-summary"></div>
-                <div id="heat-merge-groups" class="heat-merge-groups"></div>
+                <div class="heat-merge-summary" id="heat-merge-summary"></div>
+                <div class="heat-merge-groups" id="heat-merge-groups"></div>
                 <div class="heat-merge-footer-note">
-                    V0.5 只做“历史曲线匹配 + 合炉可行性提示”。工艺员仍需确认保温补偿和最终生产工艺。
+                    V0.7.1 使用规则分组 + 工装推荐，不预测最终硬度，也不自动改工艺曲线；异常数据请返回“工件详情”补全后重新分组。
                 </div>
             </div>
-
             <div class="left-generate-action left-generate-bottom">
                 <button class="btn btn-generate left-generate-btn" id="btn-generate-plan">生成方案</button>
                 <div class="left-generate-hint">配置工装与工件后，生成装炉方案</div>
