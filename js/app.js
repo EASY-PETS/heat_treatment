@@ -7597,7 +7597,9 @@ function rememberFeishuWritebackRecord(writebackKey, result, payload) {
         planName: payload?.planName || '',
         planRecordId: result?.createdPlan?.record_id || result?.createdPlan?.id || result?.existingPlan?.record_id || '',
         updatedTaskCount: result?.updatedTaskCount || 0,
-        duplicateSkipped: !!result?.duplicateSkipped
+        duplicateSkipped: !!result?.duplicateSkipped,
+        planLink: payload?.planLink || '',
+        pdfLink: payload?.pdfLink || ''
     };
     writeFeishuWritebackRegistry(registry);
 }
@@ -7649,6 +7651,53 @@ function collectFeishuSourceInfoFromCurrentPlan() {
     };
 }
 
+
+function getCurrentSystemPlanLink(writebackKey = '') {
+    try {
+        const url = new URL(window.location.href);
+        url.hash = '';
+        if (writebackKey) url.searchParams.set('planId', writebackKey);
+        const clientId = getFeishuClientId();
+        if (clientId) url.searchParams.set('clientId', clientId);
+        return url.toString();
+    } catch (_) {
+        const base = `${window.location.origin || ''}${window.location.pathname || '/furnace.html'}`;
+        return writebackKey ? `${base}?planId=${encodeURIComponent(writebackKey)}` : base;
+    }
+}
+
+function getCurrentPdfLinkForFeishu(writebackKey = '') {
+    const explicit = String(window.FEISHU_LAST_PDF_URL || localStorage.getItem('feishuLastPdfUrl') || '').trim();
+    if (/^https?:\/\//i.test(explicit)) return explicit;
+
+    const base = String(window.FEISHU_PDF_BASE_URL || localStorage.getItem('feishuPdfBaseUrl') || '').trim().replace(/\/$/, '');
+    if (/^https?:\/\//i.test(base) && writebackKey) {
+        return `${base}/${encodeURIComponent(writebackKey)}.pdf`;
+    }
+
+    return getFeishuUiText('本地导出，待上传云端', 'Local export, pending cloud upload');
+}
+
+function buildFeishuPlanSummaryText({ planName, totals, sourceInfo, toolingNames, customer, processGroup }) {
+    const tasks = (sourceInfo.taskIds || []).join(', ') || '-';
+    const toolings = (toolingNames || []).join(', ') || '-';
+    const weightRate = Number.isFinite(totals.weightRate) ? `${totals.weightRate.toFixed(1)}%` : '-';
+    const spaceRate = Number.isFinite(totals.avgSpace) ? `${totals.avgSpace.toFixed(1)}%` : '-';
+    return [
+        `方案：${planName || '-'}`,
+        `任务：${tasks}`,
+        `客户：${customer || '-'}`,
+        `工艺：${processGroup || '-'}`,
+        `工装：${toolings}`,
+        `炉次数：${totals.furnaceCount || 0}`,
+        `已装工件：${totals.itemCount || 0}`,
+        `未装工件：${totals.unpackedCount || 0}`,
+        `装载重量：${Number(totals.totalWeight || 0).toFixed(1)}kg`,
+        `重量利用率：${weightRate}`,
+        `空间利用率：${spaceRate}`
+    ].join('；');
+}
+
 function buildCurrentPlanFeishuPayload() {
     const furnaces = Array.isArray(globalFurnacesResult) ? globalFurnacesResult : [];
     if (!furnaces.length) return null;
@@ -7665,7 +7714,7 @@ function buildCurrentPlanFeishuPayload() {
     let planJson = '';
     try {
         planJson = JSON.stringify({
-            version: '0.8.1.1',
+            version: '0.8.4',
             source: 'ai-furnace-loading-agent',
             createdAt: new Date().toISOString(),
             planName,
@@ -7698,6 +7747,20 @@ function buildCurrentPlanFeishuPayload() {
         remark: `由 AI热处理装炉智能体写回；工件 ${totals.itemCount} 件，未装 ${totals.unpackedCount} 件。`
     };
     payload.writebackKey = buildFeishuWritebackKey(payload);
+    payload.generatedAt = new Date().toISOString();
+    payload.generationStatus = '已生成';
+    payload.planLink = getCurrentSystemPlanLink(payload.writebackKey);
+    payload.pdfLink = getCurrentPdfLinkForFeishu(payload.writebackKey);
+    payload.pdfStatus = /^https?:\/\//i.test(payload.pdfLink) ? '已生成链接' : '本地导出，待上传';
+    payload.notifyBot = true;
+    payload.planSummary = buildFeishuPlanSummaryText({
+        planName,
+        totals,
+        sourceInfo,
+        toolingNames,
+        customer,
+        processGroup
+    });
     return payload;
 }
 
@@ -7763,9 +7826,15 @@ async function syncCurrentPlanToFeishuAfterLibrarySave(triggerButton = null) {
         const failText = result.failedTaskCount
             ? getFeishuUiText(`，${result.failedTaskCount} 条任务状态更新失败`, `, ${result.failedTaskCount} task updates failed`)
             : '';
+        const linkText = getFeishuUiText('；方案/PDF链接字段已按表结构尝试写入', '; plan/PDF link fields were written when matching fields exist');
+        const notifyText = result.notification?.ok
+            ? getFeishuUiText('；机器人已通知本人', '; bot notification sent to you')
+            : (result.notification && !result.notification.skipped && result.notification.error
+                ? getFeishuUiText('；机器人通知失败，但不影响方案写回', '; bot notification failed, but plan writeback is unaffected')
+                : '');
         showCapacityFeedback(result.failedTaskCount ? 'warning' : 'success', getFeishuUiText(
-            `方案已保存到本地方案库，并写回飞书${planRecordId ? `（${planRecordId}）` : ''}${duplicateText}；已更新 ${result.updatedTaskCount || 0} 条任务状态${failText}。`,
-            `Plan saved locally and synced to Feishu${planRecordId ? ` (${planRecordId})` : ''}${duplicateText}; updated ${result.updatedTaskCount || 0} task statuses${failText}.`
+            `方案已保存到本地方案库，并写回飞书${planRecordId ? `（${planRecordId}）` : ''}${duplicateText}；已更新 ${result.updatedTaskCount || 0} 条任务状态${failText}${linkText}${notifyText}。`,
+            `Plan saved locally and synced to Feishu${planRecordId ? ` (${planRecordId})` : ''}${duplicateText}; updated ${result.updatedTaskCount || 0} task statuses${failText}${linkText}${notifyText}.`
         ));
         return result;
     } catch (err) {
