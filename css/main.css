@@ -11743,3 +11743,102 @@ html[data-ui-theme="dark"] #pdf-select-overlay,
 html[data-ui-theme="dark"] #rules-overlay {
     background: rgba(2, 6, 23, 0.72) !important;
 }
+
+
+/* ==================== V0.8.0.1 SAFE FIX: Feishu sync button, keep V0.7.34 styles ==================== */
+.material-feishu-sync-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    padding: 0 12px 10px;
+    margin-top: -2px;
+}
+.material-feishu-sync-row .hm-mini-btn,
+.feishu-sync-btn {
+    min-height: 34px;
+    border-radius: 10px;
+    font-weight: 800;
+    letter-spacing: .01em;
+}
+.feishu-sync-btn {
+    background: linear-gradient(135deg, #2563eb, #0ea5e9) !important;
+    color: #fff !important;
+    border-color: rgba(37, 99, 235, .35) !important;
+    box-shadow: 0 10px 22px rgba(37, 99, 235, .18);
+}
+.feishu-sync-btn:hover {
+    filter: brightness(1.05);
+    transform: translateY(-1px);
+}
+.feishu-sync-btn.is-loading,
+.feishu-sync-btn:disabled {
+    opacity: .72;
+    cursor: wait;
+    transform: none;
+}
+body[data-theme="dark"] .material-feishu-sync-row {
+    background: transparent;
+}
+body[data-theme="dark"] .material-feishu-sync-row .hm-mini-btn:not(.feishu-sync-btn) {
+    background: #111827 !important;
+    color: #e5e7eb !important;
+    border-color: rgba(148, 163, 184, .22) !important;
+}
+@media (max-width: 1180px) {
+    .material-feishu-sync-row {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ==================== V0.8.0.2 Feishu source binding badges ==================== */
+.source-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 18px;
+    padding: 0 7px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1;
+    vertical-align: middle;
+    margin-right: 6px;
+    white-space: nowrap;
+}
+.source-badge.feishu {
+    color: #14532d;
+    background: #dcfce7;
+    border: 1px solid #86efac;
+}
+.item-meta-token {
+    display: inline-flex;
+    align-items: center;
+    margin-right: 8px;
+    white-space: nowrap;
+}
+.material-card[data-source="feishu"] {
+    position: relative;
+}
+.material-card[data-source="feishu"]::after {
+    content: "飞书";
+    position: absolute;
+    top: 8px;
+    right: 28px;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: #dcfce7;
+    color: #166534;
+    border: 1px solid #86efac;
+    font-size: 9px;
+    font-weight: 800;
+    pointer-events: none;
+}
+.import-table .source-badge {
+    margin-right: 0;
+}
+body[data-theme="dark"] .source-badge.feishu,
+body[data-theme="dark"] .material-card[data-source="feishu"]::after {
+    color: #bbf7d0;
+    background: rgba(22, 163, 74, 0.16);
+    border-color: rgba(134, 239, 172, 0.38);
+}

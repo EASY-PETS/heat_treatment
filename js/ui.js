@@ -93,7 +93,12 @@ export function getMaterialDataFromCard(card) {
     const showName = card.getAttribute('data-show-name') || '';
     const customer = card.getAttribute('data-customer') || '';
     const itemCode = card.getAttribute('data-item-code') || '';
-    return { mid, name, shape, count, dim1, dim2, dim3, totalWeight, color, material, process, orderDate, deliveryDate, remark, hardness, cadImage, showName, customer, itemCode };
+    const source = card.getAttribute('data-source') || '';
+    const sourceRecordId = card.getAttribute('data-source-record-id') || '';
+    const taskId = card.getAttribute('data-task-id') || '';
+    const sourceStatus = card.getAttribute('data-source-status') || '';
+    const sourceClientId = card.getAttribute('data-source-client-id') || '';
+    return { mid, name, shape, count, dim1, dim2, dim3, totalWeight, color, material, process, orderDate, deliveryDate, remark, hardness, cadImage, showName, customer, itemCode, source, sourceRecordId, taskId, sourceStatus, sourceClientId };
 }
 
 // ==================== FURNACE CARD CREATION ====================
@@ -472,10 +477,16 @@ export function createMaterialCard(name, shape, count, dim1, dim2, dim3, totalWe
     const dimLabel = shape === 'cylinder' ? '⌀' + dim1 + '×H' + dim3 : dim1 + '×' + dim2 + '×' + dim3;
     const card = document.createElement('div');
     card.className = 'material-card'; card.id = cardId; card.setAttribute('data-mid', newMC); card.style.borderLeftColor = color;
-    if (extraData) { if (extraData.material) card.setAttribute('data-material', extraData.material); if (extraData.process) card.setAttribute('data-process', extraData.process); if (extraData.orderDate) card.setAttribute('data-order-date', extraData.orderDate); if (extraData.deliveryDate) card.setAttribute('data-delivery-date', extraData.deliveryDate); if (extraData.remark) card.setAttribute('data-remark', extraData.remark); if (extraData.hardness) card.setAttribute('data-hardness', extraData.hardness); if (extraData.cadImage) card.setAttribute('data-cad-image', extraData.cadImage); if (extraData.showName) card.setAttribute('data-show-name', extraData.showName); if (extraData.customer) card.setAttribute('data-customer', extraData.customer); if (extraData.itemCode) card.setAttribute('data-item-code', extraData.itemCode); }
+    if (extraData) { if (extraData.material) card.setAttribute('data-material', extraData.material); if (extraData.process) card.setAttribute('data-process', extraData.process); if (extraData.orderDate) card.setAttribute('data-order-date', extraData.orderDate); if (extraData.deliveryDate) card.setAttribute('data-delivery-date', extraData.deliveryDate); if (extraData.remark) card.setAttribute('data-remark', extraData.remark); if (extraData.hardness) card.setAttribute('data-hardness', extraData.hardness); if (extraData.cadImage) card.setAttribute('data-cad-image', extraData.cadImage); if (extraData.showName) card.setAttribute('data-show-name', extraData.showName); if (extraData.customer) card.setAttribute('data-customer', extraData.customer); if (extraData.itemCode) card.setAttribute('data-item-code', extraData.itemCode); if (extraData.source) card.setAttribute('data-source', extraData.source); if (extraData.sourceRecordId) card.setAttribute('data-source-record-id', extraData.sourceRecordId); if (extraData.recordId && !extraData.sourceRecordId) card.setAttribute('data-source-record-id', extraData.recordId); if (extraData.taskId) card.setAttribute('data-task-id', extraData.taskId); if (extraData.sourceStatus) card.setAttribute('data-source-status', extraData.sourceStatus); if (extraData.status && !extraData.sourceStatus) card.setAttribute('data-source-status', extraData.status); if (extraData.sourceClientId) card.setAttribute('data-source-client-id', extraData.sourceClientId); }
     const itemCode = extraData && extraData.itemCode ? extraData.itemCode : '';
     const customer = extraData && extraData.customer ? extraData.customer : '';
-    const metaExtra = (itemCode || customer) ? '<div class="item-meta">编码: ' + itemCode + ' | 客户: ' + customer + '</div>' : '';
+    const source = extraData && extraData.source ? extraData.source : '';
+    const taskId = extraData && extraData.taskId ? extraData.taskId : '';
+    const sourceBadge = source === 'feishu' ? '<span class="source-badge feishu" title="飞书生产任务">飞书</span>' : '';
+    const taskMeta = taskId ? '<span class="item-meta-token">任务: ' + taskId + '</span>' : '';
+    const codeMeta = itemCode ? '<span class="item-meta-token">编码: ' + itemCode + '</span>' : '';
+    const customerMeta = customer ? '<span class="item-meta-token">客户: ' + customer + '</span>' : '';
+    const metaExtra = (sourceBadge || taskMeta || codeMeta || customerMeta) ? '<div class="item-meta">' + sourceBadge + taskMeta + codeMeta + customerMeta + '</div>' : '';
     card.innerHTML = '<button class="m-delete" data-action="delete-material" data-mid="' + newMC + '">✕</button><div class="m-color-swatch" style="background-color:' + color + ';" title="' + name + '"></div><div class="m-info"><div class="m-name">' + name + '</div><div class="m-meta">' + shapeLabel + ' · ' + dimLabel + 'mm · ×' + count + '件 · ' + totalWeight + 'kg</div>' + metaExtra + '</div>';
     card.addEventListener('click', (e) => {
         if (e.target.closest('[data-action="delete-material"]')) return;
@@ -2356,70 +2367,9 @@ export function parseExcelData(workbook) {
     return results;
 }
 
-export function showImportPreview(data) {
-    setImportPreviewData(data);
-    const content = document.getElementById('import-preview-content');
-    if (!content) return;
+export function showImportPreview(data) { setImportPreviewData(data); const content = document.getElementById('import-preview-content'); const hasFeishu = data.some(d => d.source === 'feishu' || d.sourceRecordId || d.taskId); let html = '<table class="import-table"><thead><tr>' + (hasFeishu ? '<th>来源</th><th>任务编号</th>' : '') + '<th>产品名称</th><th>客户</th><th>物料编码</th><th>形态</th><th>尺寸</th><th>数量</th><th>单重(kg)</th><th>材质</th><th>工艺</th><th>硬度</th><th>交期</th><th>状态</th></tr></thead><tbody>'; data.forEach(d => { const dimStr = d.shape === 'cylinder' ? '⌀' + d.dim1 + '×H' + d.dim3 : d.dim1 + '×' + d.dim2 + '×' + d.dim3; const cls = d.valid ? '' : ' class="error"'; const displayName = d.showName || d.name.split('_')[0]; const customer = d.customer || ''; const sourceCell = hasFeishu ? '<td>' + (d.source === 'feishu' ? '<span class="source-badge feishu">飞书</span>' : 'Excel') + '</td><td>' + (d.taskId || '') + '</td>' : ''; html += '<tr' + cls + '>' + sourceCell + '<td>' + displayName + '</td><td>' + customer + '</td><td>' + (d.itemCode || '') + '</td><td>' + (d.shape==='cylinder'?'圆柱':'立方') + '</td><td>' + dimStr + 'mm</td><td>' + d.count + '</td><td>' + d.weight + '</td><td>' + d.material + '</td><td>' + d.process + '</td><td>' + (d.hardness || '') + '</td><td>' + (d.deliveryDate || '') + '</td><td>' + (d.valid?'✅':'⚠️ 尺寸不足') + '</td></tr>'; }); html += '</tbody></table>'; content.innerHTML = html; document.getElementById('import-preview-overlay').style.display = 'flex'; }
 
-    const lang = localStorage.getItem('heat_furnace_ui_language_v0731') === 'en' ? 'en' : 'zh';
-    const t = (zh, en) => lang === 'en' ? en : zh;
-    const escapeCell = (value) => String(value ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-    const shapeLabel = (shape) => {
-        if (shape === 'cylinder') return t('圆柱', 'Cylinder');
-        return t('立方', 'Cuboid');
-    };
-
-    let html = '<div class="import-preview-table-wrap"><table class="import-table import-table-wide"><thead><tr>' +
-        '<th>' + t('产品名称', 'Product') + '</th>' +
-        '<th>' + t('客户', 'Customer') + '</th>' +
-        '<th>' + t('物料编码', 'Item Code') + '</th>' +
-        '<th>' + t('形态', 'Shape') + '</th>' +
-        '<th>' + t('尺寸', 'Size') + '</th>' +
-        '<th>' + t('数量', 'Qty') + '</th>' +
-        '<th>' + t('单重/总重(kg)', 'Weight (kg)') + '</th>' +
-        '<th>' + t('材质', 'Material') + '</th>' +
-        '<th>' + t('工艺', 'Process') + '</th>' +
-        '<th>' + t('硬度', 'Hardness') + '</th>' +
-        '<th>' + t('日期/交期', 'Date / Due') + '</th>' +
-        '<th>' + t('备注', 'Remarks') + '</th>' +
-        '<th>' + t('状态', 'Status') + '</th>' +
-        '</tr></thead><tbody>';
-
-    data.forEach(d => {
-        const dimStr = d.shape === 'cylinder'
-            ? '⌀' + d.dim1 + '×H' + d.dim3
-            : d.dim1 + '×' + d.dim2 + '×' + d.dim3;
-        const cls = d.valid ? '' : ' class="error"';
-        const displayName = d.showName || String(d.name || '').split('_')[0];
-        const dateText = [d.orderDate || d.date || '', d.deliveryDate || d.dueDate || ''].filter(Boolean).join(' / ');
-        const status = d.valid ? '✅' : '⚠️ ' + t('尺寸不足', 'Invalid size');
-        html += '<tr' + cls + '>' +
-            '<td class="import-name-cell">' + escapeCell(displayName) + '</td>' +
-            '<td>' + escapeCell(d.customer || '') + '</td>' +
-            '<td>' + escapeCell(d.itemCode || '') + '</td>' +
-            '<td>' + shapeLabel(d.shape) + '</td>' +
-            '<td class="nowrap">' + escapeCell(dimStr + 'mm') + '</td>' +
-            '<td>' + escapeCell(d.count) + '</td>' +
-            '<td>' + escapeCell(d.weight) + '</td>' +
-            '<td>' + escapeCell(d.material || '') + '</td>' +
-            '<td>' + escapeCell(d.process || '') + '</td>' +
-            '<td>' + escapeCell(d.hardness || '') + '</td>' +
-            '<td class="nowrap">' + escapeCell(dateText) + '</td>' +
-            '<td class="import-remark-cell">' + escapeCell(d.remark || '') + '</td>' +
-            '<td class="nowrap">' + status + '</td>' +
-            '</tr>';
-    });
-    html += '</tbody></table></div>';
-    content.innerHTML = html;
-    document.getElementById('import-preview-overlay').style.display = 'flex';
-}
-
-export function applyImportData(replace) { if (replace) { document.querySelectorAll('.material-card').forEach(c => c.remove()); usedColors.clear(); clearMaterialFilters(); clearProcessFilters(); clearHardnessFilters();} importPreviewData.filter(d => d.valid).forEach(d => { const color = generateUniqueColor(usedColors); createMaterialCard(d.name, d.shape, d.count, d.dim1, d.dim2, d.dim3, d.weight, color, { material: d.material, hardness: d.hardness, process: d.process, orderDate: d.orderDate, deliveryDate: d.deliveryDate, remark: d.remark, showName: d.showName, customer: d.customer, itemCode: d.itemCode }); }); updateTopSummary(); document.getElementById('import-preview-overlay').style.display = 'none'; renderFilterBars(window._clearFurnaceResults); applyFilterAndClear(window._clearFurnaceResults);}
+export function applyImportData(replace) { if (replace) { document.querySelectorAll('.material-card').forEach(c => c.remove()); usedColors.clear(); clearMaterialFilters(); clearProcessFilters(); clearHardnessFilters();} importPreviewData.filter(d => d.valid).forEach(d => { const color = generateUniqueColor(usedColors); createMaterialCard(d.name, d.shape, d.count, d.dim1, d.dim2, d.dim3, d.weight, color, { material: d.material, hardness: d.hardness, process: d.process, orderDate: d.orderDate, deliveryDate: d.deliveryDate, remark: d.remark, showName: d.showName, customer: d.customer, itemCode: d.itemCode, source: d.source, sourceRecordId: d.sourceRecordId || d.recordId, recordId: d.recordId, taskId: d.taskId, sourceStatus: d.sourceStatus || d.status, status: d.status, sourceClientId: d.sourceClientId }); }); updateTopSummary(); document.getElementById('import-preview-overlay').style.display = 'none'; renderFilterBars(window._clearFurnaceResults); applyFilterAndClear(window._clearFurnaceResults);}
 
 // ==================== JSON IMPORT (MASTER) ====================
 

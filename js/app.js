@@ -488,7 +488,12 @@ function buildPackingItemFromHeatMergeItem(item, index = 0) {
         showName: item.showName || item.name || '',
         orderDate: item.orderDate || item.date || '',
         deliveryDate: item.deliveryDate || item.dueDate || '',
-        remark: item.remark || ''
+        remark: item.remark || '',
+        source: item.source || '',
+        sourceRecordId: item.sourceRecordId || item.recordId || '',
+        taskId: item.taskId || '',
+        sourceStatus: item.sourceStatus || item.status || '',
+        sourceClientId: item.sourceClientId || ''
     };
 }
 
@@ -537,7 +542,12 @@ function collectPackingItemsForCurrentGeneration() {
             showName: d.showName || '',
             orderDate: d.orderDate || '',
             deliveryDate: d.deliveryDate || '',
-            remark: d.remark || ''
+            remark: d.remark || '',
+            source: d.source || '',
+            sourceRecordId: d.sourceRecordId || '',
+            taskId: d.taskId || '',
+            sourceStatus: d.sourceStatus || '',
+            sourceClientId: d.sourceClientId || ''
         });
     });
     return items;
@@ -779,7 +789,12 @@ function collectMaterialBatchesForRecord() {
             orderDate: d.orderDate || '',
             deliveryDate: d.deliveryDate || '',
             remark: d.remark || '',
-            cadImage: d.cadImage || ''
+            cadImage: d.cadImage || '',
+            source: d.source || '',
+            sourceRecordId: d.sourceRecordId || '',
+            taskId: d.taskId || '',
+            sourceStatus: d.sourceStatus || '',
+            sourceClientId: d.sourceClientId || ''
         };
     });
 }
@@ -4733,9 +4748,10 @@ function getHeatMergeDataSourceInfo() {
             note: '当前物料来自测试用例二，仅用于演示合炉、工装推荐和装炉流程。'
         };
     }
+    const isFeishu = heatMergeState.dataSource === 'feishu' && total > 0;
     return {
         key: total ? (heatMergeState.dataSource || 'materials') : 'empty',
-        label: total ? '真实/手动任务' : '暂无数据',
+        label: total ? (isFeishu ? '飞书生产任务' : '真实/手动任务') : '暂无数据',
         curveLabel: '未接入真实曲线库',
         curveStatus: '待曲线确认',
         historyLabel: '暂无真实历史炉次',
@@ -4840,8 +4856,12 @@ function getHeatMergeItemsFromCards(options = {}) {
             const d = getMaterialDataFromCard(card);
             const h = parseHardnessRange(d.hardness);
             return {
-                source: 'card',
+                source: d.source || 'card',
                 cardId: card.id,
+                sourceRecordId: d.sourceRecordId || '',
+                taskId: d.taskId || '',
+                sourceStatus: d.sourceStatus || '',
+                sourceClientId: d.sourceClientId || '',
                 name: d.showName || d.name,
                 itemCode: d.itemCode || '',
                 customer: d.customer || '',
@@ -7014,6 +7034,385 @@ function initHeatMergeDesign() {
 }
 
 
+
+// ==================== V0.8.0.1 SAFE FIX: Feishu task sync frontend ====================
+// 说明：上一版误基于旧 app/css 打包，导致界面样式回退。本段只在最新 app.js 上追加飞书同步能力。
+const FEISHU_SYNC_DEFAULT_CLIENT_ID = 'client_suoli';
+
+function getFeishuApiBase() {
+    const override = (window.FEISHU_API_BASE || localStorage.getItem('feishuApiBase') || '').trim();
+    if (override) return override.replace(/\/$/, '');
+
+    // 如果前端由 node server.js 提供，则走同源；如果用 VS Code Live Server 5500，则默认请求本地 3000 后端。
+    const port = window.location && window.location.port;
+    if (port === '3000') return '';
+    return 'http://localhost:3000';
+}
+
+function getFeishuClientId() {
+    return (localStorage.getItem('feishuClientId') || window.FEISHU_CLIENT_ID || FEISHU_SYNC_DEFAULT_CLIENT_ID).trim();
+}
+
+function getFeishuUiText(zh, en) {
+    return localStorage.getItem('heat_furnace_ui_language_v0731') === 'en' ? en : zh;
+}
+
+function normalizeFeishuTaskToImportRow(task) {
+    const shape = task.shape === 'cylinder' || task.shape === '圆柱体' || task.shape === '圆柱' ? 'cylinder' : 'cuboid';
+    const count = Math.max(1, Number(task.count || task.quantity || 0) || 1);
+    const totalWeight = Number(task.totalWeight ?? task.weight ?? 0) || 0;
+
+    let dim1 = Number(task.dim1 ?? task.length ?? task.diameter ?? task.width ?? 0) || 0;
+    let dim2 = Number(task.dim2 ?? task.width ?? task.diameter ?? dim1 ?? 0) || 0;
+    let dim3 = Number(task.dim3 ?? task.height ?? 0) || 0;
+
+    if (shape === 'cylinder') {
+        const diameter = Number(task.diameter ?? task.dim1 ?? task.dim2 ?? 0) || dim1 || dim2;
+        dim1 = diameter;
+        dim2 = diameter;
+        dim3 = Number(task.height ?? task.dim3 ?? 0) || dim3;
+    }
+
+    const showName = task.showName || task.productName || task.name || task.taskId || '飞书任务';
+    const customer = task.customer || task.customerName || '';
+    const itemCode = task.itemCode || task.materialCode || task.taskId || '';
+    const name = task.name || (customer ? `${showName}_${customer}` : showName);
+
+    const valid = count > 0 && totalWeight > 0 && dim1 > 0 && dim3 > 0 && (shape === 'cylinder' || dim2 > 0);
+
+    return {
+        source: 'feishu',
+        sourceRecordId: task.recordId || task.sourceRecordId || '',
+        recordId: task.recordId || task.sourceRecordId || '',
+        taskId: task.taskId || '',
+        sourceStatus: task.status || '',
+        status: task.status || '',
+        sourceClientId: task.sourceClientId || '',
+        name,
+        showName,
+        customer,
+        itemCode,
+        shape,
+        dim1,
+        dim2,
+        dim3,
+        count,
+        weight: totalWeight,
+        totalWeight,
+        unitWeight: Number(task.unitWeight || (count ? totalWeight / count : 0)) || 0,
+        material: task.material || '',
+        process: task.process || '',
+        hardness: task.hardness || '',
+        orderDate: task.orderDate || '',
+        deliveryDate: task.deliveryDate || '',
+        remark: task.remark || '',
+        valid,
+        rawTask: task
+    };
+}
+
+function ensureFeishuSyncButton() {
+    if (document.getElementById('btn-import-feishu')) return;
+
+    const materialPane = document.getElementById('left-tab-material');
+    if (!materialPane) return;
+
+    const inlineImportBtn = document.getElementById('btn-material-import-inline');
+    const headerImportBtn = document.getElementById('btn-import-excel');
+
+    const makeFeishuButton = () => {
+        const btn = document.createElement('button');
+        btn.className = inlineImportBtn ? 'hm-mini-btn feishu-sync-btn' : 'hm-mini-btn feishu-sync-btn primary';
+        btn.id = 'btn-import-feishu';
+        btn.type = 'button';
+        btn.title = getFeishuUiText('从飞书多维表格同步待排产任务', 'Sync pending tasks from Feishu Bitable');
+        btn.textContent = getFeishuUiText('飞书同步', 'Feishu Sync');
+        return btn;
+    };
+
+    // 优先插入到工件页已有的内联导入按钮旁边。
+    if (inlineImportBtn && inlineImportBtn.parentElement) {
+        inlineImportBtn.insertAdjacentElement('afterend', makeFeishuButton());
+        return;
+    }
+
+    // 如果当前版本没有内联工具条，则在“工件详情”说明下创建一个轻量工具条，避免使用已经被新版 CSS 隐藏的旧 header 按钮。
+    let row = document.getElementById('material-feishu-sync-row');
+    if (!row) {
+        row = document.createElement('div');
+        row.id = 'material-feishu-sync-row';
+        row.className = 'material-feishu-sync-row';
+
+        const intro = materialPane.querySelector('.left-tab-intro');
+        if (intro) intro.insertAdjacentElement('afterend', row);
+        else materialPane.insertAdjacentElement('afterbegin', row);
+    }
+
+    if (!document.getElementById('btn-material-import-inline-feishu-safe')) {
+        const importBtn = document.createElement('button');
+        importBtn.className = 'hm-mini-btn';
+        importBtn.id = 'btn-material-import-inline-feishu-safe';
+        importBtn.type = 'button';
+        importBtn.textContent = getFeishuUiText('导入 Excel', 'Import Excel');
+        importBtn.title = getFeishuUiText('从 Excel 导入工件', 'Import workpieces from Excel');
+        importBtn.addEventListener('click', () => {
+            heatMergeState.dataSource = 'excel';
+            document.getElementById('excel-file-input')?.click();
+        });
+        row.appendChild(importBtn);
+    }
+
+    row.appendChild(makeFeishuButton());
+
+    if (headerImportBtn) {
+        headerImportBtn.style.display = 'none';
+    }
+}
+
+function resetHeatMergeStateAfterFeishuSync() {
+    heatMergeState.dataSource = 'feishu';
+    heatMergeState.selectedGroupId = null;
+    heatMergeState.appliedGroupId = null;
+    heatMergeState.compareToolingStrategies = false;
+    heatMergeState.manualMergeGroups = [];
+    heatMergeState.manualMergeDraftGroupIds = [];
+    heatMergeState.selectedToolingPlanId = null;
+    heatMergeState.lastToolingRecommendations = [];
+}
+
+async function syncFeishuTasksToPreview() {
+    const btn = document.getElementById('btn-import-feishu');
+    const oldText = btn ? btn.textContent : '';
+    const apiBase = getFeishuApiBase();
+    const clientId = getFeishuClientId();
+
+    try {
+        if (btn) {
+            btn.disabled = true;
+            btn.classList.add('is-loading');
+            btn.textContent = getFeishuUiText('同步中...', 'Syncing...');
+        }
+
+        const resp = await fetch(`${apiBase}/api/feishu/tasks`, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json',
+                'x-client-id': clientId
+            }
+        });
+
+        let payload = null;
+        try {
+            payload = await resp.json();
+        } catch (jsonErr) {
+            throw new Error(getFeishuUiText('后端没有返回有效 JSON，请确认 node server.js 正在运行。', 'Backend did not return valid JSON. Please confirm node server.js is running.'));
+        }
+
+        if (!resp.ok || payload.ok === false || payload.error) {
+            throw new Error(payload.error || payload.message || `HTTP ${resp.status}`);
+        }
+
+        const tasks = Array.isArray(payload.tasks) ? payload.tasks : (Array.isArray(payload) ? payload : []);
+        const rows = tasks
+            .filter(task => task && Object.keys(task).length > 0)
+            .map(normalizeFeishuTaskToImportRow);
+        rows.forEach(row => {
+            if (!row.sourceClientId) row.sourceClientId = payload.clientId || clientId || getFeishuClientId();
+            row.sourceStatus = row.sourceStatus || row.status || '';
+        });
+
+        if (!rows.length) {
+            showCapacityFeedback('error', getFeishuUiText('飞书生产任务表暂无可同步任务，请确认状态为“待排产”且字段已填写。', 'No Feishu tasks can be synced. Please check status and required fields.'));
+            return;
+        }
+
+        resetHeatMergeStateAfterFeishuSync();
+        const validCount = rows.filter(row => row.valid).length;
+        showImportPreview(rows);
+        const skippedText = payload.emptyRecords || payload.skippedByStatus
+            ? getFeishuUiText(`（已跳过空记录 ${payload.emptyRecords || 0} 条、非待排产 ${payload.skippedByStatus || 0} 条）`, ` (skipped empty ${payload.emptyRecords || 0}, non-pending ${payload.skippedByStatus || 0})`)
+            : '';
+        showCapacityFeedback('success', getFeishuUiText(
+            `已从飞书读取 ${rows.length} 条待排产任务，其中 ${validCount} 条可导入。${skippedText} 请在预览弹窗中选择“替换导入”或“追加导入”。`,
+            `Loaded ${rows.length} pending tasks from Feishu. ${validCount} can be imported.${skippedText} Choose Replace or Append in the preview dialog.`
+        ));
+    } catch (err) {
+        console.error('[Feishu Sync] failed:', err);
+        showCapacityFeedback('error', getFeishuUiText(`飞书同步失败：${err.message}`, `Feishu sync failed: ${err.message}`));
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.classList.remove('is-loading');
+            btn.textContent = oldText || getFeishuUiText('飞书同步', 'Feishu Sync');
+        }
+    }
+}
+
+function bindFeishuSyncButton() {
+    ensureFeishuSyncButton();
+    const btn = document.getElementById('btn-import-feishu');
+    if (!btn || btn.dataset.bound === '1') return;
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', syncFeishuTasksToPreview);
+}
+
+
+
+// ==================== V0.8.1: Feishu plan writeback ====================
+function collectFeishuSourceInfoFromCurrentPlan() {
+    const recordIds = new Set();
+    const taskIds = new Set();
+    const customers = new Set();
+    const processes = new Set();
+    const materials = new Set();
+
+    const takeItem = (item) => {
+        if (!item) return;
+        const source = String(item.source || item.dataSource || '').toLowerCase();
+        const recordId = item.sourceRecordId || item.recordId || item.feishuRecordId || '';
+        const taskId = item.taskId || item.taskNo || item.orderNo || '';
+        const isFeishuItem = source === 'feishu' || !!recordId;
+        if (!isFeishuItem) return;
+        if (recordId) recordIds.add(String(recordId));
+        if (taskId) taskIds.add(String(taskId));
+        if (item.customer) customers.add(String(item.customer));
+        if (item.process) processes.add(String(item.process));
+        if (item.material) materials.add(String(item.material));
+    };
+
+    (globalFurnacesResult || []).forEach(furnace => {
+        (furnace?.packedItems || []).forEach(takeItem);
+    });
+    (globalUnpackedItems || []).forEach(takeItem);
+
+    // 兜底：如果算法结果中没有保留 source 字段，则从当前工件卡片读取绑定关系。
+    if (recordIds.size === 0) {
+        document.querySelectorAll('.material-card').forEach(card => {
+            try {
+                takeItem(getMaterialDataFromCard(card));
+            } catch (err) {
+                // ignore legacy cards
+            }
+        });
+    }
+
+    return {
+        sourceRecordIds: Array.from(recordIds),
+        taskIds: Array.from(taskIds),
+        customers: Array.from(customers),
+        processes: Array.from(processes),
+        materials: Array.from(materials)
+    };
+}
+
+function buildCurrentPlanFeishuPayload() {
+    const furnaces = Array.isArray(globalFurnacesResult) ? globalFurnacesResult : [];
+    if (!furnaces.length) return null;
+
+    const sourceInfo = collectFeishuSourceInfoFromCurrentPlan();
+    if (!sourceInfo.sourceRecordIds.length) return null;
+
+    const totals = getPlanCompareTotals(furnaces, globalUnpackedItems || [], 'current');
+    const planName = buildAutoWorkspaceTitle(STRATEGY_LABELS[placementRules.strategy] || placementRules.strategy || 'balanced');
+    const toolingNames = Array.from(new Set(furnaces.map(f => f?.typeName || f?.name || f?.instanceId || '').filter(Boolean)));
+    const customer = sourceInfo.customers.length === 1 ? sourceInfo.customers[0] : sourceInfo.customers.join(', ');
+    const processGroup = sourceInfo.processes.length === 1 ? sourceInfo.processes[0] : sourceInfo.processes.join(', ');
+
+    let planJson = '';
+    try {
+        planJson = JSON.stringify({
+            version: '0.8.1',
+            source: 'ai-furnace-loading-agent',
+            createdAt: new Date().toISOString(),
+            planName,
+            sourceRecordIds: sourceInfo.sourceRecordIds,
+            taskIds: sourceInfo.taskIds,
+            placementRules,
+            furnaces,
+            unpackedItems: globalUnpackedItems || [],
+            aggregationStats: aggregationStats || null
+        });
+    } catch (err) {
+        planJson = '';
+    }
+
+    return {
+        planName,
+        furnaceCount: totals.furnaceCount,
+        totalWeightKg: Number(totals.totalWeight || 0),
+        weightUtilization: Number.isFinite(totals.weightRate) ? totals.weightRate : 0,
+        spaceUtilization: Number.isFinite(totals.avgSpace) ? totals.avgSpace : 0,
+        customer,
+        processGroup,
+        strategy: STRATEGY_LABELS[placementRules.strategy] || placementRules.strategy || '',
+        toolingNames,
+        sourceRecordIds: sourceInfo.sourceRecordIds,
+        taskIds: sourceInfo.taskIds,
+        planJson,
+        updateTaskStatus: true,
+        taskStatus: '已生成方案',
+        remark: `由 AI热处理装炉智能体写回；工件 ${totals.itemCount} 件，未装 ${totals.unpackedCount} 件。`
+    };
+}
+
+async function syncCurrentPlanToFeishuAfterLibrarySave(triggerButton = null) {
+    const payload = buildCurrentPlanFeishuPayload();
+    if (!payload) {
+        // 本地手动/Excel 方案不强制写回飞书。
+        return null;
+    }
+
+    const apiBase = getFeishuApiBase();
+    const clientId = getFeishuClientId();
+    const oldText = triggerButton ? triggerButton.textContent : '';
+
+    try {
+        if (triggerButton) {
+            triggerButton.disabled = true;
+            triggerButton.classList.add('is-loading');
+            triggerButton.textContent = getFeishuUiText('保存并写回飞书...', 'Saving & syncing Feishu...');
+        }
+
+        const resp = await fetch(`${apiBase}/api/feishu/plans`, {
+            method: 'POST',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json; charset=utf-8',
+                'x-client-id': clientId
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const result = await resp.json().catch(() => null);
+        if (!resp.ok || !result || result.ok === false) {
+            throw new Error(result?.error || result?.detail?.msg || result?.detail || `HTTP ${resp.status}`);
+        }
+
+        const planRecordId = result?.createdPlan?.record_id || result?.createdPlan?.id || '';
+        const failText = result.failedTaskCount
+            ? getFeishuUiText(`，${result.failedTaskCount} 条任务状态更新失败`, `, ${result.failedTaskCount} task updates failed`)
+            : '';
+        showCapacityFeedback('success', getFeishuUiText(
+            `方案已保存到本地方案库，并写回飞书方案记录${planRecordId ? `（${planRecordId}）` : ''}；已更新 ${result.updatedTaskCount || 0} 条任务状态${failText}。`,
+            `Plan saved locally and written back to Feishu${planRecordId ? ` (${planRecordId})` : ''}; updated ${result.updatedTaskCount || 0} task statuses${failText}.`
+        ));
+        return result;
+    } catch (err) {
+        console.error('[Feishu Plan Writeback] failed:', err);
+        showCapacityFeedback('error', getFeishuUiText(
+            `本地方案已保存，但写回飞书失败：${err.message}`,
+            `Plan saved locally, but Feishu writeback failed: ${err.message}`
+        ));
+        return null;
+    } finally {
+        if (triggerButton) {
+            triggerButton.disabled = false;
+            triggerButton.classList.remove('is-loading');
+            triggerButton.textContent = oldText || getFeishuUiText('保存到方案库', 'Save to Library');
+        }
+    }
+}
+
 function getActiveLeftPanelTab() {
     const activeBtn = document.querySelector('.left-tab-btn.active');
     return activeBtn ? activeBtn.getAttribute('data-tab') : 'furnace';
@@ -7109,6 +7508,8 @@ const UI_I18N_EN = {
     '导入 Excel': 'Import Excel',
     '导入Excel': 'Import Excel',
     '从飞书同步': 'Sync from Feishu',
+    '飞书同步': 'Feishu Sync',
+    '同步中...': 'Syncing...',
     '清空任务': 'Clear Tasks',
     '收起筛选': 'Collapse Filters',
     '筛选物料': 'Filter Items',
@@ -7659,10 +8060,12 @@ function init() {
     updateTopSummary();
     hideExplodeBOMButtons();
     initLeftPanelTabs();
+    bindFeishuSyncButton();
     ensurePlacementEditRightPanel();
     initRightPanelTabs();
     ensureLanguageThemeControls();
     initHeatMergeDesign();
+    bindFeishuSyncButton();
 
     bindWorkbenchUiModeAutoRefresh();
     updateWorkbenchUiMode();
@@ -7736,6 +8139,7 @@ function init() {
             // 否则函数内部如果依赖 controller 上下文，this 会变成按钮元素。
             // 保存后立即切到方案库并刷新列表，确保用户能看到刚保存的方案。
             planLibrary.saveCurrentPlanToLibrary();
+            void syncCurrentPlanToFeishuAfterLibrarySave(btnSavePlanLibrary);
 
             setTimeout(() => {
                 const masterView = document.getElementById('master-view');
