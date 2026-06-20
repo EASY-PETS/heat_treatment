@@ -14,77 +14,6 @@ import {
     placementRules
 } from './state.js';
 
-
-// ==================== V0.7.34 PDF language helpers ====================
-function getPdfLanguage() {
-    try { return localStorage.getItem('heat_furnace_ui_language_v0731') === 'en' ? 'en' : 'zh'; }
-    catch (_) { return 'zh'; }
-}
-function isPdfEnglish() { return getPdfLanguage() === 'en'; }
-function tPdf(zh, en) { return isPdfEnglish() ? en : zh; }
-function translatePdfStaticHtml(html) {
-    if (!isPdfEnglish()) return html;
-    const pairs = [
-        ['AI热处理装炉智能体 / 现场摆料施工单 V1', 'AI Furnace Loading Agent / Field Loading Work Sheet V1'],
-        ['现场摆料施工单', 'Field Loading Work Sheet'],
-        ['热处理装炉作业指导书', 'Heat Treatment Loading Work Instruction'],
-        ['任务总览', 'Task Overview'],
-        ['现场执行确认', 'Field Execution Confirmation'],
-        ['现场注意事项', 'Field Notes'],
-        ['分层俯视图', 'Layer Top View'],
-        ['俯视摆放图', 'Top Loading View'],
-        ['工件坐标清单', 'Item Coordinate List'],
-        ['坐标清单', 'Coordinate List'],
-        ['工件清单', 'Item List'],
-        ['编号', 'No.'],
-        ['层', 'Layer'],
-        ['工件', 'Item'],
-        ['客户/图号', 'Customer / Drawing'],
-        ['材质', 'Material'],
-        ['工艺', 'Process'],
-        ['尺寸 mm', 'Size mm'],
-        ['坐标 mm', 'Coordinates mm'],
-        ['单重', 'Unit Weight'],
-        ['数量', 'Qty'],
-        ['总重量', 'Total Weight'],
-        ['装载重量', 'Load Weight'],
-        ['空间利用率', 'Space Utilization'],
-        ['重量利用率', 'Weight Utilization'],
-        ['层数', 'Layers'],
-        ['承重上限', 'Max Load'],
-        ['工装类型', 'Tooling Type'],
-        ['装炉策略', 'Strategy'],
-        ['安全间距', 'Clearance'],
-        ['坐标为系统计算值，现场以工装实际定位基准、搁板厚度和工件实物外形复核。', 'Coordinates are calculated values. Verify them on site against tooling datums, shelf thickness and real workpiece geometry.'],
-        ['注意：当前方案仍有', 'Note: this plan still has'],
-        ['件工件未装入，请现场确认是否需要增加工装或拆分炉次。', 'unpacked items. Confirm on site whether to add tooling or split into later heats.'],
-        ['坐标 X/Z 以工装左后/左前基准角为参考，按现场约定保持方向一致。', 'X/Z coordinates use the tooling datum corner as reference; keep orientation consistent with site conventions.'],
-        ['第 1 层 / 底层', 'Layer 1 / Bottom'],
-        ['底层', 'Bottom'],
-        ['方体', 'Cuboid'],
-        ['圆柱', 'Cylinder'],
-        ['标准料框', 'Standard Basket'],
-        ['网篮', 'Mesh Basket'],
-        ['料盘', 'Tray'],
-        ['环形工装', 'Ring Tooling'],
-        ['均衡方案', 'Balanced Plan'],
-        ['空间优先', 'Space First'],
-        ['热场均衡', 'Thermal Balance'],
-        ['表面均匀', 'Surface Uniformity'],
-        ['清单', 'List'],
-        ['工装', 'Tooling'],
-        ['炉次', 'Heat'],
-        ['件', 'pcs'],
-        ['间距', 'Clearance']
-    ];
-    let out = html;
-    for (const [zh,en] of pairs) out = out.split(zh).join(en);
-    out = out.replace(/第\s*(\d+)\s*层/g, 'Layer $1');
-    out = out.replace(/(\d+)炉/g, '$1 heats');
-    out = out.replace(/(\d+)件/g, '$1 pcs');
-    return out;
-}
-
 const PAGE_ROW_LIMIT = 28;
 const SVG_W = 1000;
 const SVG_H = 650;
@@ -153,23 +82,73 @@ function getStrategyLabel() {
 }
 
 function getShapeLabel(item) {
-    if (item?.shape === 'cylinder') return '圆柱';
+    if (item?.shape === 'cylinder') {
+        return isCylinderSideStanding(item) ? '圆柱(立放)' : '圆柱';
+    }
     return '方体';
+}
+
+function getOriginalDimValues(item) {
+    const raw = item?.originalDims || {};
+    const l = toNumber(raw.l ?? raw.length ?? raw.dim1 ?? item?.w, 0);
+    const w = toNumber(raw.w ?? raw.width ?? raw.dim2 ?? item?.d, 0);
+    const h = toNumber(raw.h ?? raw.height ?? raw.dim3 ?? item?.h, 0);
+    const values = [l, w, h].filter(v => Number.isFinite(v) && v > 0);
+    return {
+        l,
+        w,
+        h,
+        max: values.length ? Math.max(...values) : 0,
+        min: values.length ? Math.min(...values) : 0
+    };
+}
+
+function isCylinderSideStanding(item) {
+    if (!item || item.shape !== 'cylinder') return false;
+    if (item.pdfPosture === 'side-standing' || item.pdfRotationAxis) return true;
+    if (Number(item.verticalRotation || item.rotationInfo?.manualPitchDeg || 0) % 180 !== 0) return true;
+
+    const dims = getOriginalDimValues(item);
+    const currentW = toNumber(item.w, 0);
+    const currentD = toNumber(item.d, 0);
+    const currentH = toNumber(item.h, 0);
+
+    // 圆盘立放后：高度接近原始直径，X/Z 占地出现“厚度 × 直径”的窄长 footprint。
+    if (dims.max > 0 && dims.min > 0) {
+        const footprintMin = Math.min(currentW, currentD);
+        const footprintMax = Math.max(currentW, currentD);
+        return currentH >= dims.max * 0.75 &&
+            footprintMin <= dims.min * 1.35 &&
+            footprintMax >= dims.max * 0.75;
+    }
+
+    return currentH > Math.min(currentW, currentD) * 1.5 && Math.max(currentW, currentD) > Math.min(currentW, currentD) * 1.5;
+}
+
+function getPdfFootprint(item) {
+    const w = toNumber(item?.pdfFootprintW ?? item?.w, 1);
+    const d = toNumber(item?.pdfFootprintD ?? item?.d, 1);
+    return { w: Math.max(1, w), d: Math.max(1, d) };
 }
 
 function getItemSizeLabel(item) {
     if (!item) return '-';
-    if (item.originalDims) {
-        const l = item.originalDims.l ?? item.originalDims.length ?? item.w;
-        const w = item.originalDims.w ?? item.originalDims.width ?? item.d;
-        const h = item.originalDims.h ?? item.originalDims.height ?? item.h;
-        return `${formatNumber(l)}×${formatNumber(w)}×${formatNumber(h)}`;
-    }
+    const currentW = toNumber(item.w, 0);
+    const currentD = toNumber(item.d, 0);
+    const currentH = toNumber(item.h, 0);
+
     if (item.shape === 'cylinder') {
-        const dia = Math.max(toNumber(item.w), toNumber(item.d));
-        return `Φ${formatNumber(dia)}×H${formatNumber(item.h)}`;
+        if (isCylinderSideStanding(item)) {
+            const fp = getPdfFootprint(item);
+            const dims = getOriginalDimValues(item);
+            const original = dims.max > 0 && dims.min > 0 ? ` / 原Φ${formatNumber(dims.max)}×${formatNumber(dims.min)}` : '';
+            return `立放 ${formatNumber(fp.w)}×${formatNumber(fp.d)}×H${formatNumber(currentH)}${original}`;
+        }
+        const dia = Math.max(currentW, currentD, getOriginalDimValues(item).max || 0);
+        return `Φ${formatNumber(dia)}×H${formatNumber(currentH)}`;
     }
-    return `${formatNumber(item.w)}×${formatNumber(item.d)}×${formatNumber(item.h)}`;
+
+    return `${formatNumber(currentW)}×${formatNumber(currentD)}×${formatNumber(currentH)}`;
 }
 
 function getItemLayer(item, furnace) {
@@ -409,10 +388,11 @@ function chooseGridStep(maxSize) {
 }
 
 function renderItemSvg(item, layout) {
+    const footprint = getPdfFootprint(item);
     const x = layout.ox + toNumber(item.x) * layout.scale;
     const y = layout.oy + toNumber(item.z) * layout.scale;
-    const w = Math.max(2, toNumber(item.w, 1) * layout.scale);
-    const h = Math.max(2, toNumber(item.d, 1) * layout.scale);
+    const w = Math.max(2, footprint.w * layout.scale);
+    const h = Math.max(2, footprint.d * layout.scale);
     const cx = x + w / 2;
     const cy = y + h / 2;
     const fill = escapeHtml(getColor(item.color, '#2563EB'));
@@ -420,11 +400,21 @@ function renderItemSvg(item, layout) {
     const labelSize = clamp(Math.min(w, h) * 0.38, 10, 26);
     const isCylinder = item.shape === 'cylinder';
 
-    if (isCylinder) {
+    if (isCylinder && !isCylinderSideStanding(item)) {
         const r = Math.max(3, Math.min(w, h) / 2);
         return `
             <circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" class="pdfv1-item" />
             <text x="${cx}" y="${cy + labelSize * 0.35}" font-size="${labelSize}" class="pdfv1-item-label">${no}</text>
+        `;
+    }
+
+    if (isCylinder && isCylinderSideStanding(item)) {
+        const radius = Math.max(3, Math.min(w, h) / 2);
+        const label = labelSize < 12 ? '' : `<text x="${cx}" y="${cy + labelSize * 0.35}" font-size="${labelSize}" class="pdfv1-item-label">${no}</text>`;
+        return `
+            <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${radius}" ry="${radius}" fill="${fill}" class="pdfv1-item pdfv1-item-standing" />
+            <line x1="${cx}" y1="${y + 2}" x2="${cx}" y2="${y + h - 2}" class="pdfv1-standing-axis" />
+            ${label || `<text x="${cx}" y="${cy + 4}" font-size="10" class="pdfv1-item-label">${no}</text>`}
         `;
     }
 
@@ -434,29 +424,9 @@ function renderItemSvg(item, layout) {
     `;
 }
 
-
-function renderTrayCornerPostsSvg(furnace, layout) {
-    const blockers = Array.isArray(furnace?.trayCornerPostBlockers)
-        ? furnace.trayCornerPostBlockers
-        : [];
-    if (!blockers.length) return '';
-
-    return blockers.map((blocker, idx) => {
-        const cx = layout.ox + toNumber(blocker.x) * layout.scale;
-        const cy = layout.oy + toNumber(blocker.z) * layout.scale;
-        const visualRadius = toNumber(blocker.visualRadius, toNumber(blocker.radius, 10));
-        const r = Math.max(3.5, visualRadius * layout.scale);
-        return `
-            <circle cx="${cx}" cy="${cy}" r="${r}" class="pdfv1-tray-post" />
-            <text x="${cx}" y="${cy + 3}" class="pdfv1-tray-post-label">P${idx + 1}</text>
-        `;
-    }).join('');
-}
-
 function renderLayerDiagram(furnace, layerItems, layer) {
     const layout = getLayout(furnace);
     const boundary = renderBoundarySvg(furnace, layout);
-    const postsSvg = renderTrayCornerPostsSvg(furnace, layout);
     const itemsSvg = layerItems.map(item => renderItemSvg(item, layout)).join('');
     const dimX = `${formatNumber(layout.fw)} mm`;
     const dimZ = `${formatNumber(layout.fd)} mm`;
@@ -473,7 +443,6 @@ function renderLayerDiagram(furnace, layerItems, layer) {
             <text x="${DRAW_PAD}" y="32" class="pdfv1-svg-title">${escapeHtml(getLayerLabel(layer))} 俯视摆放图</text>
             <text x="${SVG_W - DRAW_PAD}" y="32" class="pdfv1-svg-note" text-anchor="end">X=${dimX} / Z=${dimZ} / 间距=${escapeHtml(safeSpacing)}mm</text>
             ${boundary}
-            ${postsSvg}
             ${itemsSvg}
             <line x1="${layout.ox}" y1="${layout.oy + layout.drawH + 34}" x2="${layout.ox + Math.min(layout.drawW, 160)}" y2="${layout.oy + layout.drawH + 34}" stroke="#334155" stroke-width="2" marker-end="url(#arrow-x-${layer})" />
             <text x="${layout.ox + Math.min(layout.drawW, 174)}" y="${layout.oy + layout.drawH + 39}" class="pdfv1-axis-label">X+</text>
@@ -723,9 +692,9 @@ function getPdfV1Css() {
         .pdfv1-boundary-inner { fill: #ffffff; stroke: #94a3b8; stroke-width: 3; stroke-dasharray: 10 8; }
         .pdfv1-grid { stroke: #cbd5e1; stroke-width: 1; }
         .pdfv1-centerline { stroke: #94a3b8; stroke-width: 2; stroke-dasharray: 8 8; }
-        .pdfv1-tray-post { fill: #334155; stroke: #0f172a; stroke-width: 1.4; opacity: .92; }
-        .pdfv1-tray-post-label { fill: #fff; stroke: rgba(15,23,42,.55); stroke-width: 1; paint-order: stroke; font-size: 7pt; font-weight: 900; text-anchor: middle; font-family: Arial, sans-serif; }
         .pdfv1-item { stroke: #0f172a; stroke-width: 1.4; opacity: .94; }
+        .pdfv1-item-standing { stroke-width: 1.8; }
+        .pdfv1-standing-axis { stroke: rgba(15,23,42,.42); stroke-width: 1.2; stroke-dasharray: 5 4; }
         .pdfv1-item-label { fill: #fff; stroke: rgba(15,23,42,.34); stroke-width: 1; paint-order: stroke; font-weight: 900; text-anchor: middle; font-family: Arial, sans-serif; }
         .pdfv1-axis-label { fill: #334155; font-size: 18px; font-weight: 800; }
         .pdfv1-bullets { margin: 0; padding-left: 5mm; font-size: 9pt; line-height: 1.7; color: #334155; }
@@ -744,16 +713,66 @@ function getPdfV1Css() {
 }
 
 function mountPdfHtml(html) {
+    // V0.8.2.1.6: render pages in the viewport but underneath the existing modal.
+    // We capture each .pdfv1-page directly with html2canvas + jsPDF, so the host
+    // no longer needs to sit above the UI. It stays visible/measurable to avoid
+    // blank canvas capture, but no longer covers the PDF selection dialog.
+    const oldHost = document.getElementById('pdf-v1-render-host');
+    if (oldHost) oldHost.remove();
+
     const host = document.createElement('div');
     host.id = 'pdf-v1-render-host';
+    host.setAttribute('aria-hidden', 'true');
     host.style.position = 'fixed';
-    host.style.left = '-10000px';
+    host.style.left = '0';
     host.style.top = '0';
     host.style.width = '297mm';
+    host.style.minHeight = '210mm';
     host.style.background = '#ffffff';
-    host.innerHTML = translatePdfStaticHtml(html);
+    host.style.zIndex = '1';
+    host.style.pointerEvents = 'none';
+    host.style.overflow = 'visible';
+    host.style.opacity = '1';
+    host.style.transform = 'none';
+    host.style.contain = 'layout style';
+    host.innerHTML = html;
     document.body.appendChild(host);
     return host;
+}
+
+async function waitForPdfRenderHostReady(host) {
+    if (!host) throw new Error('PDF 渲染容器创建失败');
+
+    try {
+        if (document.fonts && document.fonts.ready) {
+            await document.fonts.ready;
+        }
+    } catch (_) {}
+
+    // Give SVG, tables and layout enough time to paint before rasterizing.
+    await new Promise(resolve => requestAnimationFrame(() => resolve()));
+    await new Promise(resolve => requestAnimationFrame(() => resolve()));
+    await new Promise(resolve => setTimeout(resolve, 80));
+
+    const pages = [...host.querySelectorAll('.pdfv1-page')];
+    const width = host.getBoundingClientRect().width;
+    const height = host.scrollHeight || host.getBoundingClientRect().height;
+
+    if (!pages.length) {
+        throw new Error('PDF 页面内容为空：未生成 pdfv1-page');
+    }
+    if (!width || !height) {
+        throw new Error(`PDF 页面尺寸异常：${Math.round(width)}×${Math.round(height)}`);
+    }
+
+    pages.forEach((page, idx) => {
+        const rect = page.getBoundingClientRect();
+        if (!rect.width || !rect.height) {
+            throw new Error(`PDF 第 ${idx + 1} 页尺寸异常：${Math.round(rect.width)}×${Math.round(rect.height)}`);
+        }
+    });
+
+    return { pageCount: pages.length, width, height };
 }
 
 function makeFileName(entries) {
@@ -761,56 +780,124 @@ function makeFileName(entries) {
     const safeName = String(getFurnaceName(first, entries[0]?.index || 0))
         .replace(/[\\/:*?"<>|]/g, '_')
         .slice(0, 32);
-    if (entries.length === 1) return `${tPdf('现场摆料施工单', 'field_loading_sheet')}_${safeName}_${getFileDateStamp()}.pdf`;
-    return `${tPdf('现场摆料施工单', 'field_loading_sheet')}_${entries.length}${tPdf('炉', 'heats')}_${getFileDateStamp()}.pdf`;
+    if (entries.length === 1) return `现场摆料施工单_${safeName}_${getFileDateStamp()}.pdf`;
+    return `现场摆料施工单_${entries.length}炉_${getFileDateStamp()}.pdf`;
+}
+
+function getHtml2Canvas() {
+    return window.html2canvas || window.html2pdf?.Worker?.prototype?.html2canvas || null;
+}
+
+function getJsPdfCtor() {
+    return window.jspdf?.jsPDF || window.jsPDF || window.html2pdf?.Worker?.prototype?.jsPDF || null;
+}
+
+function isCanvasMostlyBlank(canvas) {
+    if (!canvas || !canvas.width || !canvas.height) return true;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return false;
+
+    const sampleW = Math.min(canvas.width, 320);
+    const sampleH = Math.min(canvas.height, 220);
+    const stepX = Math.max(1, Math.floor(canvas.width / sampleW));
+    const stepY = Math.max(1, Math.floor(canvas.height / sampleH));
+    let checked = 0;
+    let nonWhite = 0;
+
+    for (let y = 0; y < canvas.height; y += stepY) {
+        const row = ctx.getImageData(0, y, canvas.width, 1).data;
+        for (let x = 0; x < canvas.width; x += stepX) {
+            const i = x * 4;
+            const r = row[i], g = row[i + 1], b = row[i + 2], a = row[i + 3];
+            checked++;
+            // Count blue text, borders, grid, black text, etc. as real content.
+            if (a > 8 && (r < 245 || g < 245 || b < 245)) nonWhite++;
+            if (nonWhite > 80) return false;
+        }
+    }
+    return nonWhite < Math.max(18, checked * 0.0008);
+}
+
+async function renderPagesToPdf(host, filename) {
+    const html2canvas = getHtml2Canvas();
+    const JsPDF = getJsPdfCtor();
+
+    if (!html2canvas || !JsPDF) {
+        throw new Error('PDF 截图组件未加载：缺少 html2canvas 或 jsPDF。请检查 html2pdf.bundle 是否正常引入。');
+    }
+
+    const pages = [...host.querySelectorAll('.pdfv1-page')];
+    if (!pages.length) throw new Error('没有可渲染的 PDF 页面');
+
+    const pdf = new JsPDF({
+        unit: 'mm',
+        format: 'a4',
+        orientation: 'landscape',
+        compress: true
+    });
+
+    const pdfW = 297;
+    const pdfH = 210;
+
+    for (let i = 0; i < pages.length; i++) {
+        const page = pages[i];
+        page.scrollIntoView({ block: 'start', inline: 'nearest' });
+        await new Promise(resolve => requestAnimationFrame(() => resolve()));
+        await new Promise(resolve => requestAnimationFrame(() => resolve()));
+
+        const rect = page.getBoundingClientRect();
+        const canvas = await html2canvas(page, {
+            scale: 2,
+            useCORS: true,
+            allowTaint: true,
+            backgroundColor: '#ffffff',
+            logging: false,
+            windowWidth: Math.max(1400, Math.ceil(rect.width || host.getBoundingClientRect().width || 1400)),
+            windowHeight: Math.max(900, Math.ceil(rect.height || 900)),
+            scrollX: 0,
+            scrollY: -window.scrollY
+        });
+
+        console.info('[PDF V1] page canvas:', i + 1, canvas.width, canvas.height);
+
+        if (isCanvasMostlyBlank(canvas)) {
+            throw new Error(`PDF 第 ${i + 1} 页渲染为空白，请稍后重试或检查浏览器截图权限。`);
+        }
+
+        if (i > 0) pdf.addPage('a4', 'landscape');
+        const imgData = canvas.toDataURL('image/jpeg', 0.96);
+        pdf.addImage(imgData, 'JPEG', 0, 0, pdfW, pdfH, undefined, 'FAST');
+    }
+
+    pdf.save(filename);
 }
 
 export async function generateSixPagePDF(selectedIds = []) {
+    let host = null;
+    const previousScrollX = window.scrollX || 0;
+    const previousScrollY = window.scrollY || 0;
     try {
-        if (typeof window.html2pdf === 'undefined') {
-            alert(tPdf('PDF 导出组件未加载，请检查 html2pdf.js 是否正常引入。', 'PDF export component is not loaded. Check html2pdf.js.'));
-            return;
-        }
-
         const entries = getSelectedFurnaceEntries(selectedIds);
         if (!entries.length) {
-            alert(tPdf('当前没有可导出的装炉方案，请先生成方案。', 'No loading plan can be exported. Generate a plan first.'));
+            alert('当前没有可导出的装炉方案，请先生成方案。');
             return;
         }
 
         const html = buildPdfDocument(entries);
-        const host = mountPdfHtml(html);
+        host = mountPdfHtml(html);
         const filename = makeFileName(entries);
+        const layoutInfo = await waitForPdfRenderHostReady(host);
+        console.info('[PDF V1] render host ready:', layoutInfo);
 
-        await window.html2pdf()
-            .set({
-                margin: 0,
-                filename,
-                image: { type: 'jpeg', quality: 0.96 },
-                html2canvas: {
-                    scale: 2,
-                    useCORS: true,
-                    backgroundColor: '#ffffff',
-                    logging: false,
-                    windowWidth: 1400
-                },
-                jsPDF: {
-                    unit: 'mm',
-                    format: 'a4',
-                    orientation: 'landscape',
-                    compress: true
-                },
-                pagebreak: { mode: ['css', 'legacy'] }
-            })
-            .from(host)
-            .save();
+        await renderPagesToPdf(host, filename);
 
         host.remove();
+        window.scrollTo(previousScrollX, previousScrollY);
     } catch (err) {
         console.error('[PDF V1] 导出失败:', err);
-        alert(tPdf('PDF 导出失败：', 'PDF export failed: ') + (err?.message || err));
-        const host = document.getElementById('pdf-v1-render-host');
+        alert('PDF 导出失败：' + (err?.message || err));
         if (host) host.remove();
+        window.scrollTo(previousScrollX, previousScrollY);
     }
 }
 

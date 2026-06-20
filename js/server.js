@@ -1,7 +1,7 @@
 /**
  * server.js - 智能预装炉云端安全中转中心
  *
- * V0.8.1: 飞书生产任务读取 + 方案记录写回
+ * V0.8.2: 飞书生产任务读取 + 方案写回 + 设备/工装同步
  * - 使用 FEISHU_APP_ID / FEISHU_APP_SECRET 获取 tenant_access_token
  * - 从多维表格「生产任务表」读取记录
  * - 自动跳过空记录，只返回待排产/待同步任务
@@ -227,6 +227,154 @@ function normalizeTaskRecord(record) {
     };
 }
 
+function normalizeAvailableStatus(statusText) {
+    const status = String(statusText || '').trim();
+    if (!status) return '';
+    return status;
+}
+
+function normalizeBooleanLike(value, fallback = false) {
+    if (value === true || value === false) return value;
+    const raw = String(value ?? '').trim().toLowerCase();
+    if (!raw) return fallback;
+    if (['true', 'yes', 'y', '1', '是', '支持', '启用', '可用'].includes(raw)) return true;
+    if (['false', 'no', 'n', '0', '否', '不支持', '停用', '禁用'].includes(raw)) return false;
+    return fallback;
+}
+
+function normalizeToolingType(typeText) {
+    const raw = String(typeText || '').trim().toLowerCase();
+    if (!raw) return 'standard-basket';
+    if (raw.includes('standard-basket') || raw.includes('标准') || raw.includes('料框')) return 'standard-basket';
+    if (raw.includes('mesh-basket') || raw.includes('网篮') || raw.includes('密网') || raw.includes('蜂窝')) return 'mesh-basket';
+    if (raw.includes('material-tray') || raw.includes('料盘') || raw.includes('托盘') || raw.includes('tray')) return 'material-tray';
+    if (raw.includes('ring-tooling') || raw.includes('环形') || raw.includes('圆盘') || raw.includes('ring')) return 'ring-tooling';
+    return 'standard-basket';
+}
+
+function getBasketTypeForTooling(toolingType) {
+    return {
+        'standard-basket': 'grid',
+        'mesh-basket': 'honeycomb',
+        'material-tray': 'tray',
+        'ring-tooling': 'ringnode'
+    }[toolingType] || 'grid';
+}
+
+function buildResourceSyncMeta(record, tableName) {
+    return {
+        source: 'feishu',
+        tableName,
+        recordId: record.record_id || '',
+        syncedAt: new Date().toISOString()
+    };
+}
+
+function pushIssue(issues, level, field, message) {
+    issues.push({ level, field, message });
+}
+
+function validateFurnaceResource(resource) {
+    const issues = [];
+    if (!resource.name || resource.name === '未命名设备') pushIssue(issues, 'warning', '设备名称', '缺少设备名称');
+    if (!resource.width) pushIssue(issues, 'error', '宽度X', '缺少宽度X');
+    if (!resource.height) pushIssue(issues, 'error', '高度Y', '缺少高度Y');
+    if (!resource.depth) pushIssue(issues, 'error', '深度Z', '缺少深度Z');
+    if (!resource.maxWeight) pushIssue(issues, 'warning', '最大承重Kg', '未填写最大承重');
+    if (!resource.workshop) pushIssue(issues, 'warning', '车间', '未填写所属车间');
+    return issues;
+}
+
+function normalizeFurnaceResourceRecord(record) {
+    const fields = record.fields || {};
+    const status = normalizeAvailableStatus(readField(fields, ['状态', '设备状态'], ''));
+    const width = readNumber(fields, ['宽度X', '宽度', '宽', 'X'], 0);
+    const height = readNumber(fields, ['高度Y', '高度', '高', 'Y'], 0);
+    const depth = readNumber(fields, ['深度Z', '深度', '纵深', '长度', '长', 'Z'], 0);
+    const resource = {
+        source: 'feishu',
+        resourceType: 'furnace',
+        recordId: record.record_id,
+        deviceNo: String(readField(fields, ['设备编号', '炉膛编号', '编号'], record.record_id || '')).trim(),
+        name: String(readField(fields, ['设备名称', '炉膛名称', '名称'], '未命名设备')).trim(),
+        workshop: String(readField(fields, ['车间', '所属车间', '生产车间'], '')).trim(),
+        deviceType: String(readField(fields, ['设备类型', '炉型', '类型'], '')).trim(),
+        width,
+        height,
+        depth,
+        dimensions: `${width || 0}×${height || 0}×${depth || 0}mm`,
+        maxWeight: readNumber(fields, ['最大承重Kg', '最大承重kg', '最大承重', '承重Kg', '承重kg', '承重'], 0),
+        supportedProcesses: String(readField(fields, ['支持工艺', '可用工艺', '工艺'], '')).trim(),
+        status,
+        remark: String(readField(fields, ['备注', '说明'], '')).trim(),
+        syncMeta: buildResourceSyncMeta(record, '设备炉膛表'),
+        rawFields: fields
+    };
+    resource.validationIssues = validateFurnaceResource(resource);
+    resource.isValid = !resource.validationIssues.some(issue => issue.level === 'error');
+    return resource;
+}
+
+function validateToolingResource(resource) {
+    const issues = [];
+    if (!resource.name || resource.name === '飞书工装') pushIssue(issues, 'warning', '工装名称', '缺少工装名称');
+    if (!resource.width) pushIssue(issues, 'error', '宽度X', '缺少宽度X');
+    if (!resource.height) pushIssue(issues, 'error', '高度Y', '缺少高度Y');
+    if (!resource.depth) pushIssue(issues, 'error', '深度Z', '缺少深度Z');
+    if (!resource.maxWeight) pushIssue(issues, 'warning', '最大承重Kg', '未填写最大承重');
+    if (!resource.availableCount) pushIssue(issues, 'warning', '可用数量', '未填写可用数量，系统按 1 个处理');
+    if (!resource.supportedProcesses) pushIssue(issues, 'info', '适用工艺', '未限制适用工艺');
+    if (!resource.workshop) pushIssue(issues, 'info', '所属车间', '未填写所属车间');
+    return issues;
+}
+
+function normalizeToolingResourceRecord(record) {
+    const fields = record.fields || {};
+    const rawType = readField(fields, ['工装类型', '类型', '料框类型'], 'standard-basket');
+    const toolingType = normalizeToolingType(rawType);
+    const width = readNumber(fields, ['宽度X', '宽度', '宽', '外径', '直径', 'X'], 0);
+    const height = readNumber(fields, ['高度Y', '高度', '高', 'Y'], 0);
+    const depth = readNumber(fields, ['深度Z', '深度', '纵深', '长度', '长', 'Z'], 0);
+    const availableCount = readNumber(fields, ['可用数量', '数量', '库存数量', '现有数量'], 1) || 1;
+    const hasShelfText = readField(fields, ['是否支持搁板', '支持搁板', '是否有搁板', '搁板'], '');
+    const hasShelf = normalizeBooleanLike(hasShelfText, false);
+    const resource = {
+        source: 'feishu',
+        resourceType: 'tooling',
+        recordId: record.record_id,
+        toolingNo: String(readField(fields, ['工装编号', '料框编号', '编号'], record.record_id || '')).trim(),
+        name: String(readField(fields, ['工装名称', '料框名称', '名称'], '飞书工装')).trim(),
+        rawType: String(rawType || '').trim(),
+        toolingType,
+        basketType: getBasketTypeForTooling(toolingType),
+        width,
+        height,
+        depth,
+        dimensions: `${width || 0}×${height || 0}×${depth || 0}mm`,
+        maxWeight: readNumber(fields, ['最大承重Kg', '最大承重kg', '最大承重', '承重Kg', '承重kg', '承重'], 0),
+        availableCount,
+        count: availableCount,
+        hasShelf,
+        maxLayers: readNumber(fields, ['最大层数', '层数', '可用层数'], hasShelf ? 5 : 1) || (hasShelf ? 5 : 1),
+        shelfThickness: readNumber(fields, ['搁板厚度', '搁板厚度mm', '隔板厚度'], hasShelf ? 20 : 0),
+        workshop: String(readField(fields, ['所属车间', '车间', '生产车间'], '')).trim(),
+        supportedProcesses: String(readField(fields, ['支持工艺', '适用工艺', '工艺'], '')).trim(),
+        status: normalizeAvailableStatus(readField(fields, ['状态', '工装状态'], '')),
+        remark: String(readField(fields, ['备注', '说明'], '')).trim(),
+        syncMeta: buildResourceSyncMeta(record, '工装表'),
+        rawFields: fields
+    };
+    resource.validationIssues = validateToolingResource(resource);
+    resource.isValid = !resource.validationIssues.some(issue => issue.level === 'error');
+    return resource;
+}
+
+function isActiveResourceStatus(status) {
+    const raw = String(status || '').trim();
+    if (!raw) return true;
+    return !['停用', '禁用', '报废', '维修中', '维护中', '不可用'].includes(raw);
+}
+
 function isNonEmptyFields(fields) {
     return fields && Object.keys(fields).length > 0;
 }
@@ -343,6 +491,9 @@ function buildFeishuPlanRecordFields(payload, fieldMap) {
     const fields = {};
     const sourceTaskText = Array.isArray(payload.taskIds) ? payload.taskIds.filter(Boolean).join(', ') : '';
     const recordText = Array.isArray(payload.sourceRecordIds) ? payload.sourceRecordIds.filter(Boolean).join(', ') : '';
+    const writebackKey = String(payload.writebackKey || '').trim();
+    const keyRemark = writebackKey ? `
+[writebackKey:${writebackKey}]` : '';
 
     addTextIfWritable(fields, fieldMap, '方案名称', payload.planName || 'AI装炉方案');
     addTextIfWritable(fields, fieldMap, '来源任务', sourceTaskText || recordText);
@@ -352,7 +503,8 @@ function buildFeishuPlanRecordFields(payload, fieldMap) {
     addTextIfWritable(fields, fieldMap, '风险等级', payload.riskLevel || '');
     addTextIfWritable(fields, fieldMap, '工装组合', Array.isArray(payload.toolingNames) ? payload.toolingNames.join(', ') : payload.toolingNames || '');
     addTextIfWritable(fields, fieldMap, '方案JSON', payload.planJson || '', 50000);
-    addTextIfWritable(fields, fieldMap, '备注', payload.remark || '');
+    addTextIfWritable(fields, fieldMap, '写回标识', writebackKey);
+    addTextIfWritable(fields, fieldMap, '备注', `${payload.remark || ''}${keyRemark}`.trim());
 
     addNumberIfWritable(fields, fieldMap, '炉次数', clampNumber(payload.furnaceCount, 0));
     addNumberIfWritable(fields, fieldMap, '装载重量kg', roundTo(payload.totalWeightKg ?? payload.totalWeight, 2));
@@ -360,6 +512,44 @@ function buildFeishuPlanRecordFields(payload, fieldMap) {
     addNumberIfWritable(fields, fieldMap, '空间利用率', normalizePercentNumber(payload.spaceUtilization));
 
     return fields;
+}
+
+function buildTaskStatusUpdateFields(status) {
+    const normalizedStatus = String(status || '已生成方案').trim() || '已生成方案';
+    return { "状态": normalizedStatus };
+}
+
+function planRecordContainsWritebackKey(record, writebackKey) {
+    if (!record || !writebackKey) return false;
+    const fields = record.fields || {};
+    const keyText = String(writebackKey).trim();
+    const direct = String(readField(fields, ['写回标识'], '')).trim();
+    if (direct && direct === keyText) return true;
+    const remark = String(readField(fields, ['备注', '说明'], '') || '');
+    if (remark.includes(`[writebackKey:${keyText}]`) || remark.includes(keyText)) return true;
+    return false;
+}
+
+async function findExistingPlanByWritebackKey({ token, appToken, tableId, writebackKey }) {
+    if (!writebackKey) return null;
+    try {
+        const records = await fetchBitableRecords({ token, appToken, tableId, pageSize: 100, maxPages: 10 });
+        return records.find(record => planRecordContainsWritebackKey(record, writebackKey)) || null;
+    } catch (err) {
+        console.warn('飞书重复写回检查失败，将继续创建方案记录:', err.feishu || err.message);
+        return null;
+    }
+}
+
+function summarizeWritebackPayload(payload) {
+    return {
+        planName: payload.planName || '',
+        sourceRecordCount: Array.isArray(payload.sourceRecordIds) ? payload.sourceRecordIds.length : 0,
+        taskCount: Array.isArray(payload.taskIds) ? payload.taskIds.length : 0,
+        furnaceCount: payload.furnaceCount || 0,
+        totalWeightKg: payload.totalWeightKg ?? payload.totalWeight ?? 0,
+        writebackKey: payload.writebackKey || ''
+    };
 }
 
 async function createBitableRecord({ token, appToken, tableId, fields }) {
@@ -397,7 +587,7 @@ async function updateBitableRecord({ token, appToken, tableId, recordId, fields 
 }
 
 app.get("/api/health", (req, res) => {
-    res.json({ ok: true, service: "AI heat treatment furnace server", version: "0.8.1" });
+    res.json({ ok: true, service: "AI heat treatment furnace server", version: "0.8.2.1" });
 });
 
 /**
@@ -429,7 +619,7 @@ app.get("/api/feishu/tasks", ensureFeishuToken, async (req, res) => {
 
         return res.json({
             ok: true,
-            version: "0.8.1",
+            version: "0.8.2",
             source: "feishu",
             clientId,
             companyName: tenant.companyName,
@@ -453,6 +643,109 @@ app.get("/api/feishu/tasks", ensureFeishuToken, async (req, res) => {
 });
 
 
+/**
+ * V0.8.2：读取飞书设备 / 炉膛资源表。
+ * Header: x-client-id: client_suoli
+ */
+app.get("/api/feishu/furnaces", ensureFeishuToken, async (req, res) => {
+    const { clientId, tenant } = getTenantFromRequest(req);
+    if (!tenant) {
+        return res.status(403).json({ ok: false, error: "未授权或非法的客户身份标识", clientId });
+    }
+
+    try {
+        const records = await fetchBitableRecords({
+            token: req.feishu_token,
+            appToken: tenant.appToken,
+            tableId: tenant.furnaceTableId,
+            pageSize: Number(req.query.page_size) || 100
+        });
+        const includeInactive = String(req.query.include_inactive || 'false') === 'true';
+        const nonEmptyRecords = records.filter(item => isNonEmptyFields(item.fields));
+        const furnaces = nonEmptyRecords
+            .map(normalizeFurnaceResourceRecord)
+            .filter(item => includeInactive || isActiveResourceStatus(item.status));
+
+        return res.json({
+            ok: true,
+            version: "0.8.2",
+            source: "feishu",
+            clientId,
+            companyName: tenant.companyName,
+            appToken: tenant.appToken,
+            tableId: tenant.furnaceTableId,
+            totalRecords: records.length,
+            emptyRecords: records.length - nonEmptyRecords.length,
+            skippedInactive: nonEmptyRecords.length - furnaces.length,
+            furnaceCount: furnaces.length,
+            invalidCount: furnaces.filter(item => item.isValid === false).length,
+            warningCount: furnaces.filter(item => Array.isArray(item.validationIssues) && item.validationIssues.length).length,
+            syncAt: new Date().toISOString(),
+            furnaces
+        });
+    } catch (error) {
+        console.error("读取飞书设备炉膛失败:", error.feishu || error.message);
+        return res.status(500).json({
+            ok: false,
+            version: "0.8.2",
+            error: "读取飞书设备炉膛失败",
+            detail: error.feishu || error.message
+        });
+    }
+});
+
+/**
+ * V0.8.2：读取飞书工装 / 料框资源表。
+ * Header: x-client-id: client_suoli
+ */
+app.get("/api/feishu/tooling", ensureFeishuToken, async (req, res) => {
+    const { clientId, tenant } = getTenantFromRequest(req);
+    if (!tenant) {
+        return res.status(403).json({ ok: false, error: "未授权或非法的客户身份标识", clientId });
+    }
+
+    try {
+        const records = await fetchBitableRecords({
+            token: req.feishu_token,
+            appToken: tenant.appToken,
+            tableId: tenant.toolingTableId,
+            pageSize: Number(req.query.page_size) || 100
+        });
+        const includeInactive = String(req.query.include_inactive || 'false') === 'true';
+        const nonEmptyRecords = records.filter(item => isNonEmptyFields(item.fields));
+        const tooling = nonEmptyRecords
+            .map(normalizeToolingResourceRecord)
+            .filter(item => includeInactive || isActiveResourceStatus(item.status));
+
+        return res.json({
+            ok: true,
+            version: "0.8.2",
+            source: "feishu",
+            clientId,
+            companyName: tenant.companyName,
+            appToken: tenant.appToken,
+            tableId: tenant.toolingTableId,
+            totalRecords: records.length,
+            emptyRecords: records.length - nonEmptyRecords.length,
+            skippedInactive: nonEmptyRecords.length - tooling.length,
+            toolingCount: tooling.length,
+            invalidCount: tooling.filter(item => item.isValid === false).length,
+            warningCount: tooling.filter(item => Array.isArray(item.validationIssues) && item.validationIssues.length).length,
+            syncAt: new Date().toISOString(),
+            tooling
+        });
+    } catch (error) {
+        console.error("读取飞书工装资源失败:", error.feishu || error.message);
+        return res.status(500).json({
+            ok: false,
+            version: "0.8.2",
+            error: "读取飞书工装资源失败",
+            detail: error.feishu || error.message
+        });
+    }
+});
+
+
 
 /**
  * V0.8.1：保存当前方案到飞书方案记录表，并可同步更新来源任务状态。
@@ -470,6 +763,9 @@ app.post("/api/feishu/plans", ensureFeishuToken, async (req, res) => {
 
     try {
         const payload = req.body || {};
+        const forceCreate = payload.forceCreate === true;
+        console.log('[Feishu Plan Writeback] request:', summarizeWritebackPayload(payload));
+
         const fieldMap = await fetchBitableFields({
             token: req.feishu_token,
             appToken: tenant.appToken,
@@ -479,19 +775,42 @@ app.post("/api/feishu/plans", ensureFeishuToken, async (req, res) => {
         const fields = buildFeishuPlanRecordFields(payload, fieldMap);
         if (!fields["方案名称"]) fields["方案名称"] = payload.planName || `AI装炉方案_${new Date().toISOString().slice(0, 10)}`;
 
-        const createdPlan = await createBitableRecord({
-            token: req.feishu_token,
-            appToken: tenant.appToken,
-            tableId: tenant.plansTableId,
-            fields
-        });
+        const writebackKey = String(payload.writebackKey || '').trim();
+        let createdPlan = null;
+        let duplicateSkipped = false;
+        let existingPlan = null;
+
+        if (writebackKey && !forceCreate) {
+            existingPlan = await findExistingPlanByWritebackKey({
+                token: req.feishu_token,
+                appToken: tenant.appToken,
+                tableId: tenant.plansTableId,
+                writebackKey
+            });
+        }
+
+        if (existingPlan) {
+            duplicateSkipped = true;
+            createdPlan = existingPlan;
+            console.log(`[Feishu Plan Writeback] duplicate skipped: ${writebackKey} -> ${existingPlan.record_id}`);
+        } else {
+            createdPlan = await createBitableRecord({
+                token: req.feishu_token,
+                appToken: tenant.appToken,
+                tableId: tenant.plansTableId,
+                fields
+            });
+            console.log(`[Feishu Plan Writeback] plan created: ${createdPlan?.record_id || createdPlan?.id || 'unknown'}`);
+        }
 
         const updateTaskStatus = payload.updateTaskStatus !== false;
         const uniqueRecordIds = Array.from(new Set((payload.sourceRecordIds || []).filter(Boolean)));
         const updatedTasks = [];
         const failedTasks = [];
+        const skippedTasks = [];
 
         if (updateTaskStatus && uniqueRecordIds.length > 0) {
+            const statusFields = buildTaskStatusUpdateFields(payload.taskStatus || "已生成方案");
             for (const recordId of uniqueRecordIds) {
                 try {
                     const updated = await updateBitableRecord({
@@ -499,34 +818,42 @@ app.post("/api/feishu/plans", ensureFeishuToken, async (req, res) => {
                         appToken: tenant.appToken,
                         tableId: tenant.itemsTableId,
                         recordId,
-                        fields: { "状态": payload.taskStatus || "已生成方案" }
+                        fields: statusFields
                     });
                     updatedTasks.push({ recordId, ok: true, record: updated });
                 } catch (taskErr) {
                     failedTasks.push({ recordId, ok: false, detail: taskErr.feishu || taskErr.message });
                 }
             }
+        } else if (!updateTaskStatus) {
+            skippedTasks.push({ reason: 'updateTaskStatus=false' });
         }
 
         return res.json({
             ok: true,
-            version: "0.8.1",
+            version: "0.8.2",
             source: "feishu",
             clientId,
             companyName: tenant.companyName,
             planTableId: tenant.plansTableId,
             taskTableId: tenant.itemsTableId,
+            duplicateSkipped,
             createdPlan,
-            writtenFields: fields,
+            existingPlan: duplicateSkipped ? existingPlan : null,
+            writtenFields: duplicateSkipped ? {} : fields,
+            writebackKey,
             updatedTaskCount: updatedTasks.length,
             failedTaskCount: failedTasks.length,
+            skippedTaskCount: skippedTasks.length,
             updatedTasks,
-            failedTasks
+            failedTasks,
+            skippedTasks
         });
     } catch (error) {
         console.error("写回飞书方案失败:", error.feishu || error.message);
         return res.status(500).json({
             ok: false,
+            version: "0.8.2",
             error: "写回飞书方案失败",
             detail: error.feishu || error.message
         });
@@ -584,5 +911,5 @@ app.get("*", (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`🚀 热处理云端排产引擎 V0.8.1 已在端口 ${PORT} 启动`);
+    console.log(`🚀 热处理云端排产引擎 V0.8.2 已在端口 ${PORT} 启动`);
 });

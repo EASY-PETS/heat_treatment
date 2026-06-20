@@ -7257,6 +7257,350 @@ function bindFeishuSyncButton() {
 }
 
 
+// ==================== V0.8.2: Feishu equipment/tooling resource sync ====================
+let lastFeishuFurnaceResources = [];
+let lastFeishuToolingResources = [];
+
+function normalizeFeishuResourceText(value, fallback = '') {
+    if (value === null || value === undefined) return fallback;
+    const text = String(value).trim();
+    return text || fallback;
+}
+
+function toPositiveNumber(value, fallback = 0) {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+function normalizeFeishuToolingForCard(item) {
+    const toolingType = item.toolingType || 'standard-basket';
+    const basketType = item.basketType || {
+        'standard-basket': 'grid',
+        'mesh-basket': 'honeycomb',
+        'material-tray': 'tray',
+        'ring-tooling': 'ringnode'
+    }[toolingType] || 'grid';
+
+    return {
+        recordId: item.recordId || item.record_id || '',
+        name: normalizeFeishuResourceText(item.name, item.toolingNo || '飞书工装'),
+        toolingNo: normalizeFeishuResourceText(item.toolingNo, ''),
+        workshop: normalizeFeishuResourceText(item.workshop, ''),
+        status: normalizeFeishuResourceText(item.status, ''),
+        supportedProcesses: normalizeFeishuResourceText(item.supportedProcesses, ''),
+        toolingType,
+        basketType,
+        width: toPositiveNumber(item.width, 900),
+        height: toPositiveNumber(item.height, toolingType === 'material-tray' ? 160 : 600),
+        depth: toPositiveNumber(item.depth, toolingType === 'ring-tooling' ? toPositiveNumber(item.width, 800) : 900),
+        maxWeight: toPositiveNumber(item.maxWeight, 500),
+        count: Math.max(1, Math.round(toPositiveNumber(item.count || item.availableCount, 1))),
+        maxLayers: Math.max(1, Math.round(toPositiveNumber(item.maxLayers, item.hasShelf ? 5 : 1))),
+        shelfThickness: toPositiveNumber(item.shelfThickness, item.hasShelf ? 20 : 0),
+        hasShelf: !!item.hasShelf,
+        remark: normalizeFeishuResourceText(item.remark, '')
+    };
+}
+
+function ensureFeishuResourceSyncControls() {
+    const furnacePane = document.getElementById('left-tab-furnace');
+    if (furnacePane && !document.getElementById('feishu-tooling-sync-row')) {
+        const intro = furnacePane.querySelector('.left-tab-intro');
+        const row = document.createElement('div');
+        row.id = 'feishu-tooling-sync-row';
+        row.className = 'feishu-resource-sync-row';
+        row.innerHTML = `
+            <button class="hm-mini-btn primary feishu-resource-btn" id="btn-sync-feishu-tooling" type="button">${getFeishuUiText('同步飞书工装', 'Sync Feishu Tooling')}</button>
+            <span class="feishu-resource-hint" id="feishu-tooling-sync-status">${getFeishuUiText('从工装表读取可用工装，替换当前装载工装。', 'Load available tooling from Feishu and replace local tooling.')}</span>
+        `;
+        (intro || furnacePane.firstElementChild)?.insertAdjacentElement('afterend', row);
+    }
+
+    const workshopPane = document.getElementById('left-tab-tooling');
+    if (workshopPane && !document.getElementById('feishu-furnace-sync-row')) {
+        const intro = workshopPane.querySelector('.left-tab-intro');
+        const row = document.createElement('div');
+        row.id = 'feishu-furnace-sync-row';
+        row.className = 'feishu-resource-sync-row';
+        row.innerHTML = `
+            <button class="hm-mini-btn primary feishu-resource-btn" id="btn-sync-feishu-furnaces" type="button">${getFeishuUiText('同步飞书设备', 'Sync Feishu Equipment')}</button>
+            <span class="feishu-resource-hint" id="feishu-furnace-sync-status">${getFeishuUiText('从设备炉膛表读取车间与设备资源。', 'Load workshop and equipment resources from Feishu.')}</span>
+        `;
+        (intro || workshopPane.firstElementChild)?.insertAdjacentElement('afterend', row);
+    }
+}
+
+function renderFeishuFurnaceResourcePanel(resources = []) {
+    const workshopPane = document.getElementById('left-tab-tooling');
+    if (!workshopPane) return;
+    let panel = document.getElementById('feishu-furnace-resource-panel');
+    if (!panel) {
+        panel = document.createElement('div');
+        panel.id = 'feishu-furnace-resource-panel';
+        panel.className = 'feishu-resource-panel';
+        const placeholder = workshopPane.querySelector('.workshop-placeholder');
+        if (placeholder) placeholder.insertAdjacentElement('afterend', panel);
+        else workshopPane.appendChild(panel);
+    }
+
+    if (!resources.length) {
+        panel.innerHTML = `
+            <div class="feishu-resource-empty">${getFeishuUiText('暂无可用设备记录。请确认设备炉膛表已填写且状态不是停用。', 'No available equipment records. Check the equipment table and status.')}</div>
+        `;
+        return;
+    }
+
+    const workshopMap = new Map();
+    resources.forEach(item => {
+        const key = item.workshop || getFeishuUiText('未分配车间', 'Unassigned Workshop');
+        if (!workshopMap.has(key)) workshopMap.set(key, []);
+        workshopMap.get(key).push(item);
+    });
+
+    panel.innerHTML = `
+        <div class="feishu-resource-panel-title">${getFeishuUiText('飞书设备资源', 'Feishu Equipment Resources')}</div>
+        ${Array.from(workshopMap.entries()).map(([workshop, list]) => `
+            <section class="feishu-workshop-group">
+                <div class="feishu-workshop-title">${hmEscape(workshop)} · ${list.length}${getFeishuUiText(' 台设备', ' device(s)')}</div>
+                <div class="feishu-resource-card-list">
+                    ${list.map(item => `
+                        <article class="feishu-resource-card">
+                            <div class="frc-head">
+                                <strong>${hmEscape(item.name || item.deviceNo || '设备')}</strong>
+                                <span>${hmEscape(item.status || getFeishuUiText('可用', 'Available'))}</span>
+                            </div>
+                            <div class="frc-meta">${hmEscape(item.deviceType || getFeishuUiText('设备', 'Equipment'))} · ${Number(item.width)||0}×${Number(item.height)||0}×${Number(item.depth)||0}mm · ${Number(item.maxWeight)||0}kg</div>
+                            <div class="frc-foot">${hmEscape(item.supportedProcesses || item.remark || getFeishuUiText('未填写支持工艺', 'No process specified'))}</div>
+                        </article>
+                    `).join('')}
+                </div>
+            </section>
+        `).join('')}
+    `;
+}
+
+function applyFeishuToolingResourcesToCards(resources = [], options = {}) {
+    const normalized = resources.map(normalizeFeishuToolingForCard).filter(item => item.width && item.height && item.depth);
+    if (!normalized.length) {
+        showCapacityFeedback('warning', getFeishuUiText('飞书工装表没有可导入的可用工装。', 'No available tooling can be imported from Feishu.'));
+        return 0;
+    }
+
+    const existingCount = document.querySelectorAll('.furnace-card').length;
+    if (existingCount && !options.force) {
+        const ok = confirm(getFeishuUiText(
+            `同步飞书工装会替换当前 ${existingCount} 个装载工装，是否继续？`,
+            `Syncing Feishu tooling will replace ${existingCount} current tooling card(s). Continue?`
+        ));
+        if (!ok) return 0;
+    }
+
+    document.querySelectorAll('.furnace-card, .furnace-inline-detail').forEach(el => el.remove());
+    setSelectedFurnaceCardId(null);
+    setFurnaceCounter(0);
+
+    normalized.forEach(item => {
+        const result = createFurnaceCard(
+            item.name,
+            item.depth,
+            item.width,
+            item.height,
+            item.maxWeight,
+            item.count,
+            0,
+            5,
+            item.basketType,
+            item.toolingType
+        );
+        const card = document.getElementById(result.cardId);
+        if (!card) return;
+        card.classList.add('feishu-source-card');
+        card.setAttribute('data-source', 'feishu');
+        card.setAttribute('data-source-record-id', item.recordId || '');
+        card.setAttribute('data-tooling-no', item.toolingNo || '');
+        card.setAttribute('data-workshop', item.workshop || '');
+        card.setAttribute('data-status', item.status || '');
+        card.setAttribute('data-max-layers', String(item.maxLayers || 1));
+        card.setAttribute('data-allowed-processes', item.supportedProcesses || '');
+        const extras = {
+            source: 'feishu',
+            recordId: item.recordId,
+            toolingNo: item.toolingNo,
+            workshop: item.workshop,
+            status: item.status,
+            supportedProcesses: item.supportedProcesses,
+            hasShelf: item.hasShelf,
+            maxLayers: item.maxLayers,
+            shelfThickness: item.shelfThickness,
+            remark: item.remark
+        };
+        if (item.toolingType === 'material-tray') {
+            extras.trayCornerPosts = { enabled: true, diameter: 16, offset: 22, safetyGap: 8 };
+        }
+        card.setAttribute('data-extras', JSON.stringify(extras));
+        const statusEl = card.querySelector('.f-card-status');
+        if (statusEl) {
+            const badge = document.createElement('span');
+            badge.className = 'feishu-source-badge';
+            badge.textContent = item.workshop ? `飞书 · ${item.workshop}` : '飞书';
+            statusEl.appendChild(document.createTextNode(' · '));
+            statusEl.appendChild(badge);
+        }
+    });
+
+    updateTopSummary();
+    updateWorkbenchUiMode();
+    renderCurrentToolingPlanCard();
+    if (typeof renderHeatMergeDesignPanel === 'function') renderHeatMergeDesignPanel();
+    return normalized.length;
+}
+
+async function fetchFeishuJson(endpoint, clientId) {
+    const apiBase = getFeishuApiBase();
+    const resp = await fetch(`${apiBase}${endpoint}`, {
+        headers: {
+            'Accept': 'application/json',
+            'x-client-id': clientId || getFeishuClientId()
+        }
+    });
+    const payload = await resp.json().catch(() => null);
+    if (!resp.ok || !payload || payload.ok === false || payload.error) {
+        throw new Error(payload?.error || payload?.detail?.msg || payload?.detail || `HTTP ${resp.status}`);
+    }
+    return payload;
+}
+
+async function syncFeishuFurnaceResources() {
+    const btn = document.getElementById('btn-sync-feishu-furnaces');
+    const status = document.getElementById('feishu-furnace-sync-status');
+    const oldText = btn?.textContent || '';
+    try {
+        if (btn) { btn.disabled = true; btn.textContent = getFeishuUiText('同步中...', 'Syncing...'); }
+        if (status) status.textContent = getFeishuUiText('正在读取飞书设备炉膛表...', 'Reading Feishu equipment table...');
+        const payload = await fetchFeishuJson('/api/feishu/furnaces', getFeishuClientId());
+        lastFeishuFurnaceResources = Array.isArray(payload.furnaces) ? payload.furnaces : [];
+        renderFeishuFurnaceResourcePanel(lastFeishuFurnaceResources);
+        const skippedText = payload.emptyRecords || payload.skippedInactive
+            ? getFeishuUiText(`（跳过空记录 ${payload.emptyRecords || 0}，停用 ${payload.skippedInactive || 0}）`, ` (skipped empty ${payload.emptyRecords || 0}, inactive ${payload.skippedInactive || 0})`)
+            : '';
+        if (status) status.textContent = getFeishuUiText(`已同步 ${lastFeishuFurnaceResources.length} 台设备${skippedText}`, `Synced ${lastFeishuFurnaceResources.length} equipment records${skippedText}`);
+        showCapacityFeedback('success', getFeishuUiText(`已从飞书同步 ${lastFeishuFurnaceResources.length} 台设备。`, `Synced ${lastFeishuFurnaceResources.length} equipment records from Feishu.`));
+    } catch (err) {
+        console.error('[Feishu Furnace Sync] failed:', err);
+        if (status) status.textContent = getFeishuUiText('飞书设备同步失败', 'Feishu equipment sync failed');
+        showCapacityFeedback('error', getFeishuUiText(`飞书设备同步失败：${err.message}`, `Feishu equipment sync failed: ${err.message}`));
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = oldText || getFeishuUiText('同步飞书设备', 'Sync Feishu Equipment'); }
+    }
+}
+
+async function syncFeishuToolingResources() {
+    const btn = document.getElementById('btn-sync-feishu-tooling');
+    const status = document.getElementById('feishu-tooling-sync-status');
+    const oldText = btn?.textContent || '';
+    try {
+        if (btn) { btn.disabled = true; btn.textContent = getFeishuUiText('同步中...', 'Syncing...'); }
+        if (status) status.textContent = getFeishuUiText('正在读取飞书工装表...', 'Reading Feishu tooling table...');
+        const payload = await fetchFeishuJson('/api/feishu/tooling', getFeishuClientId());
+        lastFeishuToolingResources = Array.isArray(payload.tooling) ? payload.tooling : [];
+        const count = applyFeishuToolingResourcesToCards(lastFeishuToolingResources);
+        const skippedText = payload.emptyRecords || payload.skippedInactive
+            ? getFeishuUiText(`（跳过空记录 ${payload.emptyRecords || 0}，停用 ${payload.skippedInactive || 0}）`, ` (skipped empty ${payload.emptyRecords || 0}, inactive ${payload.skippedInactive || 0})`)
+            : '';
+        if (status) status.textContent = getFeishuUiText(`已同步 ${count} 个可用工装${skippedText}`, `Synced ${count} available tooling records${skippedText}`);
+        showCapacityFeedback('success', getFeishuUiText(`已从飞书同步 ${count} 个工装，可继续合炉设计或生成方案。`, `Synced ${count} tooling records from Feishu. You can continue planning.`));
+    } catch (err) {
+        console.error('[Feishu Tooling Sync] failed:', err);
+        if (status) status.textContent = getFeishuUiText('飞书工装同步失败', 'Feishu tooling sync failed');
+        showCapacityFeedback('error', getFeishuUiText(`飞书工装同步失败：${err.message}`, `Feishu tooling sync failed: ${err.message}`));
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = oldText || getFeishuUiText('同步飞书工装', 'Sync Feishu Tooling'); }
+    }
+}
+
+function bindFeishuResourceSyncButtons() {
+    ensureFeishuResourceSyncControls();
+    const fBtn = document.getElementById('btn-sync-feishu-furnaces');
+    if (fBtn && fBtn.dataset.bound !== '1') {
+        fBtn.dataset.bound = '1';
+        fBtn.addEventListener('click', syncFeishuFurnaceResources);
+    }
+    const tBtn = document.getElementById('btn-sync-feishu-tooling');
+    if (tBtn && tBtn.dataset.bound !== '1') {
+        tBtn.dataset.bound = '1';
+        tBtn.addEventListener('click', syncFeishuToolingResources);
+    }
+}
+
+
+
+// ==================== V0.8.1.1: Feishu writeback stability helpers ====================
+const FEISHU_WRITEBACK_REGISTRY_KEY = 'heat_furnace_feishu_writeback_registry_v0811';
+let feishuPlanWritebackInFlight = false;
+
+function fnv1aHash(text) {
+    let hash = 0x811c9dc5;
+    const str = String(text || '');
+    for (let i = 0; i < str.length; i += 1) {
+        hash ^= str.charCodeAt(i);
+        hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+    return hash.toString(16).padStart(8, '0');
+}
+
+function readFeishuWritebackRegistry() {
+    try {
+        const raw = localStorage.getItem(FEISHU_WRITEBACK_REGISTRY_KEY);
+        const parsed = raw ? JSON.parse(raw) : {};
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (err) {
+        console.warn('[Feishu Plan Writeback] read registry failed:', err);
+        return {};
+    }
+}
+
+function writeFeishuWritebackRegistry(registry) {
+    try {
+        const entries = Object.entries(registry || {}).slice(-200);
+        localStorage.setItem(FEISHU_WRITEBACK_REGISTRY_KEY, JSON.stringify(Object.fromEntries(entries)));
+    } catch (err) {
+        console.warn('[Feishu Plan Writeback] write registry failed:', err);
+    }
+}
+
+function buildFeishuWritebackKey(payload) {
+    if (!payload) return '';
+    const base = {
+        sourceRecordIds: [...(payload.sourceRecordIds || [])].map(String).sort(),
+        taskIds: [...(payload.taskIds || [])].map(String).sort(),
+        furnaceCount: Number(payload.furnaceCount || 0),
+        totalWeightKg: Number(payload.totalWeightKg || 0).toFixed(2),
+        weightUtilization: Number(payload.weightUtilization || 0).toFixed(4),
+        spaceUtilization: Number(payload.spaceUtilization || 0).toFixed(2),
+        toolingNames: [...(payload.toolingNames || [])].map(String).sort(),
+        strategy: String(payload.strategy || '')
+    };
+    return `fw_${fnv1aHash(JSON.stringify(base))}`;
+}
+
+function hasFeishuWritebackRecord(writebackKey) {
+    if (!writebackKey) return null;
+    const registry = readFeishuWritebackRegistry();
+    return registry[writebackKey] || null;
+}
+
+function rememberFeishuWritebackRecord(writebackKey, result, payload) {
+    if (!writebackKey) return;
+    const registry = readFeishuWritebackRegistry();
+    registry[writebackKey] = {
+        at: new Date().toISOString(),
+        planName: payload?.planName || '',
+        planRecordId: result?.createdPlan?.record_id || result?.createdPlan?.id || result?.existingPlan?.record_id || '',
+        updatedTaskCount: result?.updatedTaskCount || 0,
+        duplicateSkipped: !!result?.duplicateSkipped
+    };
+    writeFeishuWritebackRegistry(registry);
+}
 
 // ==================== V0.8.1: Feishu plan writeback ====================
 function collectFeishuSourceInfoFromCurrentPlan() {
@@ -7321,7 +7665,7 @@ function buildCurrentPlanFeishuPayload() {
     let planJson = '';
     try {
         planJson = JSON.stringify({
-            version: '0.8.1',
+            version: '0.8.1.1',
             source: 'ai-furnace-loading-agent',
             createdAt: new Date().toISOString(),
             planName,
@@ -7336,7 +7680,7 @@ function buildCurrentPlanFeishuPayload() {
         planJson = '';
     }
 
-    return {
+    const payload = {
         planName,
         furnaceCount: totals.furnaceCount,
         totalWeightKg: Number(totals.totalWeight || 0),
@@ -7353,6 +7697,8 @@ function buildCurrentPlanFeishuPayload() {
         taskStatus: '已生成方案',
         remark: `由 AI热处理装炉智能体写回；工件 ${totals.itemCount} 件，未装 ${totals.unpackedCount} 件。`
     };
+    payload.writebackKey = buildFeishuWritebackKey(payload);
+    return payload;
 }
 
 async function syncCurrentPlanToFeishuAfterLibrarySave(triggerButton = null) {
@@ -7362,9 +7708,29 @@ async function syncCurrentPlanToFeishuAfterLibrarySave(triggerButton = null) {
         return null;
     }
 
+    if (feishuPlanWritebackInFlight) {
+        showCapacityFeedback('warning', getFeishuUiText(
+            '飞书写回正在进行中，请勿重复点击保存。',
+            'Feishu writeback is already in progress. Please do not click Save repeatedly.'
+        ));
+        return null;
+    }
+
+    const writebackKey = payload.writebackKey || buildFeishuWritebackKey(payload);
+    payload.writebackKey = writebackKey;
+    const existed = hasFeishuWritebackRecord(writebackKey);
+    if (existed) {
+        showCapacityFeedback('warning', getFeishuUiText(
+            `本地方案已保存；检测到该飞书方案已写回过，已跳过重复写回${existed.planRecordId ? `（${existed.planRecordId}）` : ''}。`,
+            `Plan saved locally; this Feishu plan was already written back, so duplicate writeback was skipped${existed.planRecordId ? ` (${existed.planRecordId})` : ''}.`
+        ));
+        return { ok: true, localDuplicateSkipped: true, existing: existed };
+    }
+
     const apiBase = getFeishuApiBase();
     const clientId = getFeishuClientId();
     const oldText = triggerButton ? triggerButton.textContent : '';
+    feishuPlanWritebackInFlight = true;
 
     try {
         if (triggerButton) {
@@ -7388,13 +7754,18 @@ async function syncCurrentPlanToFeishuAfterLibrarySave(triggerButton = null) {
             throw new Error(result?.error || result?.detail?.msg || result?.detail || `HTTP ${resp.status}`);
         }
 
-        const planRecordId = result?.createdPlan?.record_id || result?.createdPlan?.id || '';
+        rememberFeishuWritebackRecord(writebackKey, result, payload);
+
+        const planRecordId = result?.createdPlan?.record_id || result?.createdPlan?.id || result?.existingPlan?.record_id || '';
+        const duplicateText = result.duplicateSkipped
+            ? getFeishuUiText('；服务端检测为重复方案，未新增方案记录', '; server detected a duplicate plan and did not create another record')
+            : '';
         const failText = result.failedTaskCount
             ? getFeishuUiText(`，${result.failedTaskCount} 条任务状态更新失败`, `, ${result.failedTaskCount} task updates failed`)
             : '';
-        showCapacityFeedback('success', getFeishuUiText(
-            `方案已保存到本地方案库，并写回飞书方案记录${planRecordId ? `（${planRecordId}）` : ''}；已更新 ${result.updatedTaskCount || 0} 条任务状态${failText}。`,
-            `Plan saved locally and written back to Feishu${planRecordId ? ` (${planRecordId})` : ''}; updated ${result.updatedTaskCount || 0} task statuses${failText}.`
+        showCapacityFeedback(result.failedTaskCount ? 'warning' : 'success', getFeishuUiText(
+            `方案已保存到本地方案库，并写回飞书${planRecordId ? `（${planRecordId}）` : ''}${duplicateText}；已更新 ${result.updatedTaskCount || 0} 条任务状态${failText}。`,
+            `Plan saved locally and synced to Feishu${planRecordId ? ` (${planRecordId})` : ''}${duplicateText}; updated ${result.updatedTaskCount || 0} task statuses${failText}.`
         ));
         return result;
     } catch (err) {
@@ -7405,6 +7776,7 @@ async function syncCurrentPlanToFeishuAfterLibrarySave(triggerButton = null) {
         ));
         return null;
     } finally {
+        feishuPlanWritebackInFlight = false;
         if (triggerButton) {
             triggerButton.disabled = false;
             triggerButton.classList.remove('is-loading');
@@ -7509,6 +7881,8 @@ const UI_I18N_EN = {
     '导入Excel': 'Import Excel',
     '从飞书同步': 'Sync from Feishu',
     '飞书同步': 'Feishu Sync',
+    '同步飞书设备': 'Sync Feishu Equipment',
+    '同步飞书工装': 'Sync Feishu Tooling',
     '同步中...': 'Syncing...',
     '清空任务': 'Clear Tasks',
     '收起筛选': 'Collapse Filters',
@@ -8043,12 +8417,211 @@ function ensureLanguageThemeControls() {
     observeUiLanguageMutations();
 }
 
+
+
+// ==================== V0.8.2.1.2 PDF export bulletproof binding ====================
+let pdfExportDelegationBoundV08212 = false;
+
+function ensurePdfExportDomV08212() {
+    let overlay = document.getElementById('pdf-select-overlay');
+    let hiddenTemplate = document.getElementById('pdf-hidden-template');
+
+    if (!hiddenTemplate) {
+        hiddenTemplate = document.createElement('div');
+        hiddenTemplate.id = 'pdf-hidden-template';
+        hiddenTemplate.style.display = 'none';
+        document.body.appendChild(hiddenTemplate);
+    }
+
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'pdf-select-overlay';
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,.56);backdrop-filter:blur(8px);';
+        overlay.innerHTML = `
+            <div id="pdf-select-modal" style="width:min(920px,calc(100vw - 36px));max-height:88vh;overflow:auto;background:#fff;border-radius:22px;padding:24px;box-shadow:0 30px 100px rgba(15,23,42,.32);">
+                <h2 style="margin:0 0 8px;font-size:22px;color:#0f172a;">打印现场摆料施工单</h2>
+                <div style="color:#64748b;font-size:13px;line-height:1.7;margin-bottom:14px;">选择需要导出的炉次，然后生成 PDF。</div>
+                <div id="pdf-unpacked-warning" class="pdf-unpacked-badge" style="display:none;"></div>
+                <div id="pdf-furnace-list" style="display:flex;flex-direction:column;gap:10px;margin:14px 0 18px;"></div>
+                <div class="pdf-options-section" style="margin:12px 0;">
+                    <label style="display:flex;align-items:center;gap:8px;color:#475569;font-size:13px;">
+                        <input type="checkbox" id="pdf-opt-json"> 同时导出 JSON
+                    </label>
+                </div>
+                <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:18px;">
+                    <button id="btn-pdf-cancel" type="button" style="padding:10px 20px;border:0;border-radius:12px;background:#e2e8f0;color:#334155;font-weight:800;cursor:pointer;">取消</button>
+                    <button id="btn-pdf-confirm" type="button" style="padding:10px 24px;border:0;border-radius:12px;background:#2563eb;color:white;font-weight:800;cursor:pointer;">📄 导出 PDF</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+    }
+
+    if (!document.getElementById('pdf-furnace-list')) {
+        const modal = overlay.querySelector('#pdf-select-modal') || overlay.firstElementChild || overlay;
+        const list = document.createElement('div');
+        list.id = 'pdf-furnace-list';
+        list.style.cssText = 'display:flex;flex-direction:column;gap:10px;margin:14px 0 18px;';
+        modal.appendChild(list);
+    }
+    if (!document.getElementById('pdf-unpacked-warning')) {
+        const warning = document.createElement('div');
+        warning.id = 'pdf-unpacked-warning';
+        warning.className = 'pdf-unpacked-badge';
+        warning.style.display = 'none';
+        const list = document.getElementById('pdf-furnace-list');
+        list.parentNode.insertBefore(warning, list);
+    }
+    if (!document.getElementById('btn-pdf-cancel') || !document.getElementById('btn-pdf-confirm')) {
+        const modal = overlay.querySelector('#pdf-select-modal') || overlay.firstElementChild || overlay;
+        const actions = document.createElement('div');
+        actions.style.cssText = 'display:flex;gap:12px;justify-content:flex-end;margin-top:18px;';
+        actions.innerHTML = '<button id="btn-pdf-cancel" type="button">取消</button><button id="btn-pdf-confirm" type="button">📄 导出 PDF</button>';
+        modal.appendChild(actions);
+    }
+
+    return overlay;
+}
+
+function showPdfProgressV08212(message = '正在生成 PDF...') {
+    let overlay = document.getElementById('pdf-export-progress-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'pdf-export-progress-overlay';
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(15,23,42,.42);backdrop-filter:blur(8px);';
+        overlay.innerHTML = `
+            <div style="width:min(520px,calc(100vw - 36px));background:#fff;border-radius:20px;padding:28px;box-shadow:0 30px 100px rgba(15,23,42,.32);border:1px solid rgba(148,163,184,.28);">
+                <div style="font-size:22px;font-weight:900;color:#0f172a;margin-bottom:10px;">正在生成 PDF</div>
+                <div id="pdf-export-progress-text" style="font-size:14px;color:#64748b;line-height:1.7;">${message}</div>
+                <div style="height:8px;background:#e5e7eb;border-radius:999px;overflow:hidden;margin-top:20px;">
+                    <div style="height:100%;width:42%;background:#2563eb;border-radius:999px;animation:pdfProgressSlideV08212 1.2s ease-in-out infinite alternate;"></div>
+                </div>
+            </div>
+        `;
+        if (!document.getElementById('pdf-progress-style-v08212')) {
+            const style = document.createElement('style');
+            style.id = 'pdf-progress-style-v08212';
+            style.textContent = '@keyframes pdfProgressSlideV08212{from{transform:translateX(-35%)}to{transform:translateX(150%)}}';
+            document.head.appendChild(style);
+        }
+        document.body.appendChild(overlay);
+    } else {
+        overlay.style.display = 'flex';
+        const text = overlay.querySelector('#pdf-export-progress-text');
+        if (text) text.textContent = message;
+    }
+    return overlay;
+}
+
+function hidePdfProgressV08212() {
+    const overlay = document.getElementById('pdf-export-progress-overlay');
+    if (overlay) overlay.style.display = 'none';
+}
+
+function openPdfExportModalSafeV08212(event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+    }
+
+    const furnaces = Array.isArray(globalFurnacesResult) ? globalFurnacesResult : [];
+    if (!furnaces.length) {
+        alert('请先生成装炉方案，再打印方案。');
+        return;
+    }
+
+    try {
+        ensurePdfExportDomV08212();
+        showPdfSelectModal();
+        const confirmBtn = document.getElementById('btn-pdf-confirm');
+        if (confirmBtn) confirmBtn.onclick = confirmPdfExportSafeV08212;
+        const cancelBtn = document.getElementById('btn-pdf-cancel');
+        if (cancelBtn) cancelBtn.onclick = () => {
+            const overlay = document.getElementById('pdf-select-overlay');
+            if (overlay) overlay.style.display = 'none';
+        };
+    } catch (err) {
+        console.error('[PDF] 打开导出弹窗失败:', err);
+        alert('PDF 导出弹窗打开失败：' + (err?.message || err));
+    }
+}
+
+async function confirmPdfExportSafeV08212(event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+    }
+
+    const selectedIds = getSelectedPdfFurnaceIds();
+    if (!selectedIds.length) {
+        alert('请至少选择一个炉膛方案');
+        return;
+    }
+
+    const btn = document.getElementById('btn-pdf-confirm');
+    const oldText = btn ? btn.textContent : '';
+    const shouldExportJson = !!document.getElementById('pdf-opt-json')?.checked;
+    const overlay = document.getElementById('pdf-select-overlay');
+
+    try {
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '正在生成...';
+        }
+        if (overlay) overlay.style.display = 'none';
+        showPdfProgressV08212(`正在导出 ${selectedIds.length} 个炉次，请不要关闭页面。`);
+        await generateSixPagePDF(selectedIds);
+        if (shouldExportJson) exportCurrentPlanJson();
+    } catch (err) {
+        console.error('[PDF] 导出失败:', err);
+        alert('PDF 导出失败：' + (err?.message || err));
+    } finally {
+        hidePdfProgressV08212();
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = oldText || '📄 导出 PDF';
+        }
+    }
+}
+
+function bindPdfExportDelegationV08212() {
+    if (pdfExportDelegationBoundV08212) return;
+    pdfExportDelegationBoundV08212 = true;
+
+    document.addEventListener('click', (event) => {
+        const exportBtn = event.target.closest?.('#btn-export-pdf');
+        if (exportBtn) {
+            openPdfExportModalSafeV08212(event);
+            return;
+        }
+
+        const confirmBtn = event.target.closest?.('#btn-pdf-confirm');
+        if (confirmBtn) {
+            void confirmPdfExportSafeV08212(event);
+            return;
+        }
+
+        const cancelBtn = event.target.closest?.('#btn-pdf-cancel');
+        if (cancelBtn) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+            const overlay = document.getElementById('pdf-select-overlay');
+            if (overlay) overlay.style.display = 'none';
+        }
+    }, true);
+}
+
+
 /**
  * 初始化应用程序，设置 Three.js 场景、创建默认炉膛卡片和物料卡片，并绑定所有事件监听器。
  * @returns {void}
  */
 function init() {
     initThree();
+    bindPdfExportDelegationV08212();
     bindRadiationItemSelection();
     bindRadiationMaterialCardSelection();
     bindRadiationDiagnosisActions();
@@ -8061,11 +8634,13 @@ function init() {
     hideExplodeBOMButtons();
     initLeftPanelTabs();
     bindFeishuSyncButton();
+    bindFeishuResourceSyncButtons();
     ensurePlacementEditRightPanel();
     initRightPanelTabs();
     ensureLanguageThemeControls();
     initHeatMergeDesign();
     bindFeishuSyncButton();
+    bindFeishuResourceSyncButtons();
 
     bindWorkbenchUiModeAutoRefresh();
     updateWorkbenchUiMode();
@@ -8126,7 +8701,7 @@ function init() {
     const thermalProgressRange = document.getElementById('thermal-progress-range');
     if (thermalProgressRange) thermalProgressRange.addEventListener('input', (event) => scrubCurrentProcessAnimation(parseInt(event.target.value, 10) || 0));
     const btnExportPdf = document.getElementById("btn-export-pdf");
-    if (btnExportPdf) btnExportPdf.addEventListener("click", showPdfSelectModal);
+    if (btnExportPdf) btnExportPdf.onclick = openPdfExportModalSafeV08212;
     // JSON 导出并入 PDF 导出弹窗，顶部不再单独提供入口
     // const btnExportJson = document.getElementById('btn-export-json');
     // if (btnExportJson) {
@@ -8349,23 +8924,7 @@ function init() {
             document.getElementById("pdf-select-overlay")?.style && (document.getElementById("pdf-select-overlay").style.display = "none");
     });
     const btnPdfConfirm = document.getElementById("btn-pdf-confirm");
-    if (btnPdfConfirm) btnPdfConfirm.addEventListener("click", () => {
-        const selectedIds = getSelectedPdfFurnaceIds();
-        if (selectedIds.length === 0) {
-            alert("请至少选择一个炉膛方案");
-            return;
-        }
-
-        const shouldExportJson = !!document.getElementById('pdf-opt-json')?.checked;
-
-        document.getElementById("pdf-select-overlay")?.style && (document.getElementById("pdf-select-overlay").style.display = "none");
-
-        generateSixPagePDF(selectedIds);
-
-        if (shouldExportJson) {
-            exportCurrentPlanJson();
-        }
-    });
+    if (btnPdfConfirm) btnPdfConfirm.onclick = confirmPdfExportSafeV08212;
     const btnJiParse = document.getElementById("btn-ji-parse");
     if (btnJiParse) btnJiParse.addEventListener("click", () => {
         const jsonStr = document.getElementById("ji-json-textarea").value.trim();

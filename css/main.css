@@ -11842,3 +11842,333 @@ body[data-theme="dark"] .material-card[data-source="feishu"]::after {
     background: rgba(22, 163, 74, 0.16);
     border-color: rgba(134, 239, 172, 0.38);
 }
+
+/* ==================== V0.8.2 Feishu equipment/tooling sync ==================== */
+.feishu-resource-sync-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 10px 10px;
+  padding: 8px;
+  border: 1px solid rgba(37, 99, 235, 0.14);
+  border-radius: 12px;
+  background: rgba(239, 246, 255, 0.82);
+}
+.feishu-resource-btn {
+  white-space: nowrap;
+  min-width: 104px;
+}
+.feishu-resource-hint {
+  min-width: 0;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.35;
+}
+.feishu-resource-panel {
+  margin: 10px;
+  padding: 10px;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(255,255,255,0.86);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+}
+.feishu-resource-panel-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: #1e293b;
+  margin-bottom: 8px;
+}
+.feishu-resource-empty {
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px dashed rgba(148, 163, 184, 0.35);
+  background: rgba(248,250,252,0.7);
+}
+.feishu-workshop-group + .feishu-workshop-group { margin-top: 10px; }
+.feishu-workshop-title {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 800;
+  margin: 4px 0 8px;
+}
+.feishu-resource-card-list {
+  display: grid;
+  gap: 8px;
+}
+.feishu-resource-card {
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(248, 250, 252, 0.9);
+}
+.frc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #0f172a;
+  font-size: 12px;
+}
+.frc-head span {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  color: #0f766e;
+  background: rgba(204, 251, 241, 0.8);
+}
+.frc-meta,
+.frc-foot {
+  margin-top: 5px;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.35;
+}
+.feishu-source-card {
+  border-left: 3px solid #2563eb;
+}
+.feishu-source-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(219, 234, 254, 0.92);
+  color: #1d4ed8;
+  font-size: 10px;
+  font-weight: 800;
+}
+body.theme-dark .feishu-resource-sync-row,
+html.theme-dark .feishu-resource-sync-row,
+body.dark .feishu-resource-sync-row {
+  background: rgba(30, 41, 59, 0.72);
+  border-color: rgba(96, 165, 250, 0.22);
+}
+body.theme-dark .feishu-resource-hint,
+html.theme-dark .feishu-resource-hint,
+body.dark .feishu-resource-hint {
+  color: #94a3b8;
+}
+body.theme-dark .feishu-resource-panel,
+html.theme-dark .feishu-resource-panel,
+body.dark .feishu-resource-panel {
+  background: rgba(15, 23, 42, 0.88);
+  border-color: rgba(148, 163, 184, 0.20);
+  box-shadow: none;
+}
+body.theme-dark .feishu-resource-panel-title,
+html.theme-dark .feishu-resource-panel-title,
+body.dark .feishu-resource-panel-title,
+body.theme-dark .frc-head,
+html.theme-dark .frc-head,
+body.dark .frc-head {
+  color: #e5edf7;
+}
+body.theme-dark .feishu-resource-card,
+html.theme-dark .feishu-resource-card,
+body.dark .feishu-resource-card,
+body.theme-dark .feishu-resource-empty,
+html.theme-dark .feishu-resource-empty,
+body.dark .feishu-resource-empty {
+  background: rgba(15, 23, 42, 0.72);
+  border-color: rgba(148, 163, 184, 0.18);
+}
+body.theme-dark .frc-meta,
+html.theme-dark .frc-meta,
+body.dark .frc-meta,
+body.theme-dark .frc-foot,
+html.theme-dark .frc-foot,
+body.dark .frc-foot {
+  color: #94a3b8;
+}
+body.theme-dark .feishu-source-badge,
+html.theme-dark .feishu-source-badge,
+body.dark .feishu-source-badge {
+  background: rgba(37, 99, 235, 0.22);
+  color: #93c5fd;
+}
+
+/* ==================== V0.8.2.1 Feishu resource sync stabilization ==================== */
+.feishu-resource-sync-row-v0821 {
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.feishu-resource-sync-row-v0821 .feishu-resource-btn.secondary {
+  background: rgba(241, 245, 249, 0.92);
+  color: #334155;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+}
+.feishu-sync-summary-card {
+  padding: 10px 11px;
+  margin-bottom: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  background: linear-gradient(180deg, rgba(239, 246, 255, 0.92), rgba(248, 250, 252, 0.88));
+}
+.fss-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+.fss-head strong {
+  color: #1e3a8a;
+  font-size: 12px;
+  font-weight: 900;
+}
+.fss-head em {
+  color: #64748b;
+  font-size: 10px;
+  font-style: normal;
+}
+.fss-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px 10px;
+  color: #64748b;
+  font-size: 11px;
+}
+.fss-grid strong {
+  color: #0f172a;
+  font-weight: 900;
+}
+.feishu-resource-card.has-error {
+  border-color: rgba(239, 68, 68, 0.42);
+  background: rgba(254, 242, 242, 0.7);
+}
+.frc-issues {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 7px;
+}
+.frc-issue {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1.2;
+  background: rgba(226, 232, 240, 0.86);
+  color: #475569;
+}
+.frc-issue.error {
+  background: rgba(254, 226, 226, 0.92);
+  color: #b91c1c;
+}
+.frc-issue.warning {
+  background: rgba(254, 243, 199, 0.92);
+  color: #92400e;
+}
+.frc-issue.info {
+  background: rgba(219, 234, 254, 0.92);
+  color: #1d4ed8;
+}
+.feishu-resource-mini-list {
+  display: grid;
+  gap: 6px;
+}
+.feishu-resource-mini-item {
+  display: grid;
+  gap: 3px;
+  padding: 8px 9px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.20);
+  background: rgba(248, 250, 252, 0.72);
+}
+.feishu-resource-mini-item strong {
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 900;
+}
+.feishu-resource-mini-item span {
+  color: #64748b;
+  font-size: 11px;
+}
+.feishu-resource-mini-item em {
+  color: #92400e;
+  font-style: normal;
+  font-size: 10px;
+}
+.feishu-source-badge.warning {
+  background: rgba(254, 243, 199, 0.9);
+  color: #92400e;
+}
+body.theme-dark .feishu-resource-sync-row-v0821 .feishu-resource-btn.secondary,
+html.theme-dark .feishu-resource-sync-row-v0821 .feishu-resource-btn.secondary,
+body.dark .feishu-resource-sync-row-v0821 .feishu-resource-btn.secondary {
+  background: rgba(30, 41, 59, 0.85);
+  color: #cbd5e1;
+  border-color: rgba(148, 163, 184, 0.22);
+}
+body.theme-dark .feishu-sync-summary-card,
+html.theme-dark .feishu-sync-summary-card,
+body.dark .feishu-sync-summary-card {
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(30, 41, 59, 0.68));
+  border-color: rgba(96, 165, 250, 0.18);
+}
+body.theme-dark .fss-head strong,
+html.theme-dark .fss-head strong,
+body.dark .fss-head strong,
+body.theme-dark .fss-grid strong,
+html.theme-dark .fss-grid strong,
+body.dark .fss-grid strong,
+body.theme-dark .feishu-resource-mini-item strong,
+html.theme-dark .feishu-resource-mini-item strong,
+body.dark .feishu-resource-mini-item strong {
+  color: #e5edf7;
+}
+body.theme-dark .fss-head em,
+html.theme-dark .fss-head em,
+body.dark .fss-head em,
+body.theme-dark .fss-grid,
+html.theme-dark .fss-grid,
+body.dark .fss-grid,
+body.theme-dark .feishu-resource-mini-item span,
+html.theme-dark .feishu-resource-mini-item span,
+body.dark .feishu-resource-mini-item span {
+  color: #94a3b8;
+}
+body.theme-dark .feishu-resource-mini-item,
+html.theme-dark .feishu-resource-mini-item,
+body.dark .feishu-resource-mini-item {
+  background: rgba(15, 23, 42, 0.72);
+  border-color: rgba(148, 163, 184, 0.18);
+}
+body.theme-dark .feishu-resource-card.has-error,
+html.theme-dark .feishu-resource-card.has-error,
+body.dark .feishu-resource-card.has-error {
+  background: rgba(127, 29, 29, 0.16);
+  border-color: rgba(248, 113, 113, 0.35);
+}
+body.theme-dark .frc-issue,
+html.theme-dark .frc-issue,
+body.dark .frc-issue {
+  background: rgba(51, 65, 85, 0.9);
+  color: #cbd5e1;
+}
+body.theme-dark .frc-issue.error,
+html.theme-dark .frc-issue.error,
+body.dark .frc-issue.error {
+  background: rgba(127, 29, 29, 0.42);
+  color: #fecaca;
+}
+body.theme-dark .frc-issue.warning,
+html.theme-dark .frc-issue.warning,
+body.dark .frc-issue.warning,
+body.theme-dark .feishu-source-badge.warning,
+html.theme-dark .feishu-source-badge.warning,
+body.dark .feishu-source-badge.warning {
+  background: rgba(146, 64, 14, 0.35);
+  color: #fde68a;
+}
+body.theme-dark .frc-issue.info,
+html.theme-dark .frc-issue.info,
+body.dark .frc-issue.info {
+  background: rgba(30, 64, 175, 0.35);
+  color: #bfdbfe;
+}
