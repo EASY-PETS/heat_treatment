@@ -7043,10 +7043,8 @@ function getFeishuApiBase() {
     const override = (window.FEISHU_API_BASE || localStorage.getItem('feishuApiBase') || '').trim();
     if (override) return override.replace(/\/$/, '');
 
-    // 如果前端由 node server.js 提供，则走同源；如果用 VS Code Live Server 5500，则默认请求本地 3000 后端。
-    const port = window.location && window.location.port;
-    if (port === '3000') return '';
-    return 'http://localhost:3000';
+    // 云端部署时统一走同源 /api，由 Nginx 转发到 127.0.0.1:3000
+    return '';
 }
 
 function getFeishuClientId() {
