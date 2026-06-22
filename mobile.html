@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>AI热处理移动工作台</title>
+    <link rel="stylesheet" href="./css/mobile.css" />
+</head>
+<body>
+    <div id="app" class="mobile-shell">
+        <header class="mobile-header">
+            <div>
+                <h1>AI热处理移动工作台</h1>
+                <p>订单 · 任务 · 方案</p>
+            </div>
+            <button id="refreshBtn" class="icon-btn" type="button" aria-label="刷新">↻</button>
+        </header>
+
+        <main class="mobile-main">
+            <!-- 订单页 -->
+            <section id="ordersPage" class="page is-active" data-page="orders">
+                <div class="page-title">
+                    <div>
+                        <h2>订单草稿</h2>
+                        <p>客服手机确认机器人整理后的订单</p>
+                    </div>
+                    <span id="ordersCount" class="pill">加载中</span>
+                </div>
+
+                <div class="filter-bar">
+                    <button class="chip is-active" data-order-filter="all" type="button">全部</button>
+                    <button class="chip" data-order-filter="待确认" type="button">待确认</button>
+                    <button class="chip" data-order-filter="待转换" type="button">待转换</button>
+                    <button class="chip" data-order-filter="退回修改" type="button">退回修改</button>
+                </div>
+
+                <div class="top-action-card">
+                    <div>
+                        <strong>手机确认流程</strong>
+                        <span>确认后会写回飞书：订单状态=待转换，并勾选是否生成生产任务。</span>
+                    </div>
+                    <button id="batchConvertBtn" class="mini-primary-btn" type="button">生成已确认订单</button>
+                </div>
+
+                <div id="ordersList" class="card-list">
+                    <article class="loading-card">正在同步飞书订单草稿...</article>
+                </div>
+            </section>
+
+            <!-- 任务页 -->
+            <section id="tasksPage" class="page" data-page="tasks">
+                <div class="page-title">
+                    <div>
+                        <h2>生产任务</h2>
+                        <p>同步飞书生产任务表</p>
+                    </div>
+                    <span id="tasksCount" class="pill">加载中</span>
+                </div>
+
+                <div class="filter-bar">
+                    <button class="chip is-active" data-task-filter="all" type="button">全部</button>
+                    <button class="chip" data-task-filter="待排产" type="button">待排产</button>
+                    <button class="chip" data-task-filter="已生成方案" type="button">已生成方案</button>
+                    <button class="chip" data-task-filter="待装炉" type="button">待装炉</button>
+                </div>
+
+                <div id="tasksList" class="card-list">
+                    <article class="loading-card">正在同步飞书生产任务...</article>
+                </div>
+            </section>
+
+            <!-- 方案页 -->
+            <section id="plansPage" class="page" data-page="plans">
+                <div class="page-title">
+                    <div>
+                        <h2>装炉方案</h2>
+                        <p>查看飞书方案记录表，只读预览，不允许手机编辑</p>
+                    </div>
+                    <span id="plansCount" class="pill">加载中</span>
+                </div>
+
+                <div class="filter-bar">
+                    <button class="chip is-active" data-plan-filter="all" type="button">全部</button>
+                    <button class="chip" data-plan-filter="已生成" type="button">已生成</button>
+                    <button class="chip" data-plan-filter="低风险" type="button">低风险</button>
+                    <button class="chip" data-plan-filter="中高风险" type="button">中高风险</button>
+                </div>
+
+                <div class="top-action-card">
+                    <div>
+                        <strong>手机方案预览</strong>
+                        <span>当前只展示方案摘要和数据对比；3D恢复、施工清单、PDF和仿真摘要待接入。</span>
+                    </div>
+                    <button id="clearCompareBtn" class="mini-primary-btn disabled" type="button" disabled>暂无对比</button>
+                </div>
+
+                <div id="planCompareBar" class="compare-bar is-hidden"></div>
+                <div id="planDetailPanel" class="plan-detail-panel is-hidden"></div>
+
+                <div id="plansList" class="card-list">
+                    <article class="loading-card">正在同步飞书方案记录...</article>
+                </div>
+            </section>
+        </main>
+
+        <nav class="bottom-tabs" aria-label="底部导航">
+            <button class="tab-btn is-active" data-target="orders" type="button">
+                <span>📋</span>
+                <strong>订单</strong>
+            </button>
+            <button class="tab-btn" data-target="tasks" type="button">
+                <span>🏭</span>
+                <strong>任务</strong>
+            </button>
+            <button class="tab-btn" data-target="plans" type="button">
+                <span>🔥</span>
+                <strong>方案</strong>
+            </button>
+        </nav>
+
+        <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    </div>
+
+    <script src="./js/mobile.js"></script>
+</body>
+</html>

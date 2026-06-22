@@ -791,6 +791,87 @@ function buildOrderDraftUpdateFieldsAfterConvert(productionTaskRecordId) {
     };
 }
 
+
+// V1.0.0：手机端订单草稿读取 / 确认辅助函数。
+function normalizeOrderDraftRecord(record) {
+    const fields = record.fields || {};
+    const shape = String(readField(fields, ['形状', '工件形状'], '')).trim();
+    const normalizedShape = normalizeShape(shape);
+    const diameter = readNumber(fields, ['直径', 'D', '外径', '直径D'], 0);
+    const length = readNumber(fields, ['长度', '长', 'L', '长度L'], 0);
+    const width = readNumber(fields, ['宽度', '宽', 'W', '宽度W'], 0);
+    const height = readNumber(fields, ['高度', '高', 'H', '高度H', '厚度'], 0);
+    const count = readNumber(fields, ['数量', '件数', '数量pcs'], 0);
+    const totalWeight = readNumber(fields, ['总重量', '总重量kg', '总重', '重量kg', '重量'], 0);
+    const status = String(readField(fields, ['订单状态', '状态'], '')).trim();
+    const shouldGenerateTask = normalizeBooleanLike(fields['是否生成生产任务'], false);
+
+    return {
+        source: 'feishu',
+        recordId: record.record_id || record.id || '',
+        customer: String(readField(fields, ['客户名称', '客户', '客户简称'], '')).trim(),
+        productName: String(readField(fields, ['产品名称', '工件名称', '名称'], '')).trim(),
+        itemCode: String(readField(fields, ['物料编码', '物料编号', '图号', '产品编码'], '')).trim(),
+        material: String(readField(fields, ['材质', '材料'], '')).trim(),
+        process: String(readField(fields, ['工艺', '热处理工艺', '工艺路线'], '')).trim(),
+        hardness: String(readField(fields, ['硬度要求', '硬度', '硬度范围'], '')).trim(),
+        caseDepth: String(readField(fields, ['渗层要求', '渗层', '渗层深度'], '')).trim(),
+        shape: normalizedShape,
+        shapeText: shape || (normalizedShape === 'cylinder' ? '圆柱体' : '长方体'),
+        length,
+        width,
+        height,
+        diameter: normalizedShape === 'cylinder' ? (diameter || length || width || 0) : diameter,
+        count,
+        totalWeight,
+        arrivalDate: readDate(fields, ['来料时间', '来料日期']),
+        deliveryDate: readDate(fields, ['交期时间', '交期', '交付日期', '交货日期']),
+        status,
+        shouldGenerateTask,
+        missingFields: String(readField(fields, ['缺失字段'], '')).trim(),
+        uncertainFields: String(readField(fields, ['待确认字段', '不确定字段'], '')).trim(),
+        aiStatus: String(readField(fields, ['AI识别状态'], '')).trim(),
+        confidence: readNumber(fields, ['识别置信度', 'AI置信度'], 0),
+        rawMessage: String(readField(fields, ['原始消息'], '')).trim(),
+        feishuMessageId: String(readField(fields, ['飞书消息ID'], '')).trim(),
+        productionTaskRecordId: String(readField(fields, ['生产任务记录ID'], '')).trim(),
+        conversionResult: String(readField(fields, ['转换结果'], '')).trim(),
+        remark: String(readField(fields, ['备注', '说明'], '')).trim(),
+        createdTime: record.created_time || record.createdTime || '',
+        lastModifiedTime: record.last_modified_time || record.lastModifiedTime || ''
+    };
+}
+
+function buildOrderDraftConfirmFields(fieldMap, options = {}) {
+    const fields = {};
+    addSingleSelectIfWritable(fields, fieldMap, '订单状态', '待转换');
+    if (!Object.prototype.hasOwnProperty.call(fields, '订单状态') && fieldMap.has('订单状态')) {
+        fields['订单状态'] = '待转换';
+    }
+    if (fieldMap.has('是否生成生产任务')) {
+        fields['是否生成生产任务'] = true;
+    }
+    addTextIfWritable(fields, fieldMap, '转换结果', options.message || '手机端已确认，待生成生产任务');
+    addTextIfWritable(fields, fieldMap, '确认来源', options.source || 'mobile.html');
+    addDateTimeIfWritable(fields, fieldMap, '确认时间', new Date().toISOString());
+    return fields;
+}
+
+function buildOrderDraftRejectFields(fieldMap, options = {}) {
+    const fields = {};
+    addSingleSelectIfWritable(fields, fieldMap, '订单状态', '退回修改');
+    if (!Object.prototype.hasOwnProperty.call(fields, '订单状态') && fieldMap.has('订单状态')) {
+        fields['订单状态'] = '退回修改';
+    }
+    if (fieldMap.has('是否生成生产任务')) {
+        fields['是否生成生产任务'] = false;
+    }
+    addTextIfWritable(fields, fieldMap, '转换结果', options.message || '手机端退回修改，未生成生产任务');
+    addTextIfWritable(fields, fieldMap, '确认来源', options.source || 'mobile.html');
+    addDateTimeIfWritable(fields, fieldMap, '确认时间', new Date().toISOString());
+    return fields;
+}
+
 function detectProductionTaskBotCommand(rawText) {
     const text = String(rawText || "")
         .replace(/\s+/g, "")
@@ -806,6 +887,15 @@ function detectProductionTaskBotCommand(rawText) {
         "预览待转换"
     ];
 
+    const batchCommands = [
+        "确认批量生成生产任务",
+        "批量生成生产任务",
+        "批量转生产任务",
+        "批量转换",
+        "全部生成生产任务",
+        "全部转生产任务"
+    ];
+
     const confirmCommands = [
         "确认生成生产任务",
         "确认转生产任务",
@@ -815,6 +905,11 @@ function detectProductionTaskBotCommand(rawText) {
     ];
 
     if (previewCommands.some(cmd => text.includes(cmd))) return "preview";
+
+    // 注意：批量命令必须放在普通 confirm 前面。
+    // 否则“确认批量生成生产任务”会因为包含“生成生产任务”而被误判为单条确认。
+    if (batchCommands.some(cmd => text.includes(cmd))) return "batchConfirm";
+
     if (confirmCommands.some(cmd => text.includes(cmd))) return "confirm";
 
     return "";
@@ -829,7 +924,35 @@ function getOrderDraftConversionTables(tenant) {
     };
 }
 
-async function convertOrderDraftsCore({ token, tenant, clientId, dryRun = true, pageSize = 100 }) {
+function findExistingProductionTaskByDraftId(records, draftRecordId) {
+    const targetId = String(draftRecordId || "").trim();
+    if (!targetId) return null;
+
+    return (records || []).find(record => {
+        const fields = record.fields || {};
+        const sourceDraftId = String(
+            flattenFeishuValue(fields["来源草稿记录ID"]) || ""
+        ).trim();
+
+        return sourceDraftId && sourceDraftId === targetId;
+    }) || null;
+}
+
+function getBatchConvertLimit(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return 10;
+    return Math.max(1, Math.min(Math.floor(n), 50));
+}
+
+async function convertOrderDraftsCore({
+    token,
+    tenant,
+    clientId,
+    dryRun = true,
+    batch = false,
+    pageSize = 100,
+    maxBatch = getBatchConvertLimit(process.env.MAX_BATCH_CONVERT_COUNT || 10)
+}) {
     const {
         orderDraftsAppToken,
         orderDraftsTableId,
@@ -865,56 +988,127 @@ async function convertOrderDraftsCore({ token, tenant, clientId, dryRun = true, 
     if (dryRun) {
         return {
             ok: true,
-            version: "0.8.8",
+            version: "0.9.1",
             dryRun: true,
+            batch,
             clientId,
             companyName: tenant.companyName,
             totalRecords: records.length,
             nonEmptyRecords: nonEmptyRecords.length,
             convertibleCount: convertibleRecords.length,
+            maxBatch: getBatchConvertLimit(maxBatch),
             previewTasks
         };
     }
 
-    const first = previewTasks[0];
-
-    if (!first) {
+    if (!previewTasks.length) {
         return {
             ok: true,
-            version: "0.8.8",
+            version: "0.9.1",
             dryRun: false,
+            batch,
             convertedCount: 0,
+            skippedCount: 0,
+            failedCount: 0,
             message: "没有可转换订单"
         };
     }
 
-    const createdTask = await createBitableRecord({
-        token,
-        appToken: productionTasksAppToken,
-        tableId: productionTasksTableId,
-        fields: first.taskFields
-    });
+    const limit = getBatchConvertLimit(maxBatch);
+    const targets = batch ? previewTasks.slice(0, limit) : previewTasks.slice(0, 1);
 
-    const productionTaskRecordId = createdTask?.record_id || createdTask?.id || "";
+    // 批量模式下先读取已有生产任务，避免重复创建。
+    // 典型场景：生产任务已创建成功，但订单草稿回写状态失败；再次批量转换时应跳过。
+    let existingProductionTasks = [];
+    if (batch) {
+        existingProductionTasks = await fetchBitableRecords({
+            token,
+            appToken: productionTasksAppToken,
+            tableId: productionTasksTableId,
+            pageSize: 100,
+            maxPages: 20
+        });
+    }
 
-    await updateBitableRecord({
-        token,
-        appToken: orderDraftsAppToken,
-        tableId: orderDraftsTableId,
-        recordId: first.draftRecordId,
-        fields: buildOrderDraftUpdateFieldsAfterConvert(productionTaskRecordId)
-    });
+    const convertedResults = [];
+    const skippedResults = [];
+    const failedResults = [];
+
+    for (const item of targets) {
+        try {
+            const existingTask = batch
+                ? findExistingProductionTaskByDraftId(existingProductionTasks, item.draftRecordId)
+                : null;
+
+            if (existingTask) {
+                const existingTaskRecordId = existingTask.record_id || existingTask.id || "";
+
+                await updateBitableRecord({
+                    token,
+                    appToken: orderDraftsAppToken,
+                    tableId: orderDraftsTableId,
+                    recordId: item.draftRecordId,
+                    fields: buildOrderDraftUpdateFieldsAfterConvert(existingTaskRecordId)
+                });
+
+                skippedResults.push({
+                    draftRecordId: item.draftRecordId,
+                    productionTaskRecordId: existingTaskRecordId,
+                    taskFields: item.taskFields,
+                    reason: "生产任务已存在，跳过重复创建"
+                });
+
+                continue;
+            }
+
+            const createdTask = await createBitableRecord({
+                token,
+                appToken: productionTasksAppToken,
+                tableId: productionTasksTableId,
+                fields: item.taskFields
+            });
+
+            const productionTaskRecordId = createdTask?.record_id || createdTask?.id || "";
+
+            await updateBitableRecord({
+                token,
+                appToken: orderDraftsAppToken,
+                tableId: orderDraftsTableId,
+                recordId: item.draftRecordId,
+                fields: buildOrderDraftUpdateFieldsAfterConvert(productionTaskRecordId)
+            });
+
+            convertedResults.push({
+                draftRecordId: item.draftRecordId,
+                productionTaskRecordId,
+                taskFields: item.taskFields
+            });
+        } catch (error) {
+            failedResults.push({
+                draftRecordId: item.draftRecordId,
+                taskFields: item.taskFields,
+                detail: error.feishu || error.response?.data || error.message
+            });
+        }
+    }
 
     return {
-        ok: true,
-        version: "0.8.8",
+        ok: failedResults.length === 0,
+        version: "0.9.1",
         dryRun: false,
-        convertedCount: 1,
-        result: {
-            draftRecordId: first.draftRecordId,
-            productionTaskRecordId,
-            taskFields: first.taskFields
-        }
+        batch,
+        requestedCount: targets.length,
+        totalConvertibleCount: previewTasks.length,
+        maxBatch: limit,
+        convertedCount: convertedResults.length,
+        skippedCount: skippedResults.length,
+        failedCount: failedResults.length,
+        results: convertedResults,
+        skipped: skippedResults,
+        failed: failedResults,
+
+        // 兼容原有单条确认回复逻辑
+        result: convertedResults[0] || skippedResults[0] || null
     };
 }
 
@@ -978,10 +1172,64 @@ function buildBotConversionReplyText(command, conversionResult) {
             `当前有 ${count} 条订单草稿可转换。`,
             "",
             previewText,
+            count > 5 ? `\n还有 ${count - 5} 条未展示。` : "",
             "",
-            "确认无误后，请发送：",
-            "@热处理装炉引擎 确认生成生产任务"
-        ].join("\n");
+            "确认无误后，可发送：",
+            "@热处理装炉引擎 确认生成生产任务  （只生成下一条）",
+            "@热处理装炉引擎 确认批量生成生产任务  （批量生成全部待转换）"
+        ].filter(Boolean).join("\n");
+    }
+
+    if (command === "batchConfirm") {
+        const convertedCount = Number(conversionResult.convertedCount || 0);
+        const skippedCount = Number(conversionResult.skippedCount || 0);
+        const failedCount = Number(conversionResult.failedCount || 0);
+        const totalConvertibleCount = Number(conversionResult.totalConvertibleCount || 0);
+        const maxBatch = Number(conversionResult.maxBatch || 0);
+
+        if (convertedCount === 0 && skippedCount === 0) {
+            return [
+                "没有批量生成生产任务。",
+                "",
+                "原因：当前没有符合条件的订单草稿。",
+                "请确认：订单状态 = 待转换，并且是否生成生产任务已勾选。"
+            ].join("\n");
+        }
+
+        const resultLines = (conversionResult.results || [])
+            .slice(0, 8)
+            .map((item, index) => {
+                const taskFields = item.taskFields || {};
+                return [
+                    `${index + 1}. ${taskFields["客户名称"] || "-"} / ${taskFields["产品名称"] || "-"}`,
+                    `   任务ID：${item.productionTaskRecordId || "-"}`
+                ].join("\n");
+            });
+
+        const skippedLines = (conversionResult.skipped || [])
+            .slice(0, 5)
+            .map((item, index) => {
+                const taskFields = item.taskFields || {};
+                return `${index + 1}. ${taskFields["客户名称"] || "草稿"} / ${taskFields["产品名称"] || item.draftRecordId}：${item.reason || "已跳过"}`;
+            });
+
+        return [
+            "✅ 批量生成生产任务完成",
+            "",
+            `可转换草稿：${totalConvertibleCount} 条`,
+            maxBatch && totalConvertibleCount > maxBatch ? `安全上限：本次最多处理 ${maxBatch} 条` : "",
+            `本次新生成：${convertedCount} 条`,
+            `跳过重复：${skippedCount} 条`,
+            `失败：${failedCount} 条`,
+            "",
+            resultLines.length ? "新生成任务：" : "",
+            ...resultLines,
+            skippedLines.length ? "" : "",
+            skippedLines.length ? "跳过记录：" : "",
+            ...skippedLines,
+            failedCount > 0 ? "" : "",
+            failedCount > 0 ? "⚠️ 有部分记录失败，请查看服务器日志或飞书表字段。" : ""
+        ].filter(Boolean).join("\n");
     }
 
     if (command === "confirm") {
@@ -1126,7 +1374,7 @@ async function notifyPlanWritebackSuccess({ token, payload, planRecordId, update
 }
 
 app.get("/api/health", (req, res) => {
-    res.json({ ok: true, service: "AI heat treatment furnace server", version: "0.8.4.1" });
+    res.json({ ok: true, service: "AI heat treatment furnace server", version: "1.2.1-stable-mobile" });
 });
 
 /**
@@ -1286,6 +1534,200 @@ app.get("/api/feishu/tooling", ensureFeishuToken, async (req, res) => {
 
 
 
+
+function readRawField(fields, names) {
+    for (const name of names) {
+        if (Object.prototype.hasOwnProperty.call(fields, name)) return fields[name];
+    }
+    return undefined;
+}
+
+function findUrlInFeishuValue(value) {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'string') {
+        const text = value.trim();
+        return /^https?:\/\//i.test(text) ? text : '';
+    }
+    if (Array.isArray(value)) {
+        for (const item of value) {
+            const url = findUrlInFeishuValue(item);
+            if (url) return url;
+        }
+        return '';
+    }
+    if (isPlainObject(value)) {
+        for (const key of ['link', 'url', 'href']) {
+            const candidate = value[key];
+            if (typeof candidate === 'string' && /^https?:\/\//i.test(candidate.trim())) {
+                return candidate.trim();
+            }
+        }
+        for (const child of Object.values(value)) {
+            const url = findUrlInFeishuValue(child);
+            if (url) return url;
+        }
+    }
+    return '';
+}
+
+function readUrlField(fields, names) {
+    for (const name of names) {
+        const raw = readRawField(fields, [name]);
+        const url = findUrlInFeishuValue(raw);
+        if (url) return url;
+    }
+    return '';
+}
+
+function normalizePlanPercent(value) {
+    if (value === undefined || value === null || value === '') return 0;
+    const raw = String(value).trim();
+    if (!raw) return 0;
+    const n = Number(raw.replace(/[^0-9.\-]/g, ''));
+    if (!Number.isFinite(n)) return 0;
+    if (raw.includes('%')) return roundTo(n, 2);
+    if (n > 0 && n <= 1) return roundTo(n * 100, 2);
+    return roundTo(n, 2);
+}
+
+function parsePlanJsonSafe(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return null;
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return null;
+    }
+}
+
+function normalizePlanRecord(record) {
+    const fields = record.fields || {};
+    const planJsonText = String(readField(fields, ['方案JSON', '方案Json', 'planJson', 'PlanJSON'], '') || '').trim();
+    const planJson = parsePlanJsonSafe(planJsonText);
+
+    const sourceTask = String(readField(fields, ['来源任务', '任务编号', '生产任务', '任务ID'], '') || '').trim();
+    const planName = String(readField(fields, ['方案名称', '方案名', '名称'], '') || '').trim() || `装炉方案_${record.record_id || ''}`;
+    const customer = String(readField(fields, ['客户', '客户名称'], '') || '').trim();
+    const process = String(readField(fields, ['工艺组', '工艺', '热处理工艺'], '') || '').trim();
+    const strategy = String(readField(fields, ['策略', '装载策略', '摆放策略'], '') || '').trim();
+    const riskLevel = String(readField(fields, ['风险等级', '风险', '质量风险'], '') || '').trim();
+    const toolingNames = String(readField(fields, ['工装组合', '工装', '料框', '料框组合'], '') || '').trim();
+    const generationStatus = String(readField(fields, ['生成状态', '方案状态', '状态'], '') || '').trim() || '已生成';
+    const pdfStatus = String(readField(fields, ['PDF状态', '施工单状态'], '') || '').trim();
+    const generatedAt = readDate(fields, ['生成时间', '创建时间', '保存时间']) || String(record.created_time || record.createdTime || '');
+    const summary = String(readField(fields, ['方案摘要', '摘要', '建议'], '') || '').trim();
+    const remark = String(readField(fields, ['备注', '说明'], '') || '').trim();
+
+    const furnaceCount = readNumber(fields, ['炉次数', '炉次', '炉数'], 0);
+    const totalWeightKg = readNumber(fields, ['装载重量kg', '装载重量Kg', '装载重量', '总重量kg', '总重量'], 0);
+    const totalCount = readNumber(fields, ['总件数', '工件数量', '装载件数', '数量'], 0);
+
+    const weightRaw = readField(fields, ['重量利用率', '承重利用率'], '');
+    const spaceRaw = readField(fields, ['空间利用率', '体积利用率'], '');
+
+    const planLink = readUrlField(fields, ['方案链接', 'Web方案链接', '系统方案链接']);
+    const pdfLink = readUrlField(fields, ['PDF链接', '施工单PDF', '施工单链接']);
+
+    const parsedTaskIds = sourceTask
+        ? sourceTask.split(/[,，、\s]+/).map(item => item.trim()).filter(Boolean)
+        : [];
+
+    return {
+        source: 'feishu',
+        recordId: record.record_id || record.id || '',
+        planName,
+        sourceTask,
+        taskIds: parsedTaskIds,
+        customer,
+        process,
+        strategy,
+        riskLevel,
+        toolingNames,
+        furnaceCount,
+        totalWeightKg,
+        totalCount,
+        weightUtilizationPercent: normalizePlanPercent(weightRaw),
+        spaceUtilizationPercent: normalizePlanPercent(spaceRaw),
+        generationStatus,
+        pdfStatus,
+        generatedAt,
+        summary,
+        remark,
+        planLink,
+        webPlanLink: planLink,
+        pdfLink,
+        hasPlanJson: !!planJson,
+        planJsonPreview: planJson ? {
+            name: planJson.name || planJson.planName || '',
+            furnaceCount: planJson.furnaceCount || planJson.furnaces?.length || 0
+        } : null,
+        rawFields: fields
+    };
+}
+
+/**
+ * V1.2.0：手机端读取方案记录列表。
+ * Header: x-client-id: client_suoli
+ */
+app.get("/api/feishu/plans", ensureFeishuToken, async (req, res) => {
+    const { clientId, tenant } = getTenantFromRequest(req);
+    if (!tenant) {
+        return res.status(403).json({ ok: false, error: "未授权或非法的客户身份标识", clientId });
+    }
+
+    try {
+        if (!tenant.appToken || !tenant.plansTableId) {
+            return res.status(500).json({
+                ok: false,
+                version: "1.2.1-stable-mobile",
+                error: "方案记录表未配置",
+                detail: "请检查 tenant.appToken / tenant.plansTableId"
+            });
+        }
+
+        const records = await fetchBitableRecords({
+            token: req.feishu_token,
+            appToken: tenant.appToken,
+            tableId: tenant.plansTableId,
+            pageSize: Number(req.query.page_size) || 100,
+            maxPages: Number(req.query.max_pages) || 20
+        });
+
+        const statusFilter = String(req.query.status || '').trim();
+        const nonEmptyRecords = records.filter(item => isNonEmptyFields(item.fields));
+        let plans = nonEmptyRecords.map(normalizePlanRecord);
+
+        if (statusFilter) {
+            plans = plans.filter(item => item.generationStatus === statusFilter || item.riskLevel === statusFilter);
+        }
+
+        plans.sort((a, b) => String(b.generatedAt || '').localeCompare(String(a.generatedAt || '')));
+
+        return res.json({
+            ok: true,
+            version: "1.2.1-stable-mobile",
+            source: "feishu",
+            clientId,
+            companyName: tenant.companyName,
+            appToken: tenant.appToken,
+            tableId: tenant.plansTableId,
+            totalRecords: records.length,
+            nonEmptyRecords: nonEmptyRecords.length,
+            planCount: plans.length,
+            plans
+        });
+    } catch (error) {
+        console.error("读取飞书方案记录失败:", error.feishu || error.message);
+        return res.status(500).json({
+            ok: false,
+            version: "1.2.1-stable-mobile",
+            error: "读取飞书方案记录失败",
+            detail: error.feishu || error.message
+        });
+    }
+});
+
+
 /**
  * V0.8.1：保存当前方案到飞书方案记录表，并可同步更新来源任务状态。
  * Header: x-client-id: client_suoli
@@ -1425,12 +1867,145 @@ app.post("/api/feishu/plans", ensureFeishuToken, async (req, res) => {
     }
 });
 
+
 /**
- * V0.8.5：订单草稿 -> 生产任务。
+ * V1.0.0：手机端读取订单草稿列表。
  * Header: x-client-id: client_suoli
- * Body: { dryRun?: boolean }
+ * Query: status=待确认 可选；include_converted=true 可选，默认不返回已转换。
+ */
+app.get("/api/feishu/order-drafts", ensureFeishuToken, async (req, res) => {
+    const { clientId, tenant } = getTenantFromRequest(req);
+    if (!tenant) {
+        return res.status(403).json({ ok: false, error: "未授权或非法的客户身份标识", clientId });
+    }
+
+    try {
+        const { orderDraftsAppToken, orderDraftsTableId } = getOrderDraftConversionTables(tenant);
+        if (!orderDraftsAppToken || !orderDraftsTableId) {
+            return res.status(500).json({
+                ok: false,
+                version: "1.0.0-mobile-orders",
+                error: "订单草稿表未配置",
+                detail: "请检查 FEISHU_ORDER_DRAFTS_APP_TOKEN / FEISHU_ORDER_DRAFTS_TABLE_ID"
+            });
+        }
+
+        const records = await fetchBitableRecords({
+            token: req.feishu_token,
+            appToken: orderDraftsAppToken,
+            tableId: orderDraftsTableId,
+            pageSize: Number(req.query.page_size) || 100,
+            maxPages: Number(req.query.max_pages) || 20
+        });
+
+        const includeConverted = String(req.query.include_converted || 'false') === 'true';
+        const statusFilter = String(req.query.status || '').trim();
+        const nonEmptyRecords = records.filter(item => isNonEmptyFields(item.fields));
+        let drafts = nonEmptyRecords.map(normalizeOrderDraftRecord);
+
+        if (!includeConverted) drafts = drafts.filter(item => item.status !== '已转换');
+        if (statusFilter) drafts = drafts.filter(item => item.status === statusFilter);
+
+        drafts.sort((a, b) => String(b.lastModifiedTime || b.createdTime || '').localeCompare(String(a.lastModifiedTime || a.createdTime || '')));
+
+        return res.json({
+            ok: true,
+            version: "1.0.0-mobile-orders",
+            source: "feishu",
+            clientId,
+            companyName: tenant.companyName,
+            totalRecords: records.length,
+            nonEmptyRecords: nonEmptyRecords.length,
+            draftCount: drafts.length,
+            drafts
+        });
+    } catch (error) {
+        console.error("读取飞书订单草稿失败:", error.feishu || error.message);
+        return res.status(500).json({
+            ok: false,
+            version: "1.0.0-mobile-orders",
+            error: "读取飞书订单草稿失败",
+            detail: error.feishu || error.message
+        });
+    }
+});
+
+/**
+ * V1.0.0：手机端确认订单草稿。
+ * 将订单状态改为「待转换」，并勾选「是否生成生产任务」。
+ */
+app.post("/api/feishu/order-drafts/:recordId/confirm", ensureFeishuToken, async (req, res) => {
+    const { clientId, tenant } = getTenantFromRequest(req);
+    if (!tenant) {
+        return res.status(403).json({ ok: false, error: "未授权或非法的客户身份标识", clientId });
+    }
+
+    try {
+        const recordId = String(req.params.recordId || '').trim();
+        if (!recordId) return res.status(400).json({ ok: false, error: "缺少订单草稿 recordId" });
+
+        const { orderDraftsAppToken, orderDraftsTableId } = getOrderDraftConversionTables(tenant);
+        if (!orderDraftsAppToken || !orderDraftsTableId) {
+            return res.status(500).json({ ok: false, version: "1.0.0-mobile-orders", error: "订单草稿表未配置" });
+        }
+
+        const fieldMap = await fetchBitableFields({ token: req.feishu_token, appToken: orderDraftsAppToken, tableId: orderDraftsTableId });
+        const fields = buildOrderDraftConfirmFields(fieldMap, {
+            source: 'mobile.html',
+            message: req.body?.message || '手机端已确认，待生成生产任务'
+        });
+
+        if (!Object.keys(fields).length) {
+            return res.status(500).json({
+                ok: false,
+                version: "1.0.0-mobile-orders",
+                error: "没有可写入的确认字段",
+                detail: "请确认订单草稿表存在：订单状态、是否生成生产任务"
+            });
+        }
+
+        const updated = await updateBitableRecord({ token: req.feishu_token, appToken: orderDraftsAppToken, tableId: orderDraftsTableId, recordId, fields });
+
+        return res.json({
+            ok: true,
+            version: "1.0.0-mobile-orders",
+            message: "订单草稿已确认，等待生成生产任务",
+            recordId,
+            writtenFields: fields,
+            draft: normalizeOrderDraftRecord(updated)
+        });
+    } catch (error) {
+        console.error("确认订单草稿失败:", error.feishu || error.message);
+        return res.status(500).json({ ok: false, version: "1.0.0-mobile-orders", error: "确认订单草稿失败", detail: error.feishu || error.message });
+    }
+});
+
+/** V1.0.0：手机端退回订单草稿。 */
+app.post("/api/feishu/order-drafts/:recordId/reject", ensureFeishuToken, async (req, res) => {
+    const { clientId, tenant } = getTenantFromRequest(req);
+    if (!tenant) return res.status(403).json({ ok: false, error: "未授权或非法的客户身份标识", clientId });
+
+    try {
+        const recordId = String(req.params.recordId || '').trim();
+        if (!recordId) return res.status(400).json({ ok: false, error: "缺少订单草稿 recordId" });
+        const { orderDraftsAppToken, orderDraftsTableId } = getOrderDraftConversionTables(tenant);
+        const fieldMap = await fetchBitableFields({ token: req.feishu_token, appToken: orderDraftsAppToken, tableId: orderDraftsTableId });
+        const fields = buildOrderDraftRejectFields(fieldMap, { source: 'mobile.html', message: req.body?.message || '手机端退回修改，未生成生产任务' });
+        const updated = await updateBitableRecord({ token: req.feishu_token, appToken: orderDraftsAppToken, tableId: orderDraftsTableId, recordId, fields });
+        return res.json({ ok: true, version: "1.0.0-mobile-orders", message: "订单草稿已退回修改", recordId, writtenFields: fields, draft: normalizeOrderDraftRecord(updated) });
+    } catch (error) {
+        console.error("退回订单草稿失败:", error.feishu || error.message);
+        return res.status(500).json({ ok: false, version: "1.0.0-mobile-orders", error: "退回订单草稿失败", detail: error.feishu || error.message });
+    }
+});
+
+/**
+ * V0.9.1：订单草稿 -> 生产任务。
+ * Header: x-client-id: client_suoli
+ * Body: { dryRun?: boolean, batch?: boolean, maxBatch?: number }
  * - dryRun=true：只预览，不写入飞书。
- * - dryRun=false：只转换第一条，避免误批量写入。
+ * - dryRun=false,batch=false：只转换第一条，安全模式。
+ * - dryRun=false,batch=true：批量转换待转换订单，受 MAX_BATCH_CONVERT_COUNT / maxBatch 限制。
  */
 app.post("/api/feishu/order-drafts/convert", ensureFeishuToken, async (req, res) => {
     const { clientId, tenant } = getTenantFromRequest(req);
@@ -1438,111 +2013,39 @@ app.post("/api/feishu/order-drafts/convert", ensureFeishuToken, async (req, res)
         return res.status(403).json({ ok: false, error: "未授权或非法的客户身份标识", clientId });
     }
 
-    const orderDraftsAppToken = tenant.orderDraftsAppToken || process.env.FEISHU_ORDER_DRAFTS_APP_TOKEN || tenant.appToken;
-    const orderDraftsTableId = tenant.orderDraftsTableId || process.env.FEISHU_ORDER_DRAFTS_TABLE_ID;
-    const productionTasksAppToken = process.env.FEISHU_PRODUCTION_TASKS_APP_TOKEN || tenant.appToken;
-    const productionTasksTableId = process.env.FEISHU_PRODUCTION_TASKS_TABLE_ID || tenant.itemsTableId;
-
-    if (!orderDraftsAppToken || !orderDraftsTableId) {
-        return res.status(500).json({
-            ok: false,
-            version: "0.8.5",
-            error: "订单草稿表未配置",
-            detail: "请检查 FEISHU_ORDER_DRAFTS_APP_TOKEN / FEISHU_ORDER_DRAFTS_TABLE_ID"
-        });
-    }
-
-    if (!productionTasksAppToken || !productionTasksTableId) {
-        return res.status(500).json({
-            ok: false,
-            version: "0.8.5",
-            error: "生产任务表未配置",
-            detail: "请检查 FEISHU_PRODUCTION_TASKS_APP_TOKEN / FEISHU_PRODUCTION_TASKS_TABLE_ID"
-        });
-    }
-
     try {
         const dryRun = req.body?.dryRun !== false;
+        const batch = req.body?.batch === true;
+        const pageSize = Number(req.body?.pageSize || req.query.page_size) || 100;
+        const maxBatch = getBatchConvertLimit(req.body?.maxBatch || process.env.MAX_BATCH_CONVERT_COUNT || 10);
 
-        const records = await fetchBitableRecords({
+        const result = await convertOrderDraftsCore({
             token: req.feishu_token,
-            appToken: orderDraftsAppToken,
-            tableId: orderDraftsTableId,
-            pageSize: Number(req.body?.pageSize || req.query.page_size) || 100
-        });
-
-        const nonEmptyRecords = records.filter(item => isNonEmptyFields(item.fields));
-        const convertibleRecords = nonEmptyRecords.filter(record => isConvertibleOrderDraft(record.fields || {}));
-
-        const previewTasks = convertibleRecords.map(record => ({
-            draftRecordId: record.record_id,
-            taskFields: buildProductionTaskFieldsFromOrderDraft(record)
-        }));
-
-        if (dryRun) {
-            return res.json({
-                ok: true,
-                version: "0.8.5",
-                dryRun: true,
-                clientId,
-                companyName: tenant.companyName,
-                totalRecords: records.length,
-                nonEmptyRecords: nonEmptyRecords.length,
-                convertibleCount: convertibleRecords.length,
-                previewTasks
-            });
-        }
-
-        const first = previewTasks[0];
-
-        if (!first) {
-            return res.json({
-                ok: true,
-                version: "0.8.5",
-                dryRun: false,
-                convertedCount: 0,
-                message: "没有可转换订单"
-            });
-        }
-
-        const createdTask = await createBitableRecord({
-            token: req.feishu_token,
-            appToken: productionTasksAppToken,
-            tableId: productionTasksTableId,
-            fields: first.taskFields
-        });
-
-        const productionTaskRecordId = createdTask?.record_id || createdTask?.id || "";
-
-        await updateBitableRecord({
-            token: req.feishu_token,
-            appToken: orderDraftsAppToken,
-            tableId: orderDraftsTableId,
-            recordId: first.draftRecordId,
-            fields: buildOrderDraftUpdateFieldsAfterConvert(productionTaskRecordId)
+            tenant,
+            clientId,
+            dryRun,
+            batch,
+            pageSize,
+            maxBatch
         });
 
         return res.json({
-            ok: true,
-            version: "0.8.5",
-            dryRun: false,
-            convertedCount: 1,
-            result: {
-                draftRecordId: first.draftRecordId,
-                productionTaskRecordId,
-                taskFields: first.taskFields
-            }
+            ...result,
+            version: "0.9.1",
+            clientId,
+            companyName: tenant.companyName
         });
     } catch (error) {
         console.error("订单草稿转换生产任务失败:", error.feishu || error.message);
         return res.status(500).json({
             ok: false,
-            version: "0.8.5",
+            version: "0.9.1",
             error: "订单草稿转换生产任务失败",
             detail: error.feishu || error.message
         });
     }
 });
+
 
 function cleanFeishuBotMessageText(text) {
     return String(text || "")
@@ -1718,12 +2221,14 @@ app.post("/api/feishu/bot/events", async (req, res, next) => {
             const { clientId, tenant } = getTenantFromRequest(req);
 
             const dryRun = productionTaskCommand === "preview";
+            const batch = productionTaskCommand === "batchConfirm";
 
             const conversionResult = await convertOrderDraftsCore({
                 token: req.feishu_token,
                 tenant,
                 clientId,
-                dryRun
+                dryRun,
+                batch
             });
 
             const replyText = buildBotConversionReplyText(
@@ -1749,9 +2254,10 @@ app.post("/api/feishu/bot/events", async (req, res, next) => {
 
             return res.json({
                 ok: true,
-                version: "0.8.8",
+                version: "0.9.1",
                 command: productionTaskCommand,
                 dryRun,
+                batch,
                 conversionResult
             });
         }
@@ -1981,5 +2487,5 @@ app.get("*", (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`🚀 热处理云端排产引擎 V0.8.9 已在端口 ${PORT} 启动`);
+    console.log(`🚀 热处理云端排产引擎 V0.9.1 已在端口 ${PORT} 启动`);
 });
