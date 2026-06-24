@@ -29,6 +29,38 @@ import {
 } from './ui.js';
 
 
+function normalizeLegacyPdfOptionsV154(options = {}) {
+    const globalOptions = (typeof window !== 'undefined' && window.__HT_PDF_EXPORT_OPTIONS__) ? window.__HT_PDF_EXPORT_OPTIONS__ : {};
+    const merged = { ...globalOptions, ...(options || {}) };
+    const includeWorklist = !(
+        merged.includeCoordinateList === false ||
+        merged.includeCoordinates === false ||
+        merged.coordinateList === false ||
+        merged.worklist === false ||
+        merged.includeWorklist === false
+    );
+    const includeHighDensityZoom = !!(
+        merged.includeHighDensityZoom ||
+        merged.highDensityZoom ||
+        merged.densityZoom ||
+        merged.regionZoom ||
+        merged.zoomDenseArea
+    );
+    return {
+        ...merged,
+        worklist: includeWorklist,
+        includeWorklist,
+        includeCoordinateList: includeWorklist,
+        includeHighDensityZoom,
+        highDensityZoom: includeHighDensityZoom,
+        densityZoom: includeHighDensityZoom,
+        regionZoom: includeHighDensityZoom
+    };
+}
+
+
+
+
 // ==================== V0.7.34 PDF i18n helpers ====================
 function getPdfUiLanguage() {
     try { return localStorage.getItem('heat_furnace_ui_language_v0731') === 'en' ? 'en' : 'zh'; }
@@ -716,6 +748,24 @@ export function exportFurnaceJSON(furnaceIndex) {
  */
 export function showPdfSelectModal() {
     if (!globalFurnacesResult || globalFurnacesResult.length === 0) return;
+
+    // V1.5.4：兼容旧 HTML，没有坐标清单复选框时动态补一个。
+    const modal = document.getElementById('pdf-select-overlay');
+    if (modal && !document.getElementById('pdf-opt-coordinates')) {
+        const jsonOpt = document.getElementById('pdf-opt-json');
+        const holder = jsonOpt?.closest('label')?.parentElement || modal.querySelector('.pdf-options') || modal.querySelector('[class*="option"]');
+        if (holder) {
+            const label = document.createElement('label');
+            label.style.cssText = 'display:flex;align-items:center;gap:8px;color:#475569;font-size:13px;margin-top:8px;';
+            label.innerHTML = '<input type="checkbox" id="pdf-opt-coordinates"> PDF 内包含工件坐标清单';
+            holder.appendChild(label);
+            const zoomLabel = document.createElement('label');
+            zoomLabel.style.cssText = 'display:flex;align-items:center;gap:8px;color:#475569;font-size:13px;margin-top:8px;';
+            zoomLabel.innerHTML = '<input type="checkbox" id="pdf-opt-density-zoom"> PDF 内包含高密度区域放大';
+            holder.appendChild(zoomLabel);
+        }
+    }
+
     const list = document.getElementById('pdf-furnace-list');
     list.innerHTML = '';
 
@@ -772,7 +822,8 @@ export function getSelectedPdfFurnaceIds() {
 /**
  * Export a single furnace's PDF report.
  */
-export function exportSingleFurnacePDF(furnaceIndex, options) {
+export function exportSingleFurnacePDF(furnaceIndex, options = {}) {
+    options = normalizeLegacyPdfOptionsV154(options);
     const furnace = globalFurnacesResult[furnaceIndex];
     const pdfWrapper = document.getElementById('pdf-hidden-template');
     pdfWrapper.innerHTML = '';

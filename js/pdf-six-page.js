@@ -19,6 +19,42 @@ const SVG_W = 1000;
 const SVG_H = 650;
 const DRAW_PAD = 58;
 
+
+function normalizePdfExportOptionsV154(options = {}) {
+    const globalOptions = (typeof window !== 'undefined' && window.__HT_PDF_EXPORT_OPTIONS__) ? window.__HT_PDF_EXPORT_OPTIONS__ : {};
+    const merged = { ...globalOptions, ...(options || {}) };
+
+    // 默认保持旧行为：包含坐标清单。只有显式 false 才关闭。
+    const includeCoordinateList = !(
+        merged.includeCoordinateList === false ||
+        merged.includeCoordinates === false ||
+        merged.coordinateList === false ||
+        merged.worklist === false ||
+        merged.includeWorklist === false
+    );
+
+    const includeHighDensityZoom = !!(
+        merged.includeHighDensityZoom ||
+        merged.highDensityZoom ||
+        merged.densityZoom ||
+        merged.regionZoom ||
+        merged.zoomDenseArea
+    );
+
+    return {
+        ...merged,
+        includeCoordinateList,
+        includeWorklist: includeCoordinateList,
+        worklist: includeCoordinateList,
+        includeHighDensityZoom,
+        highDensityZoom: includeHighDensityZoom,
+        densityZoom: includeHighDensityZoom,
+        regionZoom: includeHighDensityZoom
+    };
+}
+
+
+
 function escapeHtml(value) {
     return String(value ?? '')
         .replace(/&/g, '&amp;')
@@ -593,6 +629,152 @@ function buildLayerPage(furnace, index, numberedItems, layer) {
     `;
 }
 
+
+function getLayerDensityForZoomV156(furnace, layerItems) {
+    const fw = Math.max(1, toNumber(furnace?.w, 0));
+    const fd = Math.max(1, toNumber(furnace?.d, 0));
+    const area = fw * fd;
+    const usedArea = (layerItems || []).reduce((sum, item) => {
+        const fp = getPdfFootprint(item);
+        return sum + Math.max(1, fp.w * fp.d);
+    }, 0);
+    return area > 0 ? usedArea / area * 100 : 0;
+}
+
+function shouldBuildDensityZoomPageV156(furnace, layerItems) {
+    const count = (layerItems || []).length;
+    const density = getLayerDensityForZoomV156(furnace, layerItems);
+    return count >= 36 || density >= 18;
+}
+
+function getZoomRegionForItemV156(furnace, item) {
+    const fw = Math.max(1, toNumber(furnace?.w, 0));
+    const fd = Math.max(1, toNumber(furnace?.d, 0));
+    const fp = getPdfFootprint(item);
+    const cx = toNumber(item?.x, 0) + fp.w / 2;
+    const cz = toNumber(item?.z, 0) + fp.d / 2;
+    const col = cx < fw / 2 ? 0 : 1;
+    const row = cz < fd / 2 ? 0 : 1;
+    const names = ['A 左前区', 'B 右前区', 'C 左后区', 'D 右后区'];
+    return names[row * 2 + col];
+}
+
+function getZoomRegionBoxV156(furnace, regionName) {
+    const fw = Math.max(1, toNumber(furnace?.w, 0));
+    const fd = Math.max(1, toNumber(furnace?.d, 0));
+    const isRight = /^B|^D/.test(regionName);
+    const isBack = /^C|^D/.test(regionName);
+    return {
+        x0: isRight ? fw / 2 : 0,
+        z0: isBack ? fd / 2 : 0,
+        w: fw / 2,
+        d: fd / 2
+    };
+}
+
+function getZoomLayoutV156(furnace, regionBox) {
+    const scale = Math.min((SVG_W - DRAW_PAD * 2) / regionBox.w, (SVG_H - DRAW_PAD * 2 - 30) / regionBox.d);
+    const drawW = regionBox.w * scale;
+    const drawH = regionBox.d * scale;
+    const ox = (SVG_W - drawW) / 2;
+    const oy = DRAW_PAD + 20;
+    return { ...regionBox, scale, drawW, drawH, ox, oy };
+}
+
+function renderZoomItemSvgV156(item, layout) {
+    const fp = getPdfFootprint(item);
+    const x = layout.ox + (toNumber(item.x, 0) - layout.x0) * layout.scale;
+    const y = layout.oy + (toNumber(item.z, 0) - layout.z0) * layout.scale;
+    const w = Math.max(3, fp.w * layout.scale);
+    const h = Math.max(3, fp.d * layout.scale);
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    const no = item._pdfNo || '';
+    const fill = item.color || item.batchColor || item.displayColor || '#2563eb';
+    const labelSize = clamp(Math.min(w, h) * 0.42, 10, 24);
+    const isCylinder = item.shape === 'cylinder';
+
+    if (isCylinder && !isCylinderSideStanding(item)) {
+        const r = Math.max(4, Math.min(w, h) / 2);
+        return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" class="pdfv1-item zoom-item" /><text x="${cx}" y="${cy + labelSize * .35}" font-size="${labelSize}" class="pdfv1-item-label">${no}</text>`;
+    }
+
+    return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4" fill="${fill}" class="pdfv1-item zoom-item" /><text x="${cx}" y="${cy + labelSize * .35}" font-size="${labelSize}" class="pdfv1-item-label">${no}</text>`;
+}
+
+function renderZoomRegionDiagramV156(furnace, regionItems, regionName, layer) {
+    const box = getZoomRegionBoxV156(furnace, regionName);
+    const layout = getZoomLayoutV156(furnace, box);
+    const itemsSvg = regionItems.map(item => renderZoomItemSvgV156(item, layout)).join('');
+    return `
+        <svg class="pdfv1-layout-svg" viewBox="0 0 ${SVG_W} ${SVG_H}" role="img" aria-label="${escapeHtml(regionName)}局部放大图">
+            <rect x="0" y="0" width="${SVG_W}" height="${SVG_H}" fill="#ffffff" />
+            <text x="${DRAW_PAD}" y="32" class="pdfv1-svg-title">${escapeHtml(getLayerLabel(layer))} · ${escapeHtml(regionName)}局部放大</text>
+            <text x="${SVG_W - DRAW_PAD}" y="32" class="pdfv1-svg-note" text-anchor="end">局部范围 X=${formatNumber(box.x0)}-${formatNumber(box.x0 + box.w)} / Z=${formatNumber(box.z0)}-${formatNumber(box.z0 + box.d)} mm</text>
+            <rect x="${layout.ox}" y="${layout.oy}" width="${layout.drawW}" height="${layout.drawH}" fill="#f8fafc" stroke="#0f172a" stroke-width="4" />
+            ${itemsSvg}
+        </svg>
+    `;
+}
+
+function buildDensityZoomPagesV156(furnace, index, numberedItems, layer) {
+    const layerItems = numberedItems.filter(item => item._pdfLayer === layer);
+    if (!shouldBuildDensityZoomPageV156(furnace, layerItems)) return '';
+
+    const regionMap = new Map();
+    layerItems.forEach(item => {
+        const region = getZoomRegionForItemV156(furnace, item);
+        if (!regionMap.has(region)) regionMap.set(region, []);
+        regionMap.get(region).push(item);
+    });
+
+    const density = getLayerDensityForZoomV156(furnace, layerItems);
+    const regions = [...regionMap.entries()]
+        .filter(([, items]) => items.length >= 8)
+        .sort((a, b) => b[1].length - a[1].length)
+        .slice(0, 4);
+
+    if (!regions.length) return '';
+
+    return regions.map(([regionName, items], regionIndex) => `
+        <section class="pdfv1-page layer-page zoom-page">
+            ${buildHeader('高密度区域放大', `${getFurnaceName(furnace, index)} · ${getLayerLabel(layer)} · ${regionName} · ${items.length} 件`, `放大 ${regionIndex + 1}/${regions.length}`)}
+            <div class="pdfv1-layer-layout">
+                <div class="pdfv1-diagram-panel zoom-panel">
+                    ${renderZoomRegionDiagramV156(furnace, items, regionName, layer)}
+                </div>
+                <div class="pdfv1-layer-side">
+                    <div class="pdfv1-panel warning-panel">
+                        <div class="pdfv1-panel-title">局部放大说明</div>
+                        <ul class="pdfv1-bullets">
+                            <li>本页仅放大高密度区域，方便现场核对编号和间距。</li>
+                            <li>完整位置仍以本层俯视图为准。</li>
+                            <li>本层件数 ${layerItems.length} 件，估算平面密度 ${formatPercent(density)}。</li>
+                        </ul>
+                    </div>
+                    <div class="pdfv1-panel grow-panel">
+                        <div class="pdfv1-panel-title">本区工件</div>
+                        <table class="pdfv1-table layer-table">
+                            <thead><tr><th>编号</th><th>工件</th><th>尺寸</th><th>坐标</th></tr></thead>
+                            <tbody>
+                                ${items.slice(0, 32).map(item => `
+                                    <tr>
+                                        <td class="center">${item._pdfNo}</td>
+                                        <td>${escapeHtml(item.name || '-')}</td>
+                                        <td>${escapeHtml(getItemSizeLabel(item))}</td>
+                                        <td>X ${formatNumber(item.x)} / Z ${formatNumber(item.z)}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+    `).join('');
+}
+
+
 function buildWorklistRows(items) {
     return items.map(item => `
         <tr>
@@ -635,14 +817,23 @@ function buildWorklistPages(furnace, index, numberedItems) {
     return pages.join('');
 }
 
-function buildPdfDocument(entries) {
+function buildPdfDocument(entries, options = {}) {
+    const pdfOptions = normalizePdfExportOptionsV154(options);
     const sections = [];
     entries.forEach(({ furnace, index }) => {
         const numberedItems = buildNumberedItems(furnace);
         const stats = getFurnaceStats(furnace);
         sections.push(buildCoverPage(furnace, index, numberedItems));
-        stats.layers.forEach(layer => sections.push(buildLayerPage(furnace, index, numberedItems, layer)));
-        sections.push(buildWorklistPages(furnace, index, numberedItems));
+        stats.layers.forEach(layer => {
+            sections.push(buildLayerPage(furnace, index, numberedItems, layer));
+            if (pdfOptions.includeHighDensityZoom) {
+                const zoomPages = buildDensityZoomPagesV156(furnace, index, numberedItems, layer);
+                if (zoomPages) sections.push(zoomPages);
+            }
+        });
+        if (pdfOptions.includeCoordinateList) {
+            sections.push(buildWorklistPages(furnace, index, numberedItems));
+        }
     });
 
     return `
@@ -693,6 +884,9 @@ function getPdfV1Css() {
         .pdfv1-grid { stroke: #cbd5e1; stroke-width: 1; }
         .pdfv1-centerline { stroke: #94a3b8; stroke-width: 2; stroke-dasharray: 8 8; }
         .pdfv1-item { stroke: #0f172a; stroke-width: 1.4; opacity: .94; }
+        .zoom-item { stroke-width: 2.2; opacity: .96; }
+        .zoom-page .pdfv1-diagram-panel { background: #ffffff; }
+        .zoom-panel { border-color: #fed7aa; }
         .pdfv1-item-standing { stroke-width: 1.8; }
         .pdfv1-standing-axis { stroke: rgba(15,23,42,.42); stroke-width: 1.2; stroke-dasharray: 5 4; }
         .pdfv1-item-label { fill: #fff; stroke: rgba(15,23,42,.34); stroke-width: 1; paint-order: stroke; font-weight: 900; text-anchor: middle; font-family: Arial, sans-serif; }
@@ -872,7 +1066,7 @@ async function renderPagesToPdf(host, filename) {
     pdf.save(filename);
 }
 
-export async function generateSixPagePDF(selectedIds = []) {
+export async function generateSixPagePDF(selectedIds = [], options = {}) {
     let host = null;
     const previousScrollX = window.scrollX || 0;
     const previousScrollY = window.scrollY || 0;
@@ -883,9 +1077,11 @@ export async function generateSixPagePDF(selectedIds = []) {
             return;
         }
 
-        const html = buildPdfDocument(entries);
+        const pdfOptions = normalizePdfExportOptionsV154(options);
+        const html = buildPdfDocument(entries, pdfOptions);
         host = mountPdfHtml(html);
         const filename = makeFileName(entries);
+        console.info('[PDF V1] export options:', pdfOptions);
         const layoutInfo = await waitForPdfRenderHostReady(host);
         console.info('[PDF V1] render host ready:', layoutInfo);
 

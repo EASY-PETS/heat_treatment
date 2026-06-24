@@ -413,3 +413,185 @@ button { font-family: inherit; }
     font-size: 12px;
     line-height: 1.45;
 }
+
+
+/* ==================== V1.4 手机端：最终执行版 / 对比摘要 / 仿真摘要 ==================== */
+
+.mobile-plan-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.mobile-plan-tags span {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: 900;
+    background: #e0f2fe;
+    color: #0369a1;
+}
+
+.mobile-plan-tags span.final {
+    background: #dcfce7;
+    color: #15803d;
+}
+
+.mobile-plan-tags span.adjusted {
+    background: #ede9fe;
+    color: #6d28d9;
+}
+
+.mobile-plan-tags span.simulation {
+    background: #ffedd5;
+    color: #c2410c;
+}
+
+.mobile-plan-tags span.version {
+    background: #dbeafe;
+    color: #1d4ed8;
+}
+
+.mobile-summary-panel {
+    margin: 14px 0 0;
+    padding: 13px;
+    border-radius: 20px;
+    border: 1px solid #d9e7fb;
+    background: linear-gradient(145deg, #ffffff, #f8fbff);
+}
+
+.mobile-summary-panel.muted {
+    border-style: dashed;
+    color: #64748b;
+    background: #f8fafc;
+}
+
+.mobile-summary-panel.muted p {
+    margin: 6px 0 0;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.execution-hero {
+    display: grid;
+    gap: 4px;
+    margin: 8px 0 12px;
+    padding: 13px;
+    border-radius: 18px;
+    color: #fff;
+    background: linear-gradient(135deg, #0f172a, #1e40af);
+    box-shadow: 0 14px 28px rgba(15, 23, 42, .16);
+}
+
+.execution-hero span,
+.execution-hero small {
+    color: rgba(255,255,255,.72);
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.execution-hero strong {
+    font-size: 18px;
+    line-height: 1.2;
+}
+
+.mobile-summary-card {
+    margin-top: 10px;
+    padding: 11px 12px;
+    border-radius: 16px;
+    border: 1px solid #e5edf8;
+    background: #fff;
+}
+
+.mobile-summary-card.warning {
+    border-color: #fed7aa;
+    background: #fff7ed;
+}
+
+.mobile-summary-card.safe {
+    border-color: #bbf7d0;
+    background: #f0fdf4;
+}
+
+.mobile-summary-card span {
+    display: block;
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 900;
+}
+
+.mobile-summary-card p {
+    margin: 6px 0 0;
+    color: #1e293b;
+    font-size: 13px;
+    line-height: 1.55;
+}
+
+.sim-module-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.sim-module-tags em {
+    border-radius: 999px;
+    padding: 4px 7px;
+    color: #9a3412;
+    font-size: 11px;
+    font-style: normal;
+    font-weight: 900;
+    background: rgba(255,255,255,.72);
+    border: 1px solid rgba(251,146,60,.26);
+}
+
+.version-mini-list {
+    display: grid;
+    gap: 8px;
+    margin-top: 11px;
+}
+
+.version-mini-item {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: center;
+    padding: 9px 10px;
+    border-radius: 14px;
+    background: #f8fbff;
+    border: 1px solid #e5edf8;
+}
+
+.version-mini-item.final {
+    border-color: #bbf7d0;
+    background: #f0fdf4;
+}
+
+.version-mini-item.current {
+    border-color: #bfdbfe;
+    background: #eff6ff;
+}
+
+.version-mini-item strong {
+    color: #0f172a;
+    font-size: 13px;
+}
+
+.version-mini-item span {
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 800;
+    text-align: right;
+}
+
+
+
+/* V1.5 手机端施工单入口 */
+.action-btn[data-action="open-construction-sheet"] {
+    background: linear-gradient(135deg, #2563eb, #14b8a6);
+    color: #fff;
+    border-color: transparent;
+}

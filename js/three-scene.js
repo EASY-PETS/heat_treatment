@@ -87,7 +87,7 @@ function getFixedColorByMaterial(material) {
 
 // ==================== V0.7.10: 工件颜色模式 ====================
 // 默认模式：主体颜色表达材质，顶部/边框辅助标识表达客户/批次。
-let itemColorMode = 'materialCustomer'; // materialCustomer | material | customer | process
+let itemColorMode = (localStorage.getItem('itemColorMode') || 'batch'); // batch | materialCustomer | material | customer | process
 
 const CUSTOMER_MARKER_PALETTE = [
     0xef4444, 0x22c55e, 0xf59e0b, 0x8b5cf6, 0x06b6d4,
@@ -128,7 +128,18 @@ function getProcessColor(process) {
     return key ? PROCESS_COLOR_MAP[key] : getHashColor(raw || 'process');
 }
 
+function getBatchItemColor(item, fallback = '#2563eb') {
+    return item?.renderColor ||
+        item?.displayColor ||
+        item?.batchColor ||
+        item?.listColor ||
+        item?.sourceColor ||
+        item?.color ||
+        fallback;
+}
+
 function getItemBaseColor(item) {
+    if (itemColorMode === 'batch' || itemColorMode === 'list' || itemColorMode === 'source') return getBatchItemColor(item);
     if (itemColorMode === 'customer') return getCustomerMarkerColor(item);
     if (itemColorMode === 'process') return getProcessColor(item?.process);
     const materialColor = getFixedColorByMaterial(item?.material);
@@ -205,13 +216,14 @@ function createBatchMarkerForItem(item, baseY, sourceObject = null) {
     return marker;
 }
 
-export function setItemColorMode(mode = 'materialCustomer') {
-    const allowed = new Set(['materialCustomer', 'material', 'customer', 'process']);
-    itemColorMode = allowed.has(mode) ? mode : 'materialCustomer';
+export function setItemColorMode(mode = 'batch') {
+    const allowed = new Set(['batch', 'list', 'source', 'materialCustomer', 'material', 'customer', 'process']);
+    itemColorMode = allowed.has(mode) ? mode : 'batch';
+    try { localStorage.setItem('itemColorMode', itemColorMode); } catch (_) {}
 }
 
 export function getItemColorMode() {
-    return itemColorMode;
+    return itemColorMode || 'batch';
 }
 
 

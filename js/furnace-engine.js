@@ -30,6 +30,23 @@ import { strategyConfig, PackingStrategy } from './strategies.js'
 import { optimizePosture } from './geometry-utils.js';
 import { generatePredictions } from './prediction-engine.js';
 
+// ==================== V1.5.3：批次色字段透传辅助 ====================
+function normalizeEngineBatchColorV153(item, fallback = '#2563eb') {
+    return item?.batchColor || item?.displayColor || item?.listColor || item?.renderColor || item?.sourceColor || item?.color || fallback;
+}
+
+function engineBatchColorFieldsV153(item, fallback = '#2563eb') {
+    const color = normalizeEngineBatchColorV153(item, fallback);
+    return {
+        color,
+        batchColor: color,
+        displayColor: color,
+        listColor: color,
+        sourceColor: color,
+        renderColor: color
+    };
+}
+
 // ==================== 聚集规则辅助函数（Task 2） ====================
 
 /**
@@ -161,7 +178,7 @@ export function solveHeterogeneousPacking(furnacePoolInput, itemsInput, spacing)
                 id: itemId, name: item.name, shape: item.shape,
                 w_algo: optimized.w + spacing, h_algo: optimized.h + spacing, d_algo: optimized.d + spacing,
                 w: optimized.w, h: optimized.h, d: optimized.d,
-                weight: singleWeight, color: item.color,
+                weight: singleWeight, ...engineBatchColorFieldsV153(item),
                 material: item.material || '', process: item.process || '',
                 hardness: item.hardness || '',
                 orderDate: item.orderDate || '',
@@ -510,7 +527,7 @@ export function solveShelfLayeredMultiFurnace(furnacePoolInput, itemsInput, spac
             flattenedItems.push({
                 id: itemId, name: item.name, shape: item.shape,
                 w: optimized.w, h: optimized.h, d: optimized.d,
-                weight: singleWeight, color: item.color,
+                weight: singleWeight, ...engineBatchColorFieldsV153(item),
                 material: item.material || '', process: item.process || '',
                 rotationInfo: optimized.rotationInfo,
                 needsRotation: optimized.needsRotation || false,
@@ -1030,7 +1047,7 @@ export function solveCenterOfGravityPacking(items, furnaceConfig, itemMaterialMa
             x: item.x, y: item.y, z: item.z,
             w: best.w, h: item.h, d: best.d,
             w_algo: finalIW, h_algo: ih, d_algo: finalID,
-            weight: item.weight, color: item.color,
+            weight: item.weight, ...engineBatchColorFieldsV153(item),
             material: item.material || '', process: item.process || '',
             rotationInfo: item.rotationInfo || '',
             originalDims: item.originalDims || { l: item.w, w: item.d, h: item.h }
@@ -1081,7 +1098,7 @@ export function solveCenterOfGravityMultiFurnace(furnacePoolInput, itemsInput, s
             flattenedItems.push({
                 id: itemId, name: item.name, shape: item.shape,
                 w: optimized.w, h: optimized.h, d: optimized.d,
-                weight: singleWeight, color: item.color,
+                weight: singleWeight, ...engineBatchColorFieldsV153(item),
                 material: item.material || '', process: item.process || '',
                 rotationInfo: optimized.rotationInfo,
                 needsRotation: optimized.needsRotation || false,
@@ -2448,7 +2465,7 @@ function solveUnifiedMultiFurnace(furnacePoolInput, itemsInput, spacing, strateg
             flattenedItems.push({
                 id: itemId, name: item.name, shape: item.shape,
                 w: optimized.w, h: optimized.h, d: optimized.d,
-                weight: singleWeight, color: item.color,
+                weight: singleWeight, ...engineBatchColorFieldsV153(item),
                 material: item.material || '', process: item.process || '',
                 rotationInfo: optimized.rotationInfo,
                 needsRotation: optimized.needsRotation || false,

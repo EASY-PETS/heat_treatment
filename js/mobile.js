@@ -456,7 +456,108 @@
         return state.plans;
     }
 
-    function renderPlanCompareBar() {
+    
+    function getPlanMobileSummary(plan) {
+        const summary = plan?.mobileSummary && typeof plan.mobileSummary === 'object'
+            ? plan.mobileSummary
+            : {};
+        const enabled = !!summary.enabled;
+        return {
+            enabled,
+            finalVersionName: safeText(summary.finalVersionName, ''),
+            currentVersionName: safeText(summary.currentVersionName, ''),
+            currentVersionTypeLabel: safeText(summary.currentVersionTypeLabel, ''),
+            executionStatus: safeText(summary.executionStatus, enabled ? '已生成方案' : ''),
+            adjustmentSummary: safeText(summary.adjustmentSummary, ''),
+            compareConclusion: safeText(summary.compareConclusion, ''),
+            simulationConclusion: safeText(summary.simulationConclusion, ''),
+            needSimulation: !!summary.needSimulation,
+            simulationLevel: safeText(summary.simulationLevel, ''),
+            simulationModules: Array.isArray(summary.simulationModules) ? summary.simulationModules : [],
+            versions: Array.isArray(summary.versions) ? summary.versions : []
+        };
+    }
+
+    function getMobilePlanTags(plan) {
+        const summary = getPlanMobileSummary(plan);
+        const tags = [];
+        if (summary.finalVersionName) tags.push({ text: '最终版', cls: 'final' });
+        else if (summary.currentVersionName) tags.push({ text: '版本链', cls: 'version' });
+        if (summary.adjustmentSummary) tags.push({ text: '总工调整', cls: 'adjusted' });
+        if (summary.needSimulation) tags.push({ text: '建议仿真', cls: 'simulation' });
+        return tags;
+    }
+
+    function renderMobilePlanTags(plan) {
+        const tags = getMobilePlanTags(plan);
+        if (!tags.length) return '';
+        return `<div class="mobile-plan-tags">${tags.map(tag => `<span class="${tag.cls}">${escapeHtml(tag.text)}</span>`).join('')}</div>`;
+    }
+
+    function renderMobileSummarySection(plan) {
+        const summary = getPlanMobileSummary(plan);
+        if (!summary.enabled) {
+            return `
+                <section class="mobile-summary-panel muted">
+                    <div class="detail-section-title">执行与对比摘要</div>
+                    <p>当前飞书方案记录尚未包含“最终执行版 / 总工调整说明 / 仿真摘要”。电脑端保存最终版并再次写回飞书后，这里会显示只读摘要。</p>
+                </section>
+            `;
+        }
+
+        const versionName = summary.finalVersionName || summary.currentVersionName || '未标注版本';
+        const simClass = summary.needSimulation ? 'warning' : 'safe';
+        const simText = summary.simulationConclusion || (summary.needSimulation ? '建议进一步仿真复核。' : '暂无仿真风险提示。');
+
+        return `
+            <section class="mobile-summary-panel">
+                <div class="detail-section-title">最终执行与版本摘要</div>
+                <div class="execution-hero">
+                    <span>${escapeHtml(summary.executionStatus || (summary.finalVersionName ? '最终版已确认' : '当前版本'))}</span>
+                    <strong>${escapeHtml(versionName)}</strong>
+                    ${summary.currentVersionTypeLabel ? `<small>${escapeHtml(summary.currentVersionTypeLabel)}</small>` : ''}
+                </div>
+
+                <div class="mobile-summary-card">
+                    <span>总工调整说明</span>
+                    <p>${escapeHtml(summary.adjustmentSummary || '暂无人工调整说明。')}</p>
+                </div>
+
+                <div class="mobile-summary-card">
+                    <span>对比结论</span>
+                    <p>${escapeHtml(summary.compareConclusion || '暂无版本对比结论。')}</p>
+                </div>
+
+                <div class="mobile-summary-card ${simClass}">
+                    <span>仿真摘要 / 建议</span>
+                    <p>${escapeHtml(simText)}</p>
+                    ${summary.simulationModules.length ? `<div class="sim-module-tags">${summary.simulationModules.map(item => `<em>${escapeHtml(item)}</em>`).join('')}</div>` : ''}
+                </div>
+
+                ${summary.versions.length ? `
+                    <div class="version-mini-list">
+                        ${summary.versions.slice().reverse().slice(0, 4).map(v => `
+                            <div class="version-mini-item ${v.isFinal ? 'final' : ''} ${v.isCurrent ? 'current' : ''}">
+                                <strong>${escapeHtml(v.versionName || '方案版本')}</strong>
+                                <span>${escapeHtml(v.versionTypeLabel || '')}${v.isCurrent ? ' · 当前' : ''}${v.isFinal ? ' · 最终' : ''}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : ''}
+            </section>
+        `;
+    }
+
+    function buildMobilePlanDecisionText(plan) {
+        const summary = getPlanMobileSummary(plan);
+        if (summary.compareConclusion) return summary.compareConclusion;
+        if (summary.finalVersionName) return `当前方案已有最终执行版：${summary.finalVersionName}`;
+        if (summary.currentVersionName) return `当前方案已有版本记录：${summary.currentVersionName}`;
+        return safeText(plan.summary, '暂无方案对比结论。');
+    }
+
+
+function renderPlanCompareBar() {
         const bar = $('#planCompareBar');
         const clearBtn = $('#clearCompareBtn');
         if (!bar) return;
@@ -480,25 +581,31 @@
         bar.classList.remove('is-hidden');
 
         if (selected.length === 1) {
+            const only = selected[0];
             bar.innerHTML = `
                 <h3>已选择 1 个方案</h3>
-                <p>再选择一个方案后，可以在手机上快速对比重量利用率、空间利用率、风险等级和策略。</p>
+                <p>${escapeHtml(buildMobilePlanDecisionText(only)).slice(0, 120)}</p>
+                <p>再选择一个方案后，可以快速对比执行状态、风险、重量利用率和空间利用率。</p>
             `;
             return;
         }
 
         const [a, b] = selected;
+        const aSummary = getPlanMobileSummary(a);
+        const bSummary = getPlanMobileSummary(b);
+
         bar.innerHTML = `
-            <h3>方案对比</h3>
+            <h3>手机端方案摘要对比</h3>
             <p>${escapeHtml(safeText(a.planName))} vs ${escapeHtml(safeText(b.planName))}</p>
             <table class="compare-table">
                 <tr><th>指标</th><th>方案 A</th><th>方案 B</th></tr>
+                <tr><td>执行版本</td><td>${escapeHtml(aSummary.finalVersionName || aSummary.currentVersionName || '-')}</td><td>${escapeHtml(bSummary.finalVersionName || bSummary.currentVersionName || '-')}</td></tr>
                 <tr><td>客户</td><td>${escapeHtml(safeText(a.customer))}</td><td>${escapeHtml(safeText(b.customer))}</td></tr>
                 <tr><td>工艺</td><td>${escapeHtml(safeText(a.process))}</td><td>${escapeHtml(safeText(b.process))}</td></tr>
-                <tr><td>策略</td><td>${escapeHtml(safeText(a.strategy))}</td><td>${escapeHtml(safeText(b.strategy))}</td></tr>
                 <tr><td>重量利用率</td><td>${escapeHtml(formatPercent(a.weightUtilizationPercent))}</td><td>${escapeHtml(formatPercent(b.weightUtilizationPercent))}</td></tr>
                 <tr><td>空间利用率</td><td>${escapeHtml(formatPercent(a.spaceUtilizationPercent))}</td><td>${escapeHtml(formatPercent(b.spaceUtilizationPercent))}</td></tr>
                 <tr><td>风险</td><td>${escapeHtml(safeText(a.riskLevel))}</td><td>${escapeHtml(safeText(b.riskLevel))}</td></tr>
+                <tr><td>结论</td><td>${escapeHtml(buildMobilePlanDecisionText(a)).slice(0, 80)}</td><td>${escapeHtml(buildMobilePlanDecisionText(b)).slice(0, 80)}</td></tr>
             </table>
         `;
     }
@@ -518,6 +625,7 @@
         panel.innerHTML = `
             <h3>${escapeHtml(safeText(plan.planName, '未命名方案'))}</h3>
             <p class="detail-subtitle">${escapeHtml(safeText(plan.sourceTask, '无来源任务'))} · ${escapeHtml(safeText(plan.customer))}</p>
+            ${renderMobilePlanTags(plan)}
 
             <div class="meta-grid">
                 <div class="meta-item"><span>工艺</span><strong>${escapeHtml(safeText(plan.process))}</strong></div>
@@ -534,13 +642,16 @@
                 <div class="metric-pill"><span>风险等级</span><strong>${escapeHtml(safeText(plan.riskLevel))}</strong></div>
             </div>
 
-            <div class="detail-section-title">方案摘要</div>
-            <div class="detail-summary">${escapeHtml(safeText(plan.summary, '暂无方案摘要。')).replaceAll('\\n', '<br>')}</div>
+            ${renderMobileSummarySection(plan)}
 
-            <p class="plan-readonly-note">手机端为只读预览：当前展示飞书方案摘要与数据对比；完整 3D 方案恢复、施工清单、PDF 和仿真摘要将在后续版本接入。</p>
+            <div class="detail-section-title">方案摘要</div>
+            <div class="detail-summary">${escapeHtml(safeText(plan.summary, '暂无方案摘要。')).replaceAll('\n', '<br>')}</div>
+
+            <p class="plan-readonly-note">手机端为只读执行视图：查看最终执行版、总工调整说明、对比结论和仿真摘要。复杂编辑、版本恢复和仿真运行仍在电脑端 / iPad 完成。</p>
 
             <div class="card-actions single-primary">
-                <button class="action-btn primary" data-action="toggle-compare-plan" data-record-id="${escapeHtml(plan.recordId)}" type="button">${state.comparePlanIds.includes(plan.recordId) ? '取消对比' : '加入对比'}</button>
+                ${(plan.constructionSheetUrl || plan.pdfLink) ? `<button class="action-btn primary" data-action="open-construction-sheet" data-record-id="${escapeHtml(plan.recordId)}" type="button">查看现场施工单</button>` : ''}
+                <button class="action-btn secondary" data-action="toggle-compare-plan" data-record-id="${escapeHtml(plan.recordId)}" type="button">${state.comparePlanIds.includes(plan.recordId) ? '取消对比' : '加入对比'}</button>
                 <button class="action-btn secondary" data-action="close-plan-detail" type="button">收起详情</button>
             </div>
         `;
@@ -577,6 +688,7 @@
                         <div>
                             <h3 class="card-title">${escapeHtml(safeText(plan.planName, '未命名方案'))}</h3>
                             <p class="card-subtitle">${escapeHtml(safeText(plan.sourceTask, plan.recordId))}</p>
+                            ${renderMobilePlanTags(plan)}
                         </div>
                         <span class="status ${getPlanStatusClass(plan)}">${escapeHtml(statusText)}</span>
                     </div>
@@ -657,6 +769,16 @@
         const link = String(plan?.planLink || plan?.webPlanLink || '').trim();
         if (!link) {
             showToast('当前方案没有可打开的系统链接');
+            return;
+        }
+        window.open(link, '_blank');
+    }
+
+    function openConstructionSheet(recordId) {
+        const plan = state.plans.find(item => item.recordId === recordId);
+        const link = String(plan?.constructionSheetUrl || plan?.pdfLink || '').trim();
+        if (!link) {
+            showToast('当前方案没有施工单链接');
             return;
         }
         window.open(link, '_blank');
@@ -754,6 +876,10 @@
 
             if (action === 'open-plan-link') {
                 showToast('3D方案恢复待接入，当前版本暂不开放打开方案');
+            }
+
+            if (action === 'open-construction-sheet') {
+                openConstructionSheet(recordId);
             }
         });
     }
