@@ -17,7 +17,7 @@ const fs = require("fs");
 const cors = require("cors");
 
 const app = express();
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "25mb" }));
 app.use(cors()); // 本地开发调试用；正式部署建议限制 origin
 
 const PORT = process.env.PORT || 3000;
@@ -614,14 +614,20 @@ function buildFeishuPlanRecordFields(payload, fieldMap) {
     addTextIfWritable(fields, fieldMap, '风险等级', payload.riskLevel || '');
     addTextIfWritable(fields, fieldMap, '工装组合', Array.isArray(payload.toolingNames) ? payload.toolingNames.join(', ') : payload.toolingNames || '');
     addTextIfWritable(fields, fieldMap, '方案JSON', payload.planJson || '', 50000);
+    addLinkOrTextIfWritable(fields, fieldMap, '方案JSON链接', payload.planJsonUrl || payload.jsonUrl || '', '查看完整方案JSON');
+    addLinkOrTextIfWritable(fields, fieldMap, 'JSON链接', payload.planJsonUrl || payload.jsonUrl || '', '查看完整方案JSON');
+    addLinkOrTextIfWritable(fields, fieldMap, '完整JSON链接', payload.planJsonUrl || payload.jsonUrl || '', '查看完整方案JSON');
 
     // V0.8.3：可选字段。只有飞书方案记录表中存在且类型可写时才写入，避免客户表结构未升级时报错。
     addTextIfWritable(fields, fieldMap, '方案摘要', payload.planSummary || '', 5000);
     addLinkOrTextIfWritable(fields, fieldMap, '方案链接', payload.planLink || payload.webPlanLink || '', '打开系统方案');
     addLinkOrTextIfWritable(fields, fieldMap, 'Web方案链接', payload.planLink || payload.webPlanLink || '', '打开系统方案');
-    addLinkOrTextIfWritable(fields, fieldMap, 'PDF链接', payload.pdfLink || payload.pdfUrl || '', '查看施工单 PDF');
-    addLinkOrTextIfWritable(fields, fieldMap, '施工单PDF', payload.pdfLink || payload.pdfUrl || '', '查看施工单 PDF');
-    addTextIfWritable(fields, fieldMap, 'PDF状态', payload.pdfStatus || '本地导出，待上传');
+    addLinkOrTextIfWritable(fields, fieldMap, 'PDF链接', payload.pdfLink || payload.pdfUrl || payload.constructionSheetUrl || '', '查看施工单 PDF/打印页');
+    addLinkOrTextIfWritable(fields, fieldMap, '施工单PDF', payload.pdfLink || payload.pdfUrl || payload.constructionSheetUrl || '', '查看施工单 PDF/打印页');
+    addLinkOrTextIfWritable(fields, fieldMap, '施工单链接', payload.constructionSheetUrl || payload.pdfLink || payload.pdfUrl || '', '查看现场施工单');
+    addLinkOrTextIfWritable(fields, fieldMap, '施工单HTML', payload.constructionSheetUrl || payload.pdfLink || payload.pdfUrl || '', '查看现场施工单');
+    addLinkOrTextIfWritable(fields, fieldMap, '资产清单链接', payload.assetManifestUrl || '', '查看方案资产清单');
+    addTextIfWritable(fields, fieldMap, 'PDF状态', payload.pdfStatus || '已生成施工单打印页');
     addSingleSelectIfWritable(fields, fieldMap, '生成状态', payload.generationStatus || '已生成');
     addDateTimeIfWritable(fields, fieldMap, '生成时间', payload.generatedAt || new Date().toISOString());
     addTextIfWritable(fields, fieldMap, '错误信息', payload.errorMessage || '');
@@ -1373,8 +1379,211 @@ async function notifyPlanWritebackSuccess({ token, payload, planRecordId, update
     return sendFeishuBotText({ token, text });
 }
 
+
+// ==================== V1.5：方案JSON与现场施工单持久化 ====================
+function sanitizePlanAssetKey(raw) {
+    const text = String(raw || `plan_${Date.now()}`).trim();
+    return text.replace(/[^a-zA-Z0-9_\-]/g, '_').replace(/_+/g, '_').slice(0, 90) || `plan_${Date.now()}`;
+}
+
+function escapeHtmlAsset(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
+
+function safePlanJsonObject(input) {
+    if (!input) return {};
+    if (typeof input === 'object') return input;
+    if (typeof input === 'string') {
+        try { return JSON.parse(input); } catch (_) { return { rawText: input }; }
+    }
+    return {};
+}
+
+function normalizePublicAssetRelativePathV153(relativePath) {
+    let rel = String(relativePath || '').startsWith('/') ? String(relativePath || '') : `/${relativePath || ''}`;
+    if (rel.startsWith('/ht/')) return rel;
+    if (rel.startsWith('/plan-assets/')) return `/ht${rel}`;
+    return rel;
+}
+
+function getPlanAssetPublicUrl(req, relativePath) {
+    const configuredBase = String(process.env.PUBLIC_BASE_URL || process.env.FEISHU_PUBLIC_BASE_URL || '').trim().replace(/\/$/, '');
+    let rel = normalizePublicAssetRelativePathV153(relativePath);
+
+    if (configuredBase && /^https?:\/\//i.test(configuredBase)) {
+        // PUBLIC_BASE_URL 建议配置为 http://74.248.33.0/ht
+        return `${configuredBase}${rel.replace(/^\/ht/, '')}`;
+    }
+
+    const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim();
+    const host = String(req.headers['x-forwarded-host'] || req.headers.host || req.get('host') || '').split(',')[0].trim();
+    return host ? `${proto}://${host}${rel}` : rel;
+}
+
+function getPlanFurnacesForAsset(planJson) {
+    if (Array.isArray(planJson?.loadingPlan?.furnaces)) return planJson.loadingPlan.furnaces;
+    if (Array.isArray(planJson?.furnaces)) return planJson.furnaces;
+    if (Array.isArray(planJson?.record?.loadingPlan?.furnaces)) return planJson.record.loadingPlan.furnaces;
+    return [];
+}
+
+function getPlanUnpackedForAsset(planJson) {
+    if (Array.isArray(planJson?.loadingPlan?.unpackedItems)) return planJson.loadingPlan.unpackedItems;
+    if (Array.isArray(planJson?.unpackedItems)) return planJson.unpackedItems;
+    return [];
+}
+
+function getItemNameForAsset(item, index) {
+    return item?.name || item?.productName || item?.partName || item?.typeName || item?.materialName || `工件${index + 1}`;
+}
+
+function buildConstructionSheetHtml(planJson, meta = {}) {
+    const furnaces = getPlanFurnacesForAsset(planJson);
+    const unpacked = getPlanUnpackedForAsset(planJson);
+    const title = meta.planName || planJson?.meta?.title || planJson?.planName || 'AI装炉现场施工单';
+    const customer = meta.customer || planJson?.meta?.customer || planJson?.customer || '';
+    const process = meta.processGroup || meta.process || planJson?.meta?.process || planJson?.processGroup || '';
+    const strategy = meta.strategy || planJson?.meta?.strategyLabel || planJson?.meta?.strategy || '';
+    const generatedAt = meta.generatedAt || planJson?.meta?.createdAt || planJson?.createdAt || new Date().toISOString();
+
+    const totalItems = furnaces.reduce((sum, f) => sum + (Array.isArray(f?.packedItems) ? f.packedItems.length : 0), 0);
+    const totalWeight = furnaces.reduce((sum, f) => sum + Number(f?.totalWeight || 0), 0);
+
+    const furnaceSections = furnaces.map((furnace, fIndex) => {
+        const items = Array.isArray(furnace?.packedItems) ? furnace.packedItems : [];
+        const rows = items.slice(0, 250).map((item, index) => {
+            const layer = item.layer ?? item.layerIndex ?? item.level ?? '-';
+            const pos = [
+                Number.isFinite(Number(item.x)) ? Number(item.x).toFixed(0) : '-',
+                Number.isFinite(Number(item.y)) ? Number(item.y).toFixed(0) : '-',
+                Number.isFinite(Number(item.z)) ? Number(item.z).toFixed(0) : '-'
+            ].join(' / ');
+            const size = [
+                item.w || item.width || item.length || '-',
+                item.d || item.depth || item.width || '-',
+                item.h || item.height || '-'
+            ].join(' × ');
+            return `<tr><td>${index + 1}</td><td>${escapeHtmlAsset(getItemNameForAsset(item, index))}</td><td>${escapeHtmlAsset(item.material || '-')}</td><td>${escapeHtmlAsset(item.process || '-')}</td><td>${escapeHtmlAsset(layer)}</td><td>${escapeHtmlAsset(size)}</td><td>${escapeHtmlAsset(pos)}</td><td>${escapeHtmlAsset(item.weight || item.totalWeight || item.unitWeight || '-')}</td></tr>`;
+        }).join('');
+
+        return `<section class="section"><h2>炉/工装 ${fIndex + 1}: ${escapeHtmlAsset(furnace?.name || furnace?.typeName || furnace?.instanceId || '未命名工装')}</h2><div class="metrics"><span>已装 ${items.length} 件</span><span>重量 ${Number(furnace?.totalWeight || 0).toFixed(1)} kg</span><span>承重 ${Number(furnace?.maxWeight || furnace?.max_weight || 0).toFixed(1)} kg</span><span>层数 ${escapeHtmlAsset(furnace?.layerCount || furnace?.maxLayers || '-')}</span></div><table><thead><tr><th>#</th><th>工件</th><th>材质</th><th>工艺</th><th>层</th><th>尺寸</th><th>位置 X/Y/Z</th><th>重量</th></tr></thead><tbody>${rows || '<tr><td colspan="8">暂无工件</td></tr>'}</tbody></table>${items.length > 250 ? '<p class="note">仅显示前 250 件，完整数据请查看方案JSON。</p>' : ''}</section>`;
+    }).join('');
+
+    const unpackedHtml = unpacked.length ? `<section class="section warning"><h2>未装工件</h2><p>共有 ${unpacked.length} 件未装入，请总工复核。</p></section>` : '';
+    const summaryLines = String(meta.planSummary || '').split('\n').filter(Boolean).slice(0, 20).map(line => `<li>${escapeHtmlAsset(line)}</li>`).join('');
+
+    return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>${escapeHtmlAsset(title)} - 施工单</title><style>
+body{margin:0;padding:24px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;color:#0f172a;background:#f8fafc}.page{max-width:1120px;margin:0 auto;background:#fff;border-radius:18px;padding:26px;box-shadow:0 18px 50px rgba(15,23,42,.10)}.head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;border-bottom:2px solid #e2e8f0;padding-bottom:16px;margin-bottom:18px}h1{margin:0;font-size:26px;letter-spacing:-.03em}h2{margin:0 0 10px;font-size:18px}.sub{margin-top:8px;color:#64748b;line-height:1.6;font-size:14px}.print-btn{border:0;border-radius:12px;padding:10px 14px;color:#fff;background:#2563eb;font-weight:800;cursor:pointer}.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:18px 0}.card{border:1px solid #e2e8f0;background:#f8fafc;border-radius:14px;padding:12px}.card span{display:block;color:#64748b;font-size:12px;font-weight:700}.card strong{display:block;margin-top:5px;font-size:18px}.section{margin-top:22px;padding-top:16px;border-top:1px solid #e2e8f0}.section.warning{border:1px solid #fed7aa;background:#fff7ed;border-radius:14px;padding:14px}.metrics{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 12px}.metrics span{border-radius:999px;padding:6px 10px;background:#eff6ff;color:#1d4ed8;font-size:12px;font-weight:800}table{width:100%;border-collapse:collapse;font-size:12px}th,td{border-bottom:1px solid #e2e8f0;padding:8px 7px;text-align:left;vertical-align:top}th{background:#f1f5f9;color:#475569;font-size:11px}.note{color:#64748b;font-size:12px}.sign{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:30px}.sign div{border-top:1px solid #94a3b8;padding-top:8px;color:#64748b}@media print{body{padding:0;background:#fff}.page{box-shadow:none;border-radius:0}.print-btn{display:none}.section{break-inside:avoid}}@media(max-width:760px){body{padding:12px}.page{padding:16px;border-radius:14px}.head{display:block}.cards{grid-template-columns:repeat(2,minmax(0,1fr))}table{font-size:11px}}
+</style></head><body><div class="page"><div class="head"><div><h1>${escapeHtmlAsset(title)}</h1><div class="sub">客户：${escapeHtmlAsset(customer || '-')} ｜ 工艺：${escapeHtmlAsset(process || '-')} ｜ 策略：${escapeHtmlAsset(strategy || '-')}<br/>生成时间：${escapeHtmlAsset(generatedAt)}</div></div><button class="print-btn" onclick="window.print()">打印 / 另存为PDF</button></div><div class="cards"><div class="card"><span>炉/工装数</span><strong>${furnaces.length}</strong></div><div class="card"><span>已装件数</span><strong>${totalItems}</strong></div><div class="card"><span>装载重量</span><strong>${totalWeight.toFixed(1)}kg</strong></div><div class="card"><span>未装件数</span><strong>${unpacked.length}</strong></div></div>${summaryLines ? `<section class="section"><h2>方案摘要</h2><ul>${summaryLines}</ul></section>` : ''}${furnaceSections || '<section class="section"><h2>暂无装炉明细</h2></section>'}${unpackedHtml}<div class="sign"><div>总工确认：</div><div>现场执行：</div><div>质量复核：</div></div></div></body></html>`;
+}
+
+
+function extractPlanAssetKeyFromUrlV155(rawUrl = '') {
+    const text = String(rawUrl || '').trim();
+    if (!text) return '';
+    let pathname = text;
+    try {
+        pathname = new URL(text).pathname || text;
+    } catch (_) {}
+
+    const match = pathname.match(/\/(?:ht\/)?plan-assets\/([^\/?#]+)\/(?:plan\.json|manifest\.json|construction-sheet\.html)?/i);
+    return match ? decodeURIComponent(match[1]) : '';
+}
+
+function getPlanAssetFilePathV155(assetKey, filename = 'plan.json') {
+    const safeKey = sanitizePlanAssetKey(assetKey);
+    const safeFile = filename === 'manifest.json' ? 'manifest.json' : 'plan.json';
+    const filePath = path.resolve(ROOT_DIR, 'plan-assets', safeKey, safeFile);
+    const baseDir = path.resolve(ROOT_DIR, 'plan-assets');
+    if (!filePath.startsWith(baseDir)) return '';
+    return filePath;
+}
+
+app.get("/api/plan-assets/read", (req, res) => {
+    try {
+        const rawUrl = String(req.query.url || '').trim();
+        const rawKey = String(req.query.assetKey || req.query.key || '').trim();
+        const assetKey = rawKey || extractPlanAssetKeyFromUrlV155(rawUrl);
+
+        if (!assetKey) {
+            return res.status(400).json({
+                ok: false,
+                version: "1.5.6-restore-zoom",
+                error: "缺少 assetKey 或可解析的 plan-assets URL"
+            });
+        }
+
+        const filePath = getPlanAssetFilePathV155(assetKey, 'plan.json');
+        if (!filePath || !fs.existsSync(filePath)) {
+            return res.status(404).json({
+                ok: false,
+                version: "1.5.6-restore-zoom",
+                error: "未找到方案JSON文件",
+                assetKey
+            });
+        }
+
+        const planJson = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+        return res.json({
+            ok: true,
+            version: "1.5.6-restore-zoom",
+            assetKey,
+            planJson
+        });
+    } catch (error) {
+        console.error("[Plan Assets] read failed:", error);
+        return res.status(500).json({
+            ok: false,
+            version: "1.5.6-restore-zoom",
+            error: "读取方案JSON失败",
+            detail: error.message
+        });
+    }
+});
+
+
+app.post("/api/plan-assets/save", (req, res) => {
+    try {
+        const payload = req.body || {};
+        const assetKey = sanitizePlanAssetKey(payload.assetKey || payload.writebackKey || payload.planName);
+        const dir = path.join(ROOT_DIR, "plan-assets", assetKey);
+        fs.mkdirSync(dir, { recursive: true });
+
+        const planJson = safePlanJsonObject(payload.planJson || payload.planJsonObject || {});
+        const planJsonText = JSON.stringify(planJson, null, 2);
+        const meta = {
+            planName: payload.planName || planJson?.meta?.title || planJson?.planName || '',
+            customer: payload.customer || '',
+            processGroup: payload.processGroup || payload.process || '',
+            strategy: payload.strategy || '',
+            generatedAt: payload.generatedAt || new Date().toISOString(),
+            planSummary: payload.planSummary || ''
+        };
+
+        const constructionHtml = buildConstructionSheetHtml(planJson, meta);
+        const manifest = { ok: true, version: "1.5.0", assetKey, planName: meta.planName, createdAt: new Date().toISOString(), files: { planJson: "plan.json", constructionSheet: "construction-sheet.html" } };
+
+        fs.writeFileSync(path.join(dir, "plan.json"), planJsonText, "utf-8");
+        fs.writeFileSync(path.join(dir, "construction-sheet.html"), constructionHtml, "utf-8");
+        fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify(manifest, null, 2), "utf-8");
+
+        const base = `/plan-assets/${encodeURIComponent(assetKey)}`;
+        const planJsonUrl = getPlanAssetPublicUrl(req, `${base}/plan.json`);
+        const constructionSheetUrl = getPlanAssetPublicUrl(req, `${base}/construction-sheet.html`);
+        const manifestUrl = getPlanAssetPublicUrl(req, `${base}/manifest.json`);
+
+        return res.json({ ok: true, version: "1.5.0", assetKey, planJsonUrl, constructionSheetUrl, pdfLink: constructionSheetUrl, manifestUrl });
+    } catch (error) {
+        console.error("[Plan Assets] save failed:", error);
+        return res.status(500).json({ ok: false, version: "1.5.0", error: "方案资产保存失败", detail: error.message });
+    }
+});
+
+
 app.get("/api/health", (req, res) => {
-    res.json({ ok: true, service: "AI heat treatment furnace server", version: "1.2.1-stable-mobile" });
+    res.json({ ok: true, service: "AI heat treatment furnace server", version: "1.5.6-restore-zoom" });
 });
 
 /**
@@ -1600,10 +1809,92 @@ function parsePlanJsonSafe(text) {
     }
 }
 
-function normalizePlanRecord(record) {
+
+function pickVersionMobileSummary(planJson) {
+    const summary = planJson?.mobileVersionSummary || planJson?.versionSummary || planJson?.mobileSummary || null;
+    if (!summary || typeof summary !== 'object') return null;
+    return summary;
+}
+
+function buildMobileSummaryFromPlan(fields, planJson) {
+    const versionSummary = pickVersionMobileSummary(planJson) || {};
+    const finalVersionName = String(
+        readField(fields, ['最终执行版', '最终版本', '最终方案版本'], '') ||
+        versionSummary.finalVersionName ||
+        ''
+    ).trim();
+
+    const currentVersionName = String(
+        readField(fields, ['当前版本', '当前方案版本'], '') ||
+        versionSummary.currentVersionName ||
+        ''
+    ).trim();
+
+    const adjustmentSummary = String(
+        readField(fields, ['总工调整说明', '调整说明', '人工调整说明'], '') ||
+        versionSummary.adjustmentSummary ||
+        ''
+    ).trim();
+
+    const compareConclusion = String(
+        readField(fields, ['对比结论', '版本对比结论', '方案对比结论'], '') ||
+        versionSummary.compareConclusion ||
+        ''
+    ).trim();
+
+    const simulationConclusion = String(
+        readField(fields, ['仿真摘要', '仿真结论', '仿真建议'], '') ||
+        versionSummary.simulationConclusion ||
+        ''
+    ).trim();
+
+    const executionStatus = String(
+        readField(fields, ['执行状态', '施工状态', '最终状态'], '') ||
+        (finalVersionName ? '最终版已确认' : '')
+    ).trim();
+
+    return {
+        enabled: !!(finalVersionName || currentVersionName || adjustmentSummary || compareConclusion || simulationConclusion || versionSummary.enabled),
+        versionCount: Number(versionSummary.versionCount || 0),
+        finalVersionName,
+        currentVersionName,
+        currentVersionType: versionSummary.currentVersionType || '',
+        currentVersionTypeLabel: versionSummary.currentVersionTypeLabel || '',
+        adjustmentSummary,
+        compareConclusion,
+        simulationConclusion,
+        needSimulation: !!versionSummary.needSimulation,
+        simulationLevel: versionSummary.simulationLevel || '',
+        simulationModules: Array.isArray(versionSummary.simulationModules) ? versionSummary.simulationModules : [],
+        executionStatus,
+        versions: Array.isArray(versionSummary.versions) ? versionSummary.versions : []
+    };
+}
+
+
+
+function derivePlanJsonUrlFromAssetLinksV153(planJsonUrl, constructionSheetUrl, pdfLink, manifestUrl) {
+    const explicit = String(planJsonUrl || '').trim();
+    if (/^https?:\/\//i.test(explicit)) return explicit;
+
+    const candidates = [constructionSheetUrl, pdfLink, manifestUrl].map(v => String(v || '').trim()).filter(Boolean);
+    for (const url of candidates) {
+        if (!/^https?:\/\//i.test(url)) continue;
+        if (/\/construction-sheet\.html(?:[?#].*)?$/i.test(url)) {
+            return url.replace(/\/construction-sheet\.html(?:[?#].*)?$/i, '/plan.json');
+        }
+        if (/\/manifest\.json(?:[?#].*)?$/i.test(url)) {
+            return url.replace(/\/manifest\.json(?:[?#].*)?$/i, '/plan.json');
+        }
+    }
+    return '';
+}
+
+function normalizePlanRecord(record, options = {}) {
     const fields = record.fields || {};
     const planJsonText = String(readField(fields, ['方案JSON', '方案Json', 'planJson', 'PlanJSON'], '') || '').trim();
     const planJson = parsePlanJsonSafe(planJsonText);
+    const includePlanJson = options.includePlanJson === true;
 
     const sourceTask = String(readField(fields, ['来源任务', '任务编号', '生产任务', '任务ID'], '') || '').trim();
     const planName = String(readField(fields, ['方案名称', '方案名', '名称'], '') || '').trim() || `装炉方案_${record.record_id || ''}`;
@@ -1617,6 +1908,7 @@ function normalizePlanRecord(record) {
     const generatedAt = readDate(fields, ['生成时间', '创建时间', '保存时间']) || String(record.created_time || record.createdTime || '');
     const summary = String(readField(fields, ['方案摘要', '摘要', '建议'], '') || '').trim();
     const remark = String(readField(fields, ['备注', '说明'], '') || '').trim();
+    const mobileSummary = buildMobileSummaryFromPlan(fields, planJson);
 
     const furnaceCount = readNumber(fields, ['炉次数', '炉次', '炉数'], 0);
     const totalWeightKg = readNumber(fields, ['装载重量kg', '装载重量Kg', '装载重量', '总重量kg', '总重量'], 0);
@@ -1626,7 +1918,11 @@ function normalizePlanRecord(record) {
     const spaceRaw = readField(fields, ['空间利用率', '体积利用率'], '');
 
     const planLink = readUrlField(fields, ['方案链接', 'Web方案链接', '系统方案链接']);
-    const pdfLink = readUrlField(fields, ['PDF链接', '施工单PDF', '施工单链接']);
+    let planJsonUrl = readUrlField(fields, ['方案JSON链接', 'JSON链接', '完整JSON链接']);
+    const constructionSheetUrl = readUrlField(fields, ['施工单链接', '施工单HTML', 'PDF链接', '施工单PDF']);
+    const assetManifestUrl = readUrlField(fields, ['资产清单链接', 'manifest', 'Manifest']);
+    const pdfLink = constructionSheetUrl || readUrlField(fields, ['PDF链接', '施工单PDF', '施工单链接']);
+    planJsonUrl = planJsonUrl || derivePlanJsonUrlFromAssetLinksV153('', constructionSheetUrl, pdfLink, assetManifestUrl);
 
     const parsedTaskIds = sourceTask
         ? sourceTask.split(/[,，、\s]+/).map(item => item.trim()).filter(Boolean)
@@ -1655,12 +1951,18 @@ function normalizePlanRecord(record) {
         remark,
         planLink,
         webPlanLink: planLink,
+        planJsonUrl,
+        constructionSheetUrl,
         pdfLink,
-        hasPlanJson: !!planJson,
+        assetManifestUrl,
+        hasPlanJson: !!planJson || !!planJsonUrl,
         planJsonPreview: planJson ? {
             name: planJson.name || planJson.planName || '',
-            furnaceCount: planJson.furnaceCount || planJson.furnaces?.length || 0
+            furnaceCount: planJson.furnaceCount || planJson.furnaces?.length || 0,
+            hasMobileVersionSummary: !!(planJson.mobileVersionSummary || planJson.versionSummary || planJson.mobileSummary)
         } : null,
+        mobileSummary,
+        planJson: includePlanJson ? planJson : undefined,
         rawFields: fields
     };
 }
@@ -1669,6 +1971,72 @@ function normalizePlanRecord(record) {
  * V1.2.0：手机端读取方案记录列表。
  * Header: x-client-id: client_suoli
  */
+
+/**
+ * V1.4.4：按需读取单条飞书方案记录。
+ * 目的：电脑端方案库先轻量同步摘要，点击单条方案时才加载完整方案JSON，避免浏览器一次性解析大量JSON卡死。
+ */
+app.get("/api/feishu/plans/:recordId", ensureFeishuToken, async (req, res) => {
+    const { clientId, tenant } = getTenantFromRequest(req);
+    if (!tenant) {
+        return res.status(403).json({ ok: false, error: "未授权或非法的客户身份标识", clientId });
+    }
+
+    try {
+        if (!tenant.appToken || !tenant.plansTableId) {
+            return res.status(500).json({
+                ok: false,
+                version: "1.5.6-restore-zoom",
+                error: "方案记录表未配置",
+                detail: "请检查 tenant.appToken / tenant.plansTableId"
+            });
+        }
+
+        const recordId = String(req.params.recordId || '').trim();
+        const includePlanJson = ['1', 'true', 'yes'].includes(String(req.query.include_json || req.query.includeJson || '').toLowerCase());
+
+        // 为了兼容现有封装，先通过 records 列表查找单条记录。
+        // 这一步在服务端完成，不把所有完整 planJson 推给浏览器。
+        const records = await fetchBitableRecords({
+            token: req.feishu_token,
+            appToken: tenant.appToken,
+            tableId: tenant.plansTableId,
+            pageSize: Number(req.query.page_size) || 100,
+            maxPages: Number(req.query.max_pages) || 20
+        });
+
+        const record = records.find(item =>
+            String(item.record_id || item.recordId || item.id || '') === recordId
+        );
+
+        if (!record) {
+            return res.status(404).json({
+                ok: false,
+                version: "1.5.6-restore-zoom",
+                error: "未找到方案记录",
+                recordId
+            });
+        }
+
+        return res.json({
+            ok: true,
+            version: "1.5.6-restore-zoom",
+            source: "feishu",
+            clientId,
+            plan: normalizePlanRecord(record, { includePlanJson })
+        });
+    } catch (error) {
+        console.error("读取单条飞书方案记录失败:", error.feishu || error.message);
+        return res.status(500).json({
+            ok: false,
+            version: "1.5.6-restore-zoom",
+            error: "读取单条飞书方案记录失败",
+            detail: error.feishu || error.message
+        });
+    }
+});
+
+
 app.get("/api/feishu/plans", ensureFeishuToken, async (req, res) => {
     const { clientId, tenant } = getTenantFromRequest(req);
     if (!tenant) {
@@ -1679,7 +2047,7 @@ app.get("/api/feishu/plans", ensureFeishuToken, async (req, res) => {
         if (!tenant.appToken || !tenant.plansTableId) {
             return res.status(500).json({
                 ok: false,
-                version: "1.2.1-stable-mobile",
+                version: "1.5.6-restore-zoom",
                 error: "方案记录表未配置",
                 detail: "请检查 tenant.appToken / tenant.plansTableId"
             });
@@ -1694,8 +2062,9 @@ app.get("/api/feishu/plans", ensureFeishuToken, async (req, res) => {
         });
 
         const statusFilter = String(req.query.status || '').trim();
+        const includePlanJson = ['1', 'true', 'yes'].includes(String(req.query.include_json || req.query.includeJson || '').toLowerCase());
         const nonEmptyRecords = records.filter(item => isNonEmptyFields(item.fields));
-        let plans = nonEmptyRecords.map(normalizePlanRecord);
+        let plans = nonEmptyRecords.map(record => normalizePlanRecord(record, { includePlanJson }));
 
         if (statusFilter) {
             plans = plans.filter(item => item.generationStatus === statusFilter || item.riskLevel === statusFilter);
@@ -1705,7 +2074,7 @@ app.get("/api/feishu/plans", ensureFeishuToken, async (req, res) => {
 
         return res.json({
             ok: true,
-            version: "1.2.1-stable-mobile",
+            version: "1.5.6-restore-zoom",
             source: "feishu",
             clientId,
             companyName: tenant.companyName,
@@ -1720,7 +2089,7 @@ app.get("/api/feishu/plans", ensureFeishuToken, async (req, res) => {
         console.error("读取飞书方案记录失败:", error.feishu || error.message);
         return res.status(500).json({
             ok: false,
-            version: "1.2.1-stable-mobile",
+            version: "1.5.6-restore-zoom",
             error: "读取飞书方案记录失败",
             detail: error.feishu || error.message
         });

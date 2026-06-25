@@ -362,6 +362,7 @@ function generateCandidatePlans(furnacePoolInput, itemsInput, spacing) {
             spacing,
             strategyInfo.key
         );
+        normalizePlanResultBatchColorsV151(result, itemsInput);
 
         const analysis = analyzeFurnaces(
             result.completedFurnaces || [],
@@ -406,7 +407,7 @@ function applyCandidatePlan(index) {
     currentCandidatePlanIndex = index;
 
     const plan = candidatePlans[index];
-    const result = plan.result;
+    const result = normalizePlanResultBatchColorsV151(plan.result, collectPackingItemsForCurrentGeneration());
 
     setGlobalFurnacesResult(result.completedFurnaces || []);
     setGlobalUnpackedItems(result.unpackedItems || []);
@@ -467,11 +468,85 @@ function applyCandidatePlan(index) {
 }
 
 
+
+// ==================== V1.5.3: 工件批次色一致性补丁 ====================
+function normalizeBatchColorV151(color, fallback = '#2563eb') {
+    if (!color) return fallback;
+    const text = String(color).trim();
+    if (/^#[0-9a-fA-F]{3,8}$/.test(text)) return text;
+    const rgb = text.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+    if (rgb) {
+        const toHex = n => Math.max(0, Math.min(255, Number(n) || 0)).toString(16).padStart(2, '0');
+        return `#${toHex(rgb[1])}${toHex(rgb[2])}${toHex(rgb[3])}`;
+    }
+    return text || fallback;
+}
+
+function withBatchColorFieldsV151(item, preferredColor, fallback = '#2563eb') {
+    const batchColor = normalizeBatchColorV151(
+        preferredColor || item?.batchColor || item?.displayColor || item?.listColor || item?.sourceColor || item?.renderColor || item?.color,
+        fallback
+    );
+    return {
+        ...(item || {}),
+        color: batchColor,
+        batchColor,
+        displayColor: batchColor,
+        listColor: batchColor,
+        sourceColor: batchColor,
+        renderColor: batchColor,
+        originalBatchColor: item?.originalBatchColor || batchColor
+    };
+}
+
+function buildBatchColorLookupV151(itemsInput = []) {
+    const map = new Map();
+    (itemsInput || []).forEach(item => {
+        const color = normalizeBatchColorV151(item?.batchColor || item?.displayColor || item?.listColor || item?.renderColor || item?.color);
+        [
+            item?.id, item?.itemId, item?.name, item?.showName, item?.itemCode,
+            item?.sourceRecordId, item?.taskId,
+            `${item?.customer || ''}|${item?.itemCode || ''}|${item?.name || ''}`,
+            `${item?.material || ''}|${item?.process || ''}|${item?.name || ''}`
+        ].filter(Boolean).map(String).forEach(key => map.set(key, color));
+    });
+    return map;
+}
+
+function normalizePlanResultBatchColorsV151(result, itemsInput = []) {
+    if (!result) return result;
+    const colorMap = buildBatchColorLookupV151(itemsInput);
+    (result.completedFurnaces || []).forEach(furnace => {
+        (furnace.packedItems || []).forEach(item => {
+            const keys = [
+                item?.id, item?.itemId, item?.sourceItemId, item?.name, item?.showName, item?.itemCode,
+                item?.sourceRecordId, item?.taskId,
+                `${item?.customer || ''}|${item?.itemCode || ''}|${item?.name || ''}`,
+                `${item?.material || ''}|${item?.process || ''}|${item?.name || ''}`
+            ].filter(Boolean).map(String);
+            let color = '';
+            for (const key of keys) {
+                if (colorMap.has(key)) { color = colorMap.get(key); break; }
+            }
+            Object.assign(item, withBatchColorFieldsV151(item, color));
+        });
+    });
+    (result.unpackedItems || []).forEach(item => Object.assign(item, withBatchColorFieldsV151(item, item.color || item.batchColor)));
+    return result;
+}
+
+function normalizeCandidatePlanBatchColorsV151(plans = [], itemsInput = []) {
+    (plans || []).forEach(plan => normalizePlanResultBatchColorsV151(plan?.result, itemsInput));
+    return plans;
+}
+
+
 function buildPackingItemFromHeatMergeItem(item, index = 0) {
     if (!item) return null;
     const dims = inferMockShape(item);
     const shape = item.shape || dims.shape || 'cuboid';
-    return {
+    const batchColor = normalizeBatchColorV151(item.batchColor || item.displayColor || item.listColor || item.color || '#2E86AB');
+    return withBatchColorFieldsV151({
         name: item.name || item.showName || `合炉物料-${index + 1}`,
         shape,
         count: Number(item.count) || 0,
@@ -494,7 +569,7 @@ function buildPackingItemFromHeatMergeItem(item, index = 0) {
         taskId: item.taskId || '',
         sourceStatus: item.sourceStatus || item.status || '',
         sourceClientId: item.sourceClientId || ''
-    };
+    }, batchColor, '#2E86AB');
 }
 
 function collectPackingItemsForCurrentGeneration() {
@@ -525,7 +600,8 @@ function collectPackingItemsForCurrentGeneration() {
             weight: Number(d.totalWeight) || 0
         };
         if (!isHeatMergeItemEligible(validationProbe)) return;
-        items.push({
+        const batchColor = normalizeBatchColorV151(d.color, '#2563eb');
+        items.push(withBatchColorFieldsV151({
             name: d.name,
             shape: d.shape,
             count: d.count,
@@ -548,7 +624,7 @@ function collectPackingItemsForCurrentGeneration() {
             taskId: d.taskId || '',
             sourceStatus: d.sourceStatus || '',
             sourceClientId: d.sourceClientId || ''
-        });
+        }, batchColor, '#2563eb'));
     });
     return items;
 }
@@ -634,11 +710,11 @@ function executeAndRender() {
      * V2.7: 执行装炉算法
      * 移除 xOffset 计算 — 所有炉膛在原点渲染
      */
-    candidatePlans = generateCandidatePlans(
+    candidatePlans = normalizeCandidatePlanBatchColorsV151(generateCandidatePlans(
         furnacePoolInput,
         itemsInput,
         spacing
-    );
+    ), itemsInput);
 
     currentCandidatePlanIndex = 0;
 
@@ -1559,13 +1635,14 @@ function renderCurrentWorkbenchPlanCard() {
                 <button class="cwc-restore-btn cwc-new-workspace-btn" id="btn-start-new-workspace-from-history" type="button">新生成方案</button>
             </div>
             <div class="cwc-history-note">当前左侧工装/工件为历史快照，只读查看；可恢复原工作台，也可回到输入态重新生成。</div>
-        ` : `<div class="cwc-history-note">保存后进入历史方案，可用于后续对比。</div>`}
+        ` : `<div class="cwc-history-note">保存后进入历史方案；若总工人工微调，可保存为调整版并与 AI 初稿对比。</div>${renderPlanVersionMiniPanel()}`}
     `;
 
     const restoreBtn = card.querySelector('#btn-restore-current-workspace');
     if (restoreBtn) restoreBtn.addEventListener('click', restoreCurrentWorkspaceFromHistory);
     const newBtn = card.querySelector('#btn-start-new-workspace-from-history');
     if (newBtn) newBtn.addEventListener('click', startNewWorkspaceFromHistory);
+    bindPlanVersionMiniPanelEvents(card);
 }
 
 function renderLibraryHistoryBanner() {
@@ -1627,10 +1704,667 @@ function compactPlanLibraryCards() {
     });
 }
 
+
+// ==================== V1.4.3: 方案库从飞书方案记录表拉回 ====================
+// 目标：电脑端方案库不仅能看本地 localStorage 历史，也能主动从飞书「方案记录表」同步方案。
+// 同步后：
+// 1. 显示为“飞书方案”卡片
+// 2. 可只读查看历史方案
+// 3. 可与当前方案做数据对比
+// 4. 不自动覆盖本地方案库，除非用户主动查看/后续另存
+
+const FEISHU_PLAN_LIBRARY_CACHE_KEY_V143 = 'feishu_plan_library_cache_v143';
+let feishuPlanLibraryRenderLockV145 = false;
+let planLibraryWorkbenchRefreshTimerV145 = null;
+const feishuPlanRecordMemoryCacheV145 = new Map();
+
+function getFeishuPlanLibraryCacheV143() {
+    try {
+        const raw = localStorage.getItem(FEISHU_PLAN_LIBRARY_CACHE_KEY_V143);
+
+        // V1.4.5：兼容 V1.4.3 遗留大缓存。
+        // 旧版本可能把大量完整方案JSON存在 localStorage，页面加载时 JSON.parse 就会卡死。
+        if (raw && raw.length > 900000) {
+            console.warn('[Feishu Plan Library] oversized cache cleared:', raw.length);
+            localStorage.removeItem(FEISHU_PLAN_LIBRARY_CACHE_KEY_V143);
+            return { syncedAt: '', items: [] };
+        }
+
+        const parsed = raw ? JSON.parse(raw) : null;
+        if (!parsed || !Array.isArray(parsed.items)) return { syncedAt: '', items: [] };
+
+        let changed = false;
+        const safeItems = parsed.items.slice(0, 30).map(item => {
+            if (!item || typeof item !== 'object') return null;
+
+            // 方案库列表页只缓存摘要，不缓存完整 record，避免刷新时解析/渲染过重。
+            if (item.record) changed = true;
+
+            return {
+                source: item.source || 'feishu-plan',
+                recordId: item.recordId || '',
+                planName: item.planName || '',
+                customer: item.customer || '',
+                process: item.process || '',
+                strategy: item.strategy || '',
+                generatedAt: item.generatedAt || '',
+                totalWeightKg: item.totalWeightKg || 0,
+                totalCount: item.totalCount || 0,
+                furnaceCount: item.furnaceCount || 0,
+                riskLevel: item.riskLevel || '',
+                weightUtilizationPercent: item.weightUtilizationPercent,
+                spaceUtilizationPercent: item.spaceUtilizationPercent,
+                planLink: item.planLink || '',
+                planJsonUrl: item.planJsonUrl || '',
+                constructionSheetUrl: item.constructionSheetUrl || item.pdfLink || '',
+                pdfLink: item.pdfLink || item.constructionSheetUrl || '',
+                assetManifestUrl: item.assetManifestUrl || '',
+                hasPlanJson: item.hasPlanJson !== false || !!item.planJsonUrl,
+                planJsonLoaded: false,
+                detailChecked: !!item.detailChecked,
+                no3dReason: item.no3dReason || '',
+                mobileSummary: item.mobileSummary || null
+            };
+        }).filter(Boolean);
+
+        if (safeItems.length !== parsed.items.length) changed = true;
+
+        if (changed) {
+            localStorage.setItem(FEISHU_PLAN_LIBRARY_CACHE_KEY_V143, JSON.stringify({
+                syncedAt: parsed.syncedAt || '',
+                items: safeItems
+            }));
+        }
+
+        return { syncedAt: parsed.syncedAt || '', items: safeItems };
+    } catch (error) {
+        console.warn('[Feishu Plan Library] read cache failed, cache cleared:', error);
+        localStorage.removeItem(FEISHU_PLAN_LIBRARY_CACHE_KEY_V143);
+        return { syncedAt: '', items: [] };
+    }
+}
+
+function saveFeishuPlanLibraryCacheV143(items) {
+    // V1.4.5：只缓存摘要，不缓存完整方案 record。
+    const safeItems = (Array.isArray(items) ? items : []).slice(0, 30).map(item => ({
+        source: item.source || 'feishu-plan',
+        recordId: item.recordId || '',
+        planName: item.planName || '',
+        customer: item.customer || '',
+        process: item.process || '',
+        strategy: item.strategy || '',
+        generatedAt: item.generatedAt || '',
+        totalWeightKg: item.totalWeightKg || 0,
+        totalCount: item.totalCount || 0,
+        furnaceCount: item.furnaceCount || 0,
+        riskLevel: item.riskLevel || '',
+        weightUtilizationPercent: item.weightUtilizationPercent,
+        spaceUtilizationPercent: item.spaceUtilizationPercent,
+        planLink: item.planLink || '',
+        planJsonUrl: item.planJsonUrl || '',
+        constructionSheetUrl: item.constructionSheetUrl || item.pdfLink || '',
+        pdfLink: item.pdfLink || item.constructionSheetUrl || '',
+        assetManifestUrl: item.assetManifestUrl || '',
+        hasPlanJson: item.hasPlanJson !== false || !!item.planJsonUrl,
+        planJsonLoaded: false,
+        detailChecked: !!item.detailChecked,
+        no3dReason: item.no3dReason || '',
+        mobileSummary: item.mobileSummary || null
+    }));
+
+    const payload = {
+        syncedAt: new Date().toISOString(),
+        items: safeItems
+    };
+    try {
+        localStorage.setItem(FEISHU_PLAN_LIBRARY_CACHE_KEY_V143, JSON.stringify(payload));
+    } catch (error) {
+        console.warn('[Feishu Plan Library] write cache failed:', error);
+    }
+    return payload;
+}
+
+function parsePlanJsonV143(value) {
+    if (!value) return null;
+    if (typeof value === 'object') return value;
+    if (typeof value === 'string') {
+        try {
+            return JSON.parse(value);
+        } catch (error) {
+            return null;
+        }
+    }
+    return null;
+}
+
+function normalizeFeishuPlanToDigitalTwinRecordV143(plan) {
+    if (!plan) return null;
+
+    const planJson = parsePlanJsonV143(plan.planJson || plan.rawPlanJson || plan.planJsonObject);
+    if (!planJson) return null;
+
+    const title = plan.planName || planJson.planName || planJson.name || `飞书方案_${plan.recordId || ''}`;
+    const createdAt = plan.generatedAt || planJson.createdAt || new Date().toISOString();
+
+    // 已经是数字孪生记录时，保留主体，只补充 meta。
+    if (
+        planJson.schemaVersion === 'heat-treatment-digital-twin-v1' ||
+        (planJson.loadingPlan && Array.isArray(planJson.loadingPlan.furnaces))
+    ) {
+        const record = clonePlain(planJson);
+        record.meta = {
+            ...(record.meta || {}),
+            title: record.meta?.title || title,
+            createdAt: record.meta?.createdAt || createdAt,
+            source: 'feishu-plan-record',
+            feishuPlanRecordId: plan.recordId || '',
+            customer: plan.customer || record.meta?.customer || '',
+            process: plan.process || record.meta?.process || '',
+            strategy: plan.strategy || record.meta?.strategy || planJson.placementRules?.strategy || '',
+            planLink: plan.planLink || plan.webPlanLink || '',
+            pdfLink: plan.pdfLink || ''
+        };
+        return record;
+    }
+
+    const furnaces = Array.isArray(planJson.furnaces)
+        ? planJson.furnaces
+        : (Array.isArray(planJson.loadingPlan?.furnaces) ? planJson.loadingPlan.furnaces : []);
+
+    if (!furnaces.length) return null;
+
+    return {
+        schemaVersion: 'heat-treatment-digital-twin-v1',
+        meta: {
+            title,
+            createdAt,
+            source: 'feishu-plan-record',
+            feishuPlanRecordId: plan.recordId || '',
+            customer: plan.customer || planJson.customer || '',
+            process: plan.process || planJson.processGroup || '',
+            strategy: planJson.placementRules?.strategy || plan.strategy || '',
+            planLink: plan.planLink || plan.webPlanLink || '',
+            pdfLink: plan.pdfLink || '',
+            mobileVersionSummary: plan.mobileSummary || planJson.mobileVersionSummary || null
+        },
+        loadingPlan: {
+            furnaces,
+            unpackedItems: Array.isArray(planJson.unpackedItems) ? planJson.unpackedItems : [],
+            predictions: Array.isArray(planJson.predictions) ? planJson.predictions : []
+        },
+        placementRules: planJson.placementRules || {},
+        aggregationStats: planJson.aggregationStats || null,
+        sourceRecordIds: planJson.sourceRecordIds || plan.sourceRecordIds || [],
+        taskIds: planJson.taskIds || plan.taskIds || []
+    };
+}
+
+function normalizeFeishuPlanCacheItemsV143(plans) {
+    const seen = new Set();
+    return (plans || [])
+        .map(rawPlan => {
+            const plan = withDerivedPlanAssetLinksV153(rawPlan || {});
+            const record = normalizeFeishuPlanToDigitalTwinRecordV143(plan);
+            const id = plan.recordId || plan.id || record?.meta?.feishuPlanRecordId || '';
+            const key = id || `${plan.planName || record?.meta?.title || ''}|${plan.generatedAt || record?.meta?.createdAt || ''}`;
+            if (!key || seen.has(key)) return null;
+            seen.add(key);
+
+            return {
+                source: 'feishu-plan',
+                recordId: id,
+                planName: plan.planName || record?.meta?.title || `飞书方案_${id}`,
+                customer: plan.customer || record?.meta?.customer || '',
+                process: plan.process || record?.meta?.process || '',
+                strategy: plan.strategy || record?.meta?.strategy || '',
+                generatedAt: plan.generatedAt || record?.meta?.createdAt || '',
+                totalWeightKg: plan.totalWeightKg || 0,
+                totalCount: plan.totalCount || 0,
+                furnaceCount: plan.furnaceCount || record?.loadingPlan?.furnaces?.length || 0,
+                riskLevel: plan.riskLevel || '',
+                weightUtilizationPercent: plan.weightUtilizationPercent,
+                spaceUtilizationPercent: plan.spaceUtilizationPercent,
+                planLink: plan.planLink || plan.webPlanLink || '',
+                planJsonUrl: plan.planJsonUrl || '',
+                constructionSheetUrl: plan.constructionSheetUrl || plan.pdfLink || '',
+                pdfLink: plan.pdfLink || plan.constructionSheetUrl || '',
+                assetManifestUrl: plan.assetManifestUrl || plan.manifestUrl || '',
+                hasPlanJson: !!record || !!plan.planJsonPreview || !!plan.planJsonUrl,
+                planJsonLoaded: !!record,
+                mobileSummary: plan.mobileSummary || null,
+                record
+            };
+        })
+        .filter(Boolean)
+        .sort((a, b) => String(b.generatedAt || '').localeCompare(String(a.generatedAt || '')));
+}
+
+function getFeishuPlanCacheItemByRecordIdV143(recordId) {
+    const cache = getFeishuPlanLibraryCacheV143();
+    return (cache.items || []).find(item => String(item.recordId || '') === String(recordId || '')) || null;
+}
+
+function showFeishuPlanSummaryOnlyV147(item) {
+    if (!item) return;
+    const jsonUrl = derivePlanJsonUrlFromPlanAssetLinksV153(item);
+    const text = [
+        `方案：${item.planName || '-'}`,
+        `客户：${item.customer || '-'}`,
+        `工艺：${item.process || '-'}`,
+        `策略：${item.strategy || '-'}`,
+        `重量：${item.totalWeightKg ? Number(item.totalWeightKg).toFixed(1) + 'kg' : '-'}`,
+        `炉/工装：${item.furnaceCount || '-'}`,
+        item.constructionSheetUrl ? `施工单：${item.constructionSheetUrl}` : '',
+        jsonUrl ? `推导JSON：${jsonUrl}` : '',
+        '',
+        '该飞书记录当前只作为摘要显示，未能恢复3D工作台。',
+        '如果上方 JSON 链接可以直接打开，请检查服务器是否已部署 V1.5.6 的 /api/plan-assets/read 代理接口，并清理本地方案库缓存后重试。'
+    ].filter(Boolean).join('\n');
+    alert(text);
+}
+
+
+async function ensureFeishuPlanRecordLoadedV144(recordId, triggerButton = null) {
+    const cache = getFeishuPlanLibraryCacheV143();
+    const items = cache.items || [];
+    const index = items.findIndex(item => String(item.recordId || '') === String(recordId || ''));
+    if (index < 0) return null;
+
+    const existing = items[index];
+    const memoryRecord = feishuPlanRecordMemoryCacheV145.get(String(recordId || ''));
+    if (memoryRecord) return { ...existing, record: memoryRecord, planJsonLoaded: true, hasPlanJson: true };
+    if (existing.record) return existing;
+
+    const oldText = triggerButton?.textContent || '';
+    try {
+        if (triggerButton) {
+            triggerButton.disabled = true;
+            triggerButton.textContent = '加载中...';
+        }
+
+        const payload = await fetchFeishuJson(`/api/feishu/plans/${encodeURIComponent(recordId)}?include_json=1`, getFeishuClientId());
+        const detailPlan = withDerivedPlanAssetLinksV153({ ...existing, ...(payload.plan || {}) });
+        let normalized = normalizeFeishuPlanCacheItemsV143([detailPlan])[0];
+
+        const planJsonAssetUrl = derivePlanJsonUrlFromPlanAssetLinksV153(detailPlan);
+        if (!normalized?.record && planJsonAssetUrl) {
+            const assetJson = await loadPlanJsonAssetV15(planJsonAssetUrl);
+            if (assetJson) {
+                const assetPlan = {
+                    ...detailPlan,
+                    planJson: assetJson,
+                    planJsonUrl: planJsonAssetUrl
+                };
+                normalized = normalizeFeishuPlanCacheItemsV143([assetPlan])[0];
+            }
+        }
+
+        if (!normalized?.record) {
+            const nextItems = items.slice();
+            nextItems[index] = {
+                ...existing,
+                hasPlanJson: false,
+                planJsonLoaded: false,
+                detailChecked: true,
+                no3dReason: 'NO_COMPLETE_PLAN_JSON'
+            };
+            saveFeishuPlanLibraryCacheV143(nextItems);
+            renderFeishuPlanLibraryCardsV143();
+            showCapacityFeedback('warning', '该飞书方案只有摘要，且未找到可读取的方案JSON链接，不能恢复3D工作台。');
+            return nextItems[index];
+        }
+
+        const loadedItem = {
+            ...existing,
+            ...normalized,
+            record: normalized.record,
+            planJsonLoaded: true,
+            hasPlanJson: true
+        };
+        feishuPlanRecordMemoryCacheV145.set(String(recordId || ''), normalized.record);
+        items[index] = { ...loadedItem, record: null, planJsonLoaded: false, detailChecked: true, hasPlanJson: true };
+        saveFeishuPlanLibraryCacheV143(items);
+        renderFeishuPlanLibraryCardsV143();
+        return loadedItem;
+    } catch (error) {
+        console.error('[Feishu Plan Library] lazy load failed:', error);
+        const message = String(error?.message || '');
+        const hint = message.includes('HTML而不是JSON') || message.includes('有效JSON')
+            ? '请确认服务器已替换 V1.4.5/1.4.6 的 server.js 并重启 heat-treatment-server。'
+            : '';
+        showCapacityFeedback('error', `加载飞书方案详情失败：${message}${hint ? ' ' + hint : ''}`);
+        return existing;
+    } finally {
+        if (triggerButton) {
+            triggerButton.disabled = false;
+            triggerButton.textContent = oldText || '查看方案';
+        }
+    }
+}
+
+
+function ensureFeishuPlanLibrarySyncButtonV143() {
+    if (!document.getElementById('feishu-plan-library-v143-style')) {
+        const style = document.createElement('style');
+        style.id = 'feishu-plan-library-v143-style';
+        style.textContent = `
+            .feishu-plan-sync-btn {
+                margin-left: 6px;
+                padding: 8px 10px;
+                min-width: auto;
+                white-space: nowrap;
+                font-size: 12px;
+            }
+            #master-header {
+                align-items: center;
+                gap: 8px;
+                flex-wrap: wrap;
+            }
+            .feishu-plan-section-v143 {
+                margin: 10px 0 8px;
+                padding: 8px 10px;
+                border-radius: 14px;
+                background: linear-gradient(135deg, #eff6ff, #f8fafc);
+                border: 1px solid #dbeafe;
+            }
+            .feishu-plan-section-title {
+                display: flex;
+                justify-content: space-between;
+                gap: 10px;
+                align-items: center;
+                color: #0f172a;
+                font-size: 13px;
+            }
+            .feishu-plan-section-title span {
+                color: #64748b;
+                font-size: 12px;
+                font-weight: 700;
+            }
+            .mpc-tag.feishu {
+                background: #dbeafe;
+                color: #1d4ed8;
+            }
+            .feishu-plan-card-v143 {
+                border-color: #bfdbfe;
+                background: linear-gradient(135deg, #ffffff, #f8fbff);
+                margin-bottom: 8px;
+            }
+            .feishu-plan-card-v143 .mpc-title {
+                font-size: 13px;
+                line-height: 1.35;
+            }
+            .feishu-plan-card-v143 .mpc-meta {
+                font-size: 11px;
+                line-height: 1.35;
+            }
+            .feishu-plan-card-v143 .mpc-actions {
+                display: flex;
+                gap: 6px;
+                flex-wrap: wrap;
+                margin-top: 8px;
+            }
+            .feishu-plan-card-v143 .plan-card-action {
+                flex: 1;
+                min-width: 72px;
+                padding: 7px 8px;
+                font-size: 12px;
+            }
+            .feishu-plan-metrics {
+                margin-top: 10px;
+            }
+            .plan-card-action:disabled {
+                opacity: .48;
+                cursor: not-allowed;
+            }
+            .cwc-history-note.warning {
+                border-color: #fed7aa;
+                background: #fff7ed;
+                color: #c2410c;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+    const header = document.getElementById('master-header');
+    if (!header || document.getElementById('btn-sync-feishu-plans-library')) return;
+
+    const btn = document.createElement('button');
+    btn.id = 'btn-sync-feishu-plans-library';
+    btn.type = 'button';
+    btn.className = 'master-import-btn feishu-plan-sync-btn';
+    btn.textContent = '同步飞书';
+    btn.title = '从飞书方案记录表同步摘要，点击卡片时再加载完整方案';
+    btn.addEventListener('click', () => syncFeishuPlanLibraryFromServerV143(btn));
+
+    const importBtn = document.getElementById('btn-master-import-json');
+    if (importBtn && importBtn.parentElement === header) {
+        header.insertBefore(btn, importBtn);
+    } else {
+        header.appendChild(btn);
+    }
+}
+
+function renderFeishuPlanLibraryCardsV143() {
+    const list = document.getElementById('master-list');
+    if (!list || feishuPlanLibraryRenderLockV145) return;
+
+    feishuPlanLibraryRenderLockV145 = true;
+    window.__suppressPlanLibraryObserverV145 = true;
+
+    list.querySelectorAll('.feishu-plan-card-v143, .feishu-plan-section-v143').forEach(card => card.remove());
+
+    const cache = getFeishuPlanLibraryCacheV143();
+    const items = cache.items || [];
+    if (!items.length) {
+        const empty = document.getElementById('master-empty-state');
+        const localCards = list.querySelectorAll('.master-plan-card:not(.feishu-plan-card-v143)');
+        if (empty && !localCards.length) empty.style.display = 'block';
+        feishuPlanLibraryRenderLockV145 = false;
+        setTimeout(() => { window.__suppressPlanLibraryObserverV145 = false; }, 50);
+        return;
+    }
+
+    const frag = document.createDocumentFragment();
+
+    const section = document.createElement('div');
+    section.className = 'feishu-plan-section-v143';
+    section.innerHTML = `
+        <div class="feishu-plan-section-title">
+            <strong>飞书方案记录</strong>
+            <span>${items.length} 条 · ${cache.syncedAt ? formatWorkspaceTime(cache.syncedAt) : '未同步'}</span>
+        </div>
+    `;
+    frag.appendChild(section);
+
+    items.forEach(item => {
+        const card = document.createElement('div');
+        card.className = 'master-plan-card master-plan-card-compact feishu-plan-card-v143';
+        card.setAttribute('data-feishu-plan-record-id', item.recordId || '');
+        card.setAttribute('data-title', item.planName || '');
+
+        const weightText = Number.isFinite(Number(item.totalWeightKg)) && Number(item.totalWeightKg) > 0
+            ? `${Number(item.totalWeightKg).toFixed(1)} kg`
+            : '-';
+        const countText = Number.isFinite(Number(item.totalCount)) && Number(item.totalCount) > 0
+            ? `${Number(item.totalCount)} 件`
+            : '-';
+        const furnaceText = Number.isFinite(Number(item.furnaceCount)) && Number(item.furnaceCount) > 0
+            ? `${Number(item.furnaceCount)} 炉/工装`
+            : '-';
+
+        card.innerHTML = `
+            <div class="mpc-head-row">
+                <div class="mpc-title">${escapeCompareHtml(item.planName || '飞书方案')}</div>
+                <span class="mpc-tag feishu">飞书</span>
+            </div>
+            <div class="mpc-meta">${escapeCompareHtml([item.customer, item.process, item.strategy, formatWorkspaceTime(item.generatedAt)].filter(Boolean).join(' · ') || '飞书方案记录')}</div>
+            <div class="cwc-metrics feishu-plan-metrics">
+                <span><b>${escapeCompareHtml(furnaceText)}</b></span>
+                <span><b>${escapeCompareHtml(countText)}</b></span>
+                <span><b>${escapeCompareHtml(weightText)}</b></span>
+                <span><b>${escapeCompareHtml(item.riskLevel || '风险未标注')}</b></span>
+            </div>
+            ${item.mobileSummary?.finalVersionName ? `<div class="cwc-history-note">最终执行版：${escapeCompareHtml(item.mobileSummary.finalVersionName)}</div>` : ''}
+            ${item.detailChecked && item.hasPlanJson === false ? `<div class="cwc-history-note warning">仅有摘要：该记录没有完整方案JSON，无法恢复3D工作台</div>` : ''}
+            <div class="mpc-actions">
+                <button type="button" class="plan-card-action load" data-action="${item.detailChecked && item.hasPlanJson === false ? 'show-feishu-plan-summary' : 'load-feishu-plan-card'}" data-record-id="${escapeCompareHtml(item.recordId || '')}">${item.detailChecked && item.hasPlanJson === false ? '查看摘要' : (item.planJsonLoaded ? '查看方案' : '加载方案')}</button>
+                <button type="button" class="plan-card-action compare-data" data-action="compare-data-feishu-plan" data-record-id="${escapeCompareHtml(item.recordId || '')}" ${item.detailChecked && item.hasPlanJson === false ? 'disabled' : ''}>对比</button>
+            </div>
+        `;
+        frag.appendChild(card);
+    });
+
+    list.appendChild(frag);
+
+    const empty = document.getElementById('master-empty-state');
+    if (empty) empty.style.display = 'none';
+
+    feishuPlanLibraryRenderLockV145 = false;
+    setTimeout(() => { window.__suppressPlanLibraryObserverV145 = false; }, 50);
+}
+
+async function syncFeishuPlanLibraryFromServerV143(triggerButton = null) {
+    const oldText = triggerButton?.textContent || '';
+    try {
+        if (triggerButton) {
+            triggerButton.disabled = true;
+            triggerButton.classList.add('is-loading');
+            triggerButton.textContent = '同步中...';
+        }
+
+        const payload = await fetchFeishuJson('/api/feishu/plans?page_size=30&max_pages=3', getFeishuClientId());
+        const items = normalizeFeishuPlanCacheItemsV143(payload.plans || []);
+        saveFeishuPlanLibraryCacheV143(items);
+
+        renderFeishuPlanLibraryCardsV143();
+        compactPlanLibraryCards();
+        showCapacityFeedback('success', `已从飞书同步 ${items.length} 条方案记录到网页方案库。`);
+    } catch (error) {
+        console.error('[Feishu Plan Library] sync failed:', error);
+        showCapacityFeedback('error', `同步飞书方案失败：${error.message}`);
+    } finally {
+        if (triggerButton) {
+            triggerButton.disabled = false;
+            triggerButton.classList.remove('is-loading');
+            triggerButton.textContent = oldText || '同步飞书';
+        }
+    }
+}
+
+function loadFeishuPlanRecordToWorkbenchV143(item) {
+    if (!item?.record) {
+        alert('该飞书方案缺少可恢复的方案JSON，无法载入工作台。');
+        return;
+    }
+
+    const title = item.planName || item.record?.meta?.title || '飞书方案';
+    markHistoryView(item.record, title);
+
+    try {
+        // 优先走标准数字孪生恢复流程。
+        workbenchRecord.applyDigitalTwinRecordToWorkbench(item.record, {
+            sourceTitle: title,
+            closeLibrary: false,
+            showSuccess: true
+        });
+
+        updateWorkbenchUiMode();
+        refreshPlanLibraryWorkbench();
+        updateCurrentToolingHud();
+        setTimeout(() => activateRightPanelTab('library'), 0);
+        return;
+    } catch (error) {
+        // V1.5.6：兼容 V1.5 生成的资产 JSON。
+        // plan-record.js 对“非标准装炉记录”比较严格；但 V1.5 plan.json 中通常有 loadingPlan.furnaces，
+        // 可以用 V1.3 的版本恢复流程直接恢复到工作台。
+        console.warn('[Feishu Plan Library] standard restore failed, fallback to direct version restore:', error);
+        const versionLike = {
+            versionId: item.recordId || item.record?.meta?.feishuPlanRecordId || `feishu_${Date.now()}`,
+            versionNo: 0,
+            versionName: title,
+            versionType: 'feishu_plan_record',
+            versionTypeLabel: '飞书方案记录',
+            createdAt: item.generatedAt || item.record?.meta?.createdAt || new Date().toISOString(),
+            strategy: item.strategy || item.record?.meta?.strategy || '',
+            record: item.record
+        };
+
+        const restored = applyPlanVersionToCurrentWorkspaceV13(versionLike, {
+            skipConfirm: true
+        });
+
+        if (!restored) {
+            alert(`飞书方案加载失败：${error?.message || error}`);
+            return;
+        }
+
+        if (typeof showCapacityFeedback === 'function') {
+            showCapacityFeedback('success', `已通过兼容模式恢复飞书方案：${title}`);
+        }
+        setTimeout(() => activateRightPanelTab('library'), 0);
+    }
+}
+
+function bindFeishuPlanLibraryEventsV143() {
+    const list = document.getElementById('master-list');
+    if (!list || list.dataset.feishuPlanEventsV143 === '1') return;
+    list.dataset.feishuPlanEventsV143 = '1';
+
+    list.addEventListener('click', event => {
+        const summaryBtn = event.target.closest('[data-action="show-feishu-plan-summary"]');
+        if (summaryBtn) {
+            event.preventDefault();
+            event.stopPropagation();
+            const item = getFeishuPlanCacheItemByRecordIdV143(summaryBtn.getAttribute('data-record-id'));
+            showFeishuPlanSummaryOnlyV147(item);
+            return;
+        }
+
+        const loadBtn = event.target.closest('[data-action="load-feishu-plan-card"]');
+        if (loadBtn) {
+            event.preventDefault();
+            event.stopPropagation();
+            ensureFeishuPlanRecordLoadedV144(loadBtn.getAttribute('data-record-id'), loadBtn).then(item => {
+                if (item?.record) loadFeishuPlanRecordToWorkbenchV143(item);
+            });
+            return;
+        }
+
+        const compareBtn = event.target.closest('[data-action="compare-data-feishu-plan"]');
+        if (compareBtn) {
+            event.preventDefault();
+            event.stopPropagation();
+            ensureFeishuPlanRecordLoadedV144(compareBtn.getAttribute('data-record-id'), compareBtn).then(item => {
+                if (!item?.record) {
+                    showFeishuPlanSummaryOnlyV147(item);
+                    return;
+                }
+                enterPlanDataCompareMode(item.record, item.planName || getPlanRecordTitle(item.record));
+            });
+        }
+    });
+}
+
+function initFeishuPlanLibrarySyncV143() {
+    ensureFeishuPlanLibrarySyncButtonV143();
+    bindFeishuPlanLibraryEventsV143();
+    renderFeishuPlanLibraryCardsV143();
+}
+
+
 function refreshPlanLibraryWorkbench() {
+    if (window.__suppressPlanLibraryObserverV145) return;
+
     renderCurrentWorkbenchPlanCard();
     renderLibraryHistoryBanner();
-    setTimeout(enhancePlanLibraryCompareButtons, 0);
+    ensureFeishuPlanLibrarySyncButtonV143();
+    bindFeishuPlanLibraryEventsV143();
+
+    clearTimeout(planLibraryWorkbenchRefreshTimerV145);
+    planLibraryWorkbenchRefreshTimerV145 = setTimeout(() => {
+        if (window.__suppressPlanLibraryObserverV145) return;
+        enhancePlanLibraryCompareButtons();
+        renderFeishuPlanLibraryCardsV143();
+    }, 80);
 }
 
 function enhancePlanLibraryCompareButtons() {
@@ -1677,6 +2411,9 @@ function enhancePlanLibraryCompareButtons() {
         }
     });
     compactPlanLibraryCards();
+    enhancePlanDataCompareButtons();
+    ensureFeishuPlanLibrarySyncButtonV143();
+    bindFeishuPlanLibraryEventsV143();
 }
 
 function observePlanLibraryForCompareButtons() {
@@ -1684,12 +2421,2254 @@ function observePlanLibraryForCompareButtons() {
     if (!list) return;
 
     const observer = new MutationObserver(() => {
-        refreshPlanLibraryWorkbench();
+        if (window.__suppressPlanLibraryObserverV145) return;
+        clearTimeout(planLibraryWorkbenchRefreshTimerV145);
+        planLibraryWorkbenchRefreshTimerV145 = setTimeout(refreshPlanLibraryWorkbench, 120);
     });
 
     observer.observe(list, { childList: true, subtree: true });
     refreshPlanLibraryWorkbench();
 }
+
+// ==================== V1: 方案数据对比（桌面优先，移动端可复用） ====================
+// 设计原则：
+// 1. 默认比较“当前工作台方案 vs 一个历史方案”。
+// 2. V1 只做统计数据和规则推荐，不打开 3D 分屏。
+// 3. 计算逻辑尽量独立于 DOM，后续 mobile.html 可复用同一套指标口径。
+
+let planDataCompareState = {
+    active: false,
+    currentRecord: null,
+    targetRecord: null,
+    payload: null
+};
+
+function safeCompareNumber(value, fallback = 0) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+}
+
+function formatCompareNumber(value, digits = 1, fallback = '-') {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    return n.toFixed(digits);
+}
+
+function formatComparePercentValue(value, digits = 1) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '-';
+    return `${n.toFixed(digits)}%`;
+}
+
+function getCompareStrategyLabelFromRecord(record) {
+    const raw = record?.meta?.strategy ||
+        record?.strategy ||
+        record?.loadingPlan?.strategy ||
+        record?.placementRules?.strategy ||
+        record?.rules?.strategy ||
+        '';
+
+    if (!raw) return '未标注';
+    return STRATEGY_LABELS?.[raw] || raw;
+}
+
+function getCompareRecordUnpackedCount(record) {
+    const unpacked = record?.loadingPlan?.unpackedItems || record?.unpackedItems || record?.notPackedItems || [];
+    return Array.isArray(unpacked) ? unpacked.length : 0;
+}
+
+function getCompareRuntimeFurnaces(record) {
+    if (record?.__runtimeFurnaces && Array.isArray(record.__runtimeFurnaces)) {
+        return record.__runtimeFurnaces;
+    }
+
+    try {
+        return normalizeRuntimeFurnacesFromRecord(record) || [];
+    } catch (error) {
+        console.warn('[plan-data-compare] normalize runtime furnaces failed:', error);
+        return [];
+    }
+}
+
+function getComparePackedItems(furnaces) {
+    return (furnaces || []).flatMap(f => Array.isArray(f?.packedItems) ? f.packedItems : []);
+}
+
+function uniqueNonEmpty(values) {
+    return [...new Set((values || []).map(v => String(v || '').trim()).filter(Boolean))];
+}
+
+function estimateCompareRisk(metrics) {
+    const reasons = [];
+
+    if (metrics.unpackedCount > 0) {
+        reasons.push(`仍有 ${metrics.unpackedCount} 件未装入`);
+    }
+
+    if (metrics.weightRate > 95) {
+        reasons.push('重量利用率接近上限');
+    }
+
+    if (metrics.spaceRate > 88) {
+        reasons.push('空间利用率偏高，可能影响热场/气流均匀性');
+    }
+
+    if (metrics.maxLayerCount >= 5) {
+        reasons.push('层数较多，现场执行复杂度上升');
+    }
+
+    if (metrics.toolingCount >= 3) {
+        reasons.push('工装数量较多，调度和施工复杂度上升');
+    }
+
+    if (reasons.some(text => text.includes('未装入') || text.includes('接近上限'))) {
+        return { level: '高', reasons };
+    }
+
+    if (reasons.length) {
+        return { level: '中', reasons };
+    }
+
+    return { level: '低', reasons: ['主要指标处于可控范围'] };
+}
+
+function calculateCompareScore(metrics) {
+    // V1 规则分：不是工艺仿真，只是帮助排序的经营/装载综合分。
+    let score = 72;
+
+    if (Number.isFinite(metrics.weightRate)) score += Math.min(metrics.weightRate, 90) * 0.08;
+    if (Number.isFinite(metrics.spaceRate)) score += Math.min(metrics.spaceRate, 85) * 0.08;
+
+    score -= metrics.unpackedCount * 8;
+    score -= Math.max(0, metrics.weightRate - 92) * 0.8;
+    score -= Math.max(0, metrics.spaceRate - 86) * 0.45;
+    score -= Math.max(0, metrics.maxLayerCount - 4) * 3;
+    score -= Math.max(0, metrics.toolingCount - 2) * 2;
+
+    if (metrics.riskLevel === '低') score += 6;
+    if (metrics.riskLevel === '中') score -= 4;
+    if (metrics.riskLevel === '高') score -= 12;
+
+    return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+function normalizePlanForDataCompare(record, role = 'target') {
+    const furnaces = getCompareRuntimeFurnaces(record);
+    const packedItems = getComparePackedItems(furnaces);
+
+    const toolingCount = furnaces.length;
+    const totalItems = packedItems.length;
+    const totalWeight = furnaces.reduce((sum, f) => sum + safeCompareNumber(f?.totalWeight), 0);
+    const maxWeight = furnaces.reduce((sum, f) => sum + safeCompareNumber(f?.max_weight ?? f?.maxWeight), 0);
+
+    const furnaceVolume = furnaces.reduce((sum, f) => sum + getFurnaceVolume(f), 0);
+    const packedVolume = furnaces.reduce((sum, f) => sum + getPackedVolume(f), 0);
+
+    const layers = furnaces.map(f => safeCompareNumber(getCurrentToolingLayerCount(f), 0));
+    const totalLayerCount = layers.reduce((sum, n) => sum + n, 0);
+    const maxLayerCount = layers.length ? Math.max(...layers) : 0;
+
+    const unpackedCount = getCompareRecordUnpackedCount(record);
+    const weightRate = maxWeight > 0 ? totalWeight / maxWeight * 100 : NaN;
+    const spaceRate = furnaceVolume > 0 ? packedVolume / furnaceVolume * 100 : NaN;
+
+    const materials = uniqueNonEmpty(packedItems.map(item => item.material || item.materialName));
+    const processes = uniqueNonEmpty(packedItems.map(item => item.process || item.processName));
+    const customers = uniqueNonEmpty(packedItems.map(item => item.customer || item.customerName));
+
+    const metrics = {
+        role,
+        title: getPlanRecordTitle(record),
+        createdAt: getPlanRecordCreatedAt(record),
+        strategy: getCompareStrategyLabelFromRecord(record),
+        toolingCount,
+        totalItems,
+        totalWeight,
+        maxWeight,
+        weightRate,
+        spaceRate,
+        totalLayerCount,
+        maxLayerCount,
+        unpackedCount,
+        materials,
+        processes,
+        customers,
+        packedVolume,
+        furnaceVolume,
+        rawRecord: record
+    };
+
+    const risk = estimateCompareRisk(metrics);
+    metrics.riskLevel = risk.level;
+    metrics.riskReasons = risk.reasons;
+    metrics.score = calculateCompareScore(metrics);
+
+    return metrics;
+}
+
+function buildCurrentCompareRecord() {
+    if (!globalFurnacesResult || globalFurnacesResult.length === 0) return null;
+
+    let record = null;
+    try {
+        record = buildCurrentDigitalTwinRecord({
+            title: getCurrentWorkspaceTitle ? getCurrentWorkspaceTitle() : '当前工作台方案',
+            materials: typeof collectMaterialBatchesForRecord === 'function' ? collectMaterialBatchesForRecord() : [],
+            tooling: typeof collectToolingForRecord === 'function' ? collectToolingForRecord() : []
+        });
+    } catch (error) {
+        console.warn('[plan-data-compare] build current record failed, fallback runtime record:', error);
+    }
+
+    if (!record) {
+        record = {
+            meta: {
+                title: getCurrentWorkspaceTitle ? getCurrentWorkspaceTitle() : '当前工作台方案',
+                createdAt: new Date().toISOString(),
+                strategy: placementRules?.strategy || ''
+            },
+            loadingPlan: {
+                furnaces: globalFurnacesResult,
+                unpackedItems: globalUnpackedItems || []
+            }
+        };
+    }
+
+    record.__runtimeFurnaces = globalFurnacesResult || [];
+    if (!record.loadingPlan) record.loadingPlan = {};
+    if (!Array.isArray(record.loadingPlan.unpackedItems)) {
+        record.loadingPlan.unpackedItems = globalUnpackedItems || [];
+    }
+    return record;
+}
+
+function compareDelta(a, b) {
+    const n1 = Number(a);
+    const n2 = Number(b);
+    if (!Number.isFinite(n1) || !Number.isFinite(n2)) {
+        return { text: '-', cls: 'equal', value: NaN };
+    }
+    const delta = n1 - n2;
+    if (Math.abs(delta) < 0.05) return { text: '持平', cls: 'equal', value: 0 };
+    return {
+        text: `${delta > 0 ? '+' : ''}${delta.toFixed(Math.abs(delta) >= 10 ? 0 : 1)}`,
+        cls: delta > 0 ? 'positive' : 'negative',
+        value: delta
+    };
+}
+
+function compareDeltaWithSuffix(a, b, suffix = '') {
+    const d = compareDelta(a, b);
+    if (d.text !== '-' && d.text !== '持平') d.text += suffix;
+    return d;
+}
+
+function buildPlanDataComparePayload(currentRecord, targetRecord) {
+    const current = normalizePlanForDataCompare(currentRecord, 'current');
+    const target = normalizePlanForDataCompare(targetRecord, 'target');
+
+    const rows = [
+        { key: 'strategy', label: '摆放策略', type: 'text', current: current.strategy, target: target.strategy, delta: { text: current.strategy === target.strategy ? '相同' : '不同', cls: current.strategy === target.strategy ? 'equal' : 'warning' } },
+        { key: 'toolingCount', label: '工装数量', type: 'number', current: current.toolingCount, target: target.toolingCount, delta: compareDeltaWithSuffix(current.toolingCount, target.toolingCount, '个') },
+        { key: 'totalItems', label: '已装件数', type: 'number', current: current.totalItems, target: target.totalItems, delta: compareDeltaWithSuffix(current.totalItems, target.totalItems, '件') },
+        { key: 'unpackedCount', label: '未装件数', type: 'number', current: current.unpackedCount, target: target.unpackedCount, delta: compareDeltaWithSuffix(current.unpackedCount, target.unpackedCount, '件') },
+        { key: 'totalWeight', label: '装载重量', type: 'weight', current: current.totalWeight, target: target.totalWeight, delta: compareDeltaWithSuffix(current.totalWeight, target.totalWeight, 'kg') },
+        { key: 'weightRate', label: '重量利用率', type: 'percent', current: current.weightRate, target: target.weightRate, delta: compareDeltaWithSuffix(current.weightRate, target.weightRate, '%') },
+        { key: 'spaceRate', label: '空间利用率', type: 'percent', current: current.spaceRate, target: target.spaceRate, delta: compareDeltaWithSuffix(current.spaceRate, target.spaceRate, '%') },
+        { key: 'totalLayerCount', label: '总层数', type: 'number', current: current.totalLayerCount, target: target.totalLayerCount, delta: compareDeltaWithSuffix(current.totalLayerCount, target.totalLayerCount, '层') },
+        { key: 'maxLayerCount', label: '最大层数', type: 'number', current: current.maxLayerCount, target: target.maxLayerCount, delta: compareDeltaWithSuffix(current.maxLayerCount, target.maxLayerCount, '层') },
+        { key: 'riskLevel', label: '风险等级', type: 'risk', current: current.riskLevel, target: target.riskLevel, delta: { text: current.riskLevel === target.riskLevel ? '相同' : '不同', cls: current.riskLevel === target.riskLevel ? 'equal' : 'warning' } },
+        { key: 'score', label: '综合评分', type: 'score', current: current.score, target: target.score, delta: compareDeltaWithSuffix(current.score, target.score, '分') }
+    ];
+
+    return {
+        current,
+        target,
+        rows,
+        recommendation: buildPlanDataCompareRecommendation(current, target, rows),
+        shouldSuggest3D: shouldSuggest3DCompare(current, target)
+    };
+}
+
+function riskRank(level) {
+    if (String(level).includes('高')) return 3;
+    if (String(level).includes('中')) return 2;
+    return 1;
+}
+
+function shouldSuggest3DCompare(current, target) {
+    const reasons = [];
+
+    if (Math.abs((current.spaceRate || 0) - (target.spaceRate || 0)) >= 10) {
+        reasons.push('空间利用率差异超过 10%');
+    }
+    if (current.totalLayerCount !== target.totalLayerCount || current.maxLayerCount !== target.maxLayerCount) {
+        reasons.push('层数存在差异');
+    }
+    if (current.toolingCount !== target.toolingCount) {
+        reasons.push('工装数量不同');
+    }
+    if (riskRank(current.riskLevel) >= 2 || riskRank(target.riskLevel) >= 2) {
+        reasons.push('至少一个方案存在中/高风险');
+    }
+    if (current.strategy !== target.strategy) {
+        reasons.push('摆放策略不同');
+    }
+
+    return {
+        yes: reasons.length > 0,
+        reasons
+    };
+}
+
+function buildPlanDataCompareRecommendation(current, target) {
+    const currentRisk = riskRank(current.riskLevel);
+    const targetRisk = riskRank(target.riskLevel);
+    const scoreDelta = current.score - target.score;
+    const currentLoadedMore = current.totalItems > target.totalItems || current.unpackedCount < target.unpackedCount;
+
+    let winner = 'current';
+    let headline = '推荐当前工作台方案';
+    const reasons = [];
+
+    if (targetRisk < currentRisk && target.score >= current.score - 3) {
+        winner = 'target';
+        headline = '推荐历史方案';
+        reasons.push('历史方案风险等级更低，且综合评分没有明显落后。');
+    } else if (scoreDelta < -5) {
+        winner = 'target';
+        headline = '推荐历史方案';
+        reasons.push(`历史方案综合评分高出 ${Math.abs(scoreDelta)} 分。`);
+    } else if (scoreDelta > 5) {
+        reasons.push(`当前方案综合评分高出 ${scoreDelta} 分。`);
+    } else {
+        headline = '两个方案接近，建议结合业务目标选择';
+        reasons.push('两个方案综合评分接近，暂不建议只按单一指标决策。');
+    }
+
+    if (winner === 'current') {
+        if (currentLoadedMore) reasons.push('当前方案装载件数更多或未装件数更少。');
+        if (currentRisk < targetRisk) reasons.push('当前方案风险等级更低。');
+        if (current.spaceRate < target.spaceRate && current.riskLevel === '低') reasons.push('当前方案空间密度更保守，适合品质优先。');
+    } else {
+        if (target.totalItems > current.totalItems || target.unpackedCount < current.unpackedCount) reasons.push('历史方案装载件数更多或未装件数更少。');
+        if (target.spaceRate < current.spaceRate && target.riskLevel === '低') reasons.push('历史方案空间密度更保守，适合品质优先。');
+    }
+
+    const fallback = winner === 'current' ? current : target;
+    if (!reasons.length) {
+        reasons.push(`${fallback.title} 在综合评分和风险控制上更有优势。`);
+    }
+
+    return { winner, headline, reasons };
+}
+
+function formatCompareCellValue(row, value) {
+    if (row.type === 'percent') return formatComparePercentValue(value);
+    if (row.type === 'weight') return `${formatCompareNumber(value, 1)} kg`;
+    if (row.type === 'score') return `${formatCompareNumber(value, 0)} 分`;
+    if (row.type === 'number') return formatCompareNumber(value, 0);
+    return String(value ?? '-');
+}
+
+function escapeCompareHtml(value) {
+    return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+}
+
+function ensurePlanDataCompareStyles() {
+    if (document.getElementById('plan-data-compare-v1-style')) return;
+
+    const style = document.createElement('style');
+    style.id = 'plan-data-compare-v1-style';
+    style.textContent = `
+        .pdc-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 9990;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            background: rgba(15, 23, 42, .52);
+            backdrop-filter: blur(10px);
+        }
+        .pdc-modal.active { display: flex; }
+        .pdc-panel {
+            width: min(1120px, 96vw);
+            max-height: 92vh;
+            overflow: hidden;
+            display: grid;
+            grid-template-rows: auto minmax(0, 1fr);
+            border: 1px solid rgba(219, 228, 239, .9);
+            border-radius: 28px;
+            background: #f8fafc;
+            box-shadow: 0 28px 70px rgba(15, 23, 42, .28);
+        }
+        .pdc-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            align-items: flex-start;
+            padding: 18px 20px;
+            border-bottom: 1px solid #e2e8f0;
+            background: linear-gradient(135deg, #ffffff, #eef6ff);
+        }
+        .pdc-kicker {
+            font-size: 12px;
+            font-weight: 900;
+            color: #2563eb;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+        }
+        .pdc-title {
+            margin-top: 4px;
+            font-size: 22px;
+            line-height: 1.2;
+            font-weight: 900;
+            color: #0f172a;
+        }
+        .pdc-subtitle {
+            margin-top: 6px;
+            color: #64748b;
+            font-size: 13px;
+        }
+        .pdc-close {
+            border: 0;
+            border-radius: 14px;
+            padding: 10px 14px;
+            color: #0f172a;
+            font-weight: 900;
+            background: #e2e8f0;
+            cursor: pointer;
+        }
+        .pdc-body {
+            overflow: auto;
+            padding: 18px 20px 22px;
+        }
+        .pdc-summary-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+            margin-bottom: 14px;
+        }
+        .pdc-plan-card {
+            border: 1px solid #e2e8f0;
+            border-radius: 22px;
+            padding: 16px;
+            background: #fff;
+            box-shadow: 0 12px 28px rgba(15, 23, 42, .08);
+        }
+        .pdc-plan-label {
+            display: inline-flex;
+            border-radius: 999px;
+            padding: 5px 9px;
+            font-size: 11px;
+            font-weight: 900;
+            color: #fff;
+            background: #2563eb;
+        }
+        .pdc-plan-label.target { background: #7c3aed; }
+        .pdc-plan-title {
+            margin-top: 10px;
+            font-size: 18px;
+            font-weight: 900;
+            color: #0f172a;
+        }
+        .pdc-plan-meta {
+            margin-top: 5px;
+            color: #64748b;
+            font-size: 12px;
+        }
+        .pdc-metric-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .pdc-metric {
+            border-radius: 15px;
+            padding: 10px;
+            background: #f8fafc;
+            border: 1px solid #e5edf8;
+        }
+        .pdc-metric span {
+            display: block;
+            color: #7b8ba8;
+            font-size: 11px;
+            font-weight: 800;
+        }
+        .pdc-metric strong {
+            display: block;
+            margin-top: 4px;
+            color: #0f172a;
+            font-size: 17px;
+            line-height: 1;
+        }
+        .pdc-recommend {
+            margin: 14px 0;
+            border-radius: 22px;
+            padding: 16px;
+            color: #fff;
+            background: linear-gradient(135deg, #0f172a, #1e3a8a);
+            box-shadow: 0 18px 42px rgba(15, 23, 42, .18);
+        }
+        .pdc-recommend h3 {
+            margin: 0 0 8px;
+            font-size: 18px;
+        }
+        .pdc-recommend ul {
+            margin: 8px 0 0 18px;
+            padding: 0;
+            color: rgba(255,255,255,.82);
+            line-height: 1.55;
+            font-size: 13px;
+        }
+        .pdc-3d-note {
+            margin-top: 12px;
+            border-top: 1px solid rgba(255,255,255,.16);
+            padding-top: 10px;
+            color: rgba(255,255,255,.74);
+            font-size: 12px;
+            line-height: 1.5;
+        }
+        .pdc-table-wrap {
+            overflow: auto;
+            border: 1px solid #e2e8f0;
+            border-radius: 20px;
+            background: #fff;
+        }
+        .pdc-table {
+            width: 100%;
+            min-width: 760px;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        .pdc-table th,
+        .pdc-table td {
+            padding: 12px 14px;
+            border-bottom: 1px solid #eef2f7;
+            text-align: left;
+            vertical-align: middle;
+        }
+        .pdc-table th {
+            color: #64748b;
+            font-size: 12px;
+            background: #f8fafc;
+        }
+        .pdc-table tr:last-child td { border-bottom: 0; }
+        .pdc-delta {
+            display: inline-flex;
+            border-radius: 999px;
+            padding: 5px 9px;
+            font-weight: 900;
+            font-size: 12px;
+            background: #f1f5f9;
+            color: #64748b;
+        }
+        .pdc-delta.positive { background: #ecfdf5; color: #047857; }
+        .pdc-delta.negative { background: #fff1f2; color: #be123c; }
+        .pdc-delta.warning { background: #fff7ed; color: #c2410c; }
+        .pdc-risk-list {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 14px;
+        }
+        .pdc-risk {
+            border-radius: 18px;
+            padding: 13px 14px;
+            background: #fff;
+            border: 1px solid #e2e8f0;
+        }
+        .pdc-risk strong {
+            display: block;
+            margin-bottom: 6px;
+            color: #0f172a;
+        }
+        .pdc-risk p {
+            margin: 0;
+            color: #64748b;
+            font-size: 12px;
+            line-height: 1.55;
+        }
+        @media (max-width: 720px) {
+            .pdc-modal { padding: 0; align-items: stretch; }
+            .pdc-panel { width: 100vw; max-height: 100vh; border-radius: 0; }
+            .pdc-head { padding: 14px 15px; }
+            .pdc-title { font-size: 18px; }
+            .pdc-body { padding: 14px 14px 18px; }
+            .pdc-summary-grid,
+            .pdc-risk-list { grid-template-columns: 1fr; }
+            .pdc-metric-row { grid-template-columns: 1fr 1fr; }
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+function ensurePlanDataCompareModal() {
+    ensurePlanDataCompareStyles();
+
+    let modal = document.getElementById('plan-data-compare-modal');
+    if (modal) return modal;
+
+    modal = document.createElement('div');
+    modal.id = 'plan-data-compare-modal';
+    modal.className = 'pdc-modal';
+    modal.innerHTML = `
+        <div class="pdc-panel" role="dialog" aria-modal="true" aria-labelledby="pdc-title">
+            <div class="pdc-head">
+                <div>
+                    <div class="pdc-kicker">方案数据对比 V1</div>
+                    <div class="pdc-title" id="pdc-title">当前方案 vs 历史方案</div>
+                    <div class="pdc-subtitle" id="pdc-subtitle">统计数据优先，3D 对比后续按需打开</div>
+                </div>
+                <button class="pdc-close" type="button" id="pdc-close">关闭</button>
+            </div>
+            <div class="pdc-body" id="pdc-body"></div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    modal.querySelector('#pdc-close')?.addEventListener('click', closePlanDataCompareModal);
+    modal.addEventListener('click', (event) => {
+        if (event.target === modal) closePlanDataCompareModal();
+    });
+
+    return modal;
+}
+
+function renderPlanSummaryCard(metrics, label, labelClass = '') {
+    return `
+        <section class="pdc-plan-card">
+            <span class="pdc-plan-label ${labelClass}">${label}</span>
+            <div class="pdc-plan-title">${escapeCompareHtml(metrics.title)}</div>
+            <div class="pdc-plan-meta">${escapeCompareHtml(metrics.strategy)} · ${escapeCompareHtml(metrics.createdAt || '未记录时间')}</div>
+            <div class="pdc-metric-row">
+                <div class="pdc-metric"><span>综合评分</span><strong>${formatCompareNumber(metrics.score, 0)}</strong></div>
+                <div class="pdc-metric"><span>风险</span><strong>${escapeCompareHtml(metrics.riskLevel)}</strong></div>
+                <div class="pdc-metric"><span>已装</span><strong>${formatCompareNumber(metrics.totalItems, 0)}</strong></div>
+                <div class="pdc-metric"><span>重量</span><strong>${formatCompareNumber(metrics.totalWeight, 1)}kg</strong></div>
+            </div>
+        </section>
+    `;
+}
+
+function renderPlanDataComparePayload(payload) {
+    const modal = ensurePlanDataCompareModal();
+    const body = modal.querySelector('#pdc-body');
+    const title = modal.querySelector('#pdc-title');
+    const subtitle = modal.querySelector('#pdc-subtitle');
+
+    const currentLabel = payload.currentLabel || '当前工作台方案';
+    const targetLabel = payload.targetLabel || '历史方案';
+    const compareType = payload.compareType || '方案数据对比';
+
+    if (title) title.textContent = `${compareType}：${payload.current.title} vs ${payload.target.title}`;
+    if (subtitle) subtitle.textContent = payload.subtitle || '默认展示统计数据和规则推荐；需要空间验证时再进入 3D 对比。';
+
+    const rowsHtml = payload.rows.map(row => `
+        <tr>
+            <td><strong>${escapeCompareHtml(row.label)}</strong></td>
+            <td>${escapeCompareHtml(formatCompareCellValue(row, row.current))}</td>
+            <td>${escapeCompareHtml(formatCompareCellValue(row, row.target))}</td>
+            <td><span class="pdc-delta ${row.delta.cls}">${escapeCompareHtml(row.delta.text)}</span></td>
+        </tr>
+    `).join('');
+
+    const rec = payload.recommendation;
+    const suggest3D = payload.shouldSuggest3D;
+    const threeDNote = suggest3D.yes
+        ? `建议后续查看 3D 对比：${suggest3D.reasons.join('、')}。`
+        : '暂不强制需要 3D 对比：主要指标差异不大，可先按数据和业务目标决策。';
+
+    const changeSummaryHtml = payload.versionChangeSummary
+        ? renderPlanVersionChangeSummaryHtml(payload.versionChangeSummary)
+        : '';
+
+    body.innerHTML = `
+        <div class="pdc-summary-grid">
+            ${renderPlanSummaryCard(payload.current, currentLabel)}
+            ${renderPlanSummaryCard(payload.target, targetLabel, 'target')}
+        </div>
+
+        ${changeSummaryHtml}
+
+        <section class="pdc-recommend">
+            <h3>${escapeCompareHtml(rec.headline)}</h3>
+            <ul>
+                ${rec.reasons.map(text => `<li>${escapeCompareHtml(text)}</li>`).join('')}
+            </ul>
+            <div class="pdc-3d-note">${escapeCompareHtml(threeDNote)}</div>
+        </section>
+
+        <div class="pdc-table-wrap">
+            <table class="pdc-table">
+                <thead>
+                    <tr>
+                        <th>指标</th>
+                        <th>${escapeCompareHtml(currentLabel)}</th>
+                        <th>${escapeCompareHtml(targetLabel)}</th>
+                        <th>差异</th>
+                    </tr>
+                </thead>
+                <tbody>${rowsHtml}</tbody>
+            </table>
+        </div>
+
+        <div class="pdc-risk-list">
+            <section class="pdc-risk">
+                <strong>${escapeCompareHtml(currentLabel)}风险说明</strong>
+                <p>${escapeCompareHtml(payload.current.riskReasons.join('；'))}</p>
+            </section>
+            <section class="pdc-risk">
+                <strong>${escapeCompareHtml(targetLabel)}风险说明</strong>
+                <p>${escapeCompareHtml(payload.target.riskReasons.join('；'))}</p>
+            </section>
+        </div>
+    `;
+
+    modal.classList.add('active');
+    document.body.classList.add('plan-data-compare-open');
+}
+
+function closePlanDataCompareModal() {
+    const modal = document.getElementById('plan-data-compare-modal');
+    if (modal) modal.classList.remove('active');
+    document.body.classList.remove('plan-data-compare-open');
+    planDataCompareState.active = false;
+}
+
+function enterPlanDataCompareMode(targetRecord, targetTitle = '') {
+    const currentRecord = buildCurrentCompareRecord();
+
+    if (!currentRecord) {
+        alert('请先生成当前工作台方案，再进行数据对比。');
+        return;
+    }
+
+    if (!targetRecord) {
+        alert('没有找到可对比的历史方案记录。');
+        return;
+    }
+
+    if (targetTitle && !targetRecord.meta?.title) {
+        targetRecord.meta = { ...(targetRecord.meta || {}), title: targetTitle };
+    }
+
+    const payload = buildPlanDataComparePayload(currentRecord, targetRecord);
+    planDataCompareState = {
+        active: true,
+        currentRecord,
+        targetRecord,
+        payload
+    };
+
+    renderPlanDataComparePayload(payload);
+}
+
+function enhancePlanDataCompareButtons() {
+    const cards = document.querySelectorAll('#master-list .master-plan-card');
+    cards.forEach(card => {
+        let actionRow = card.querySelector('.mpc-actions');
+        if (!actionRow) {
+            actionRow = document.createElement('div');
+            actionRow.className = 'mpc-actions';
+            card.appendChild(actionRow);
+        }
+
+        if (!actionRow.querySelector('[data-action="compare-data-plan"]')) {
+            const compareBtn = document.createElement('button');
+            compareBtn.type = 'button';
+            compareBtn.className = 'plan-card-action compare-data';
+            compareBtn.setAttribute('data-action', 'compare-data-plan');
+            compareBtn.textContent = '数据对比';
+            compareBtn.title = '与当前工作台方案进行统计数据对比';
+            actionRow.insertBefore(compareBtn, actionRow.firstChild);
+        }
+    });
+}
+
+// 供后续 mobile.html 或其它页面复用同一套数据口径。
+window.PlanDataCompareV1 = {
+    normalizePlanForDataCompare,
+    buildPlanDataComparePayload,
+    estimateCompareRisk,
+    calculateCompareScore,
+    shouldSuggest3DCompare
+};
+
+
+// ==================== V1.1: 方案版本保存 / 人工微调对比 ====================
+// 产品原则：
+// - 产品类订单：看历史经验是否可复用。
+// - 非标类订单：看人工微调是否更合理。
+// - 仿真模块：验证微调是否降低质量风险。
+// V1.1 先落地“AI初稿 → 总工调整版 → 与上一版对比”的本地版本链路。
+
+const PLAN_VERSION_V11_STORAGE_KEY = 'heatTreatmentPlanVersionsV11';
+const PLAN_VERSION_V11_MAX_PER_WORKSPACE = 12;
+
+let planVersionV11State = {
+    lastSavedVersionId: '',
+    lastCompareTargetVersionId: '',
+    currentRestoredVersionId: ''
+};
+
+function readPlanVersionStoreV11() {
+    try {
+        const raw = localStorage.getItem(PLAN_VERSION_V11_STORAGE_KEY);
+        const data = raw ? JSON.parse(raw) : {};
+        return data && typeof data === 'object' ? data : {};
+    } catch (error) {
+        console.warn('[plan-version-v1.1] read store failed:', error);
+        return {};
+    }
+}
+
+function writePlanVersionStoreV11(store) {
+    try {
+        localStorage.setItem(PLAN_VERSION_V11_STORAGE_KEY, JSON.stringify(store || {}));
+        return true;
+    } catch (error) {
+        console.warn('[plan-version-v1.1] write store failed:', error);
+        if (typeof showCapacityFeedback === 'function') {
+            showCapacityFeedback('warning', '方案版本保存失败：浏览器本地存储空间可能不足。');
+        }
+        return false;
+    }
+}
+
+function getCurrentPlanVersionGroupIdV11() {
+    const identity = ensureCurrentWorkspaceIdentity();
+    return identity.id || makeWorkspaceId();
+}
+
+function makePlanVersionIdV11(type = 'version') {
+    return `${type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function getPlanVersionsForWorkspaceV11(groupId = getCurrentPlanVersionGroupIdV11()) {
+    const store = readPlanVersionStoreV11();
+    const list = store[groupId] || [];
+    return Array.isArray(list) ? list : [];
+}
+
+function savePlanVersionsForWorkspaceV11(groupId, versions) {
+    const store = readPlanVersionStoreV11();
+    store[groupId] = (versions || []).slice(-PLAN_VERSION_V11_MAX_PER_WORKSPACE);
+    return writePlanVersionStoreV11(store);
+}
+
+function getCurrentPlanVersionsV11() {
+    return getPlanVersionsForWorkspaceV11(getCurrentPlanVersionGroupIdV11());
+}
+
+function getPlanVersionTypeLabelV11(type = '') {
+    const map = {
+        ai_draft: 'AI初稿',
+        manual_adjusted: '总工调整版',
+        simulation_optimized: '仿真优化版',
+        final_execution: '最终执行版'
+    };
+    return map[type] || '方案版本';
+}
+
+function getNextPlanVersionNoV11(versions) {
+    return (Array.isArray(versions) ? versions.length : 0) + 1;
+}
+
+function buildCurrentPlanVersionRecordV11({ versionId, versionNo, versionName, versionType, baseVersionId, source = '' } = {}) {
+    if (!globalFurnacesResult || globalFurnacesResult.length === 0) return null;
+
+    const title = `${getCurrentWorkspaceTitle()} · ${versionName || '方案版本'}`;
+    let record = null;
+    try {
+        record = buildCurrentDigitalTwinRecord({
+            title,
+            materials: collectMaterialBatchesForRecord(),
+            tooling: collectToolingForRecord()
+        });
+    } catch (error) {
+        console.warn('[plan-version-v1.1] build record failed, fallback record:', error);
+    }
+
+    if (!record) {
+        record = {
+            schemaVersion: 'heat-treatment-digital-twin-v1',
+            meta: {},
+            loadingPlan: {}
+        };
+    }
+
+    record.meta = {
+        ...(record.meta || {}),
+        title,
+        createdAt: new Date().toISOString(),
+        planGroupId: getCurrentPlanVersionGroupIdV11(),
+        workspaceId: getCurrentPlanVersionGroupIdV11(),
+        workspaceTitle: getCurrentWorkspaceTitle(),
+        versionId,
+        versionNo,
+        versionName,
+        versionType,
+        baseVersionId: baseVersionId || '',
+        versionSource: source || '',
+        strategy: currentWorkspaceIdentity?.strategyKey || placementRules.strategy || '',
+        strategyLabel: currentWorkspaceIdentity?.strategyLabel || STRATEGY_LABELS[placementRules.strategy] || placementRules.strategy || ''
+    };
+
+    record.loadingPlan = {
+        ...(record.loadingPlan || {}),
+        furnaces: clonePlain(globalFurnacesResult || []),
+        unpackedItems: clonePlain(globalUnpackedItems || []),
+        versionId,
+        versionNo,
+        versionName,
+        versionType
+    };
+
+    record.__runtimeFurnaces = clonePlain(globalFurnacesResult || []);
+    return record;
+}
+
+function flattenPlanPlacementStatesV11(record) {
+    const furnaces = getCompareRuntimeFurnaces(record) || [];
+    const map = new Map();
+
+    furnaces.forEach((furnace, furnaceIndex) => {
+        (furnace.packedItems || []).forEach((item, itemIndex) => {
+            const key = String(item.id || item.itemId || item.code || item.name || `F${furnaceIndex}-I${itemIndex}`);
+            const layer = getPlacementItemLayer(item, furnace);
+            const state = {
+                key,
+                itemName: item.name || item.showName || item.productName || key,
+                furnaceIndex,
+                itemIndex,
+                x: Number(item.x || 0),
+                y: Number(item.y || 0),
+                z: Number(item.z || 0),
+                w: Number(item.w || 0),
+                h: Number(item.h || 0),
+                d: Number(item.d || 0),
+                layer,
+                rotation: Number(item.rotation || item.manualRotation || 0),
+                verticalRotation: Number(item.verticalRotation || 0),
+                locked: !!item.locked,
+                finalEdited: !!item.finalEdited || !!item.manualMoved
+            };
+            map.set(key, state);
+        });
+    });
+
+    return { furnaces, map };
+}
+
+function calculatePlanCenterOffsetV11(record) {
+    const { furnaces } = flattenPlanPlacementStatesV11(record);
+    let totalWeight = 0;
+    let weightedOffset = 0;
+    let maxOffset = 0;
+
+    furnaces.forEach(furnace => {
+        const fw = Number(furnace.w || furnace.width || 0);
+        const fd = Number(furnace.d || furnace.depth || 0);
+        const cx = fw / 2;
+        const cz = fd / 2;
+
+        (furnace.packedItems || []).forEach(item => {
+            const weight = Math.max(1, Number(item.totalWeight || item.weight || item.unitWeight || 1));
+            const ix = Number(item.x || 0) + Number(item.w || 0) / 2;
+            const iz = Number(item.z || 0) + Number(item.d || 0) / 2;
+            const offset = Math.sqrt((ix - cx) * (ix - cx) + (iz - cz) * (iz - cz));
+            weightedOffset += offset * weight;
+            totalWeight += weight;
+            maxOffset = Math.max(maxOffset, offset);
+        });
+    });
+
+    return {
+        avgOffset: totalWeight > 0 ? weightedOffset / totalWeight : NaN,
+        maxOffset
+    };
+}
+
+
+// ==================== V1.2: 人工调整对比增强指标 ====================
+// V1.2 目标：在 V1.1 的“移动/层级/旋转/重心”基础上，补充：
+// - 最小平面间距变化
+// - 近距离工件对变化
+// - 局部密度变化
+// - 重件移动
+// - 是否建议进一步做辐射/气流/热场仿真对比
+// 这些指标仍是规则近似，不替代真实热仿真。
+
+function getPlacementWeightV12(item) {
+    return Math.max(1, Number(item.totalWeight || item.weight || item.unitWeight || item.singleWeight || 1));
+}
+
+function buildPlacementBoxV12(state) {
+    const w = Math.max(1, Number(state.w || 0));
+    const d = Math.max(1, Number(state.d || 0));
+    const h = Math.max(1, Number(state.h || 0));
+    const x = Number(state.x || 0);
+    const y = Number(state.y || 0);
+    const z = Number(state.z || 0);
+    return {
+        minX: x,
+        maxX: x + w,
+        minY: y,
+        maxY: y + h,
+        minZ: z,
+        maxZ: z + d,
+        cx: x + w / 2,
+        cy: y + h / 2,
+        cz: z + d / 2,
+        area: w * d,
+        volume: w * h * d
+    };
+}
+
+function getRectGapDistanceV12(a, b) {
+    const dx = Math.max(0, Math.max(a.minX - b.maxX, b.minX - a.maxX));
+    const dz = Math.max(0, Math.max(a.minZ - b.maxZ, b.minZ - a.maxZ));
+    return Math.sqrt(dx * dx + dz * dz);
+}
+
+function calculatePlanSpacingMetricsV12(record) {
+    const { furnaces, map } = flattenPlanPlacementStatesV11(record);
+    const byFurnaceLayer = new Map();
+
+    map.forEach(state => {
+        const key = `${state.furnaceIndex}::${state.layer}`;
+        if (!byFurnaceLayer.has(key)) byFurnaceLayer.set(key, []);
+        byFurnaceLayer.get(key).push({
+            ...state,
+            box: buildPlacementBoxV12(state)
+        });
+    });
+
+    let minGap = Infinity;
+    let nearestSum = 0;
+    let nearestCount = 0;
+    let closePairCount = 0;
+    let overlapPairCount = 0;
+    const closeThreshold = 30;
+
+    byFurnaceLayer.forEach(items => {
+        items.forEach((item, i) => {
+            let nearest = Infinity;
+
+            for (let j = i + 1; j < items.length; j++) {
+                const other = items[j];
+                const gap = getRectGapDistanceV12(item.box, other.box);
+
+                minGap = Math.min(minGap, gap);
+                nearest = Math.min(nearest, gap);
+
+                if (gap <= 0.1) overlapPairCount += 1;
+                if (gap > 0.1 && gap < closeThreshold) closePairCount += 1;
+            }
+
+            if (Number.isFinite(nearest)) {
+                nearestSum += nearest;
+                nearestCount += 1;
+            }
+        });
+    });
+
+    return {
+        minGap: Number.isFinite(minGap) ? minGap : NaN,
+        avgNearestGap: nearestCount > 0 ? nearestSum / nearestCount : NaN,
+        closePairCount,
+        overlapPairCount
+    };
+}
+
+function calculatePlanLocalDensityMetricsV12(record) {
+    const { furnaces, map } = flattenPlanPlacementStatesV11(record);
+    const byFurnaceLayer = new Map();
+
+    map.forEach(state => {
+        const key = `${state.furnaceIndex}::${state.layer}`;
+        if (!byFurnaceLayer.has(key)) byFurnaceLayer.set(key, []);
+        byFurnaceLayer.get(key).push({
+            ...state,
+            box: buildPlacementBoxV12(state)
+        });
+    });
+
+    let maxCellDensity = 0;
+    let maxLayerFootprintDensity = 0;
+    let highDensityCellCount = 0;
+
+    byFurnaceLayer.forEach((items, layerKey) => {
+        const furnaceIndex = Number(String(layerKey).split('::')[0]);
+        const furnace = furnaces[furnaceIndex] || {};
+        const fw = Math.max(1, Number(furnace.w || furnace.width || furnace.innerWidth || 0));
+        const fd = Math.max(1, Number(furnace.d || furnace.depth || furnace.innerDepth || 0));
+        const totalArea = fw * fd;
+        const cellArea = totalArea / 9;
+        const cells = Array(9).fill(0);
+        let layerArea = 0;
+
+        items.forEach(item => {
+            const bx = item.box;
+            const cellX = Math.max(0, Math.min(2, Math.floor((bx.cx / fw) * 3)));
+            const cellZ = Math.max(0, Math.min(2, Math.floor((bx.cz / fd) * 3)));
+            const cellIndex = cellZ * 3 + cellX;
+            const area = Math.max(1, bx.area);
+            cells[cellIndex] += area;
+            layerArea += area;
+        });
+
+        const layerDensity = totalArea > 0 ? layerArea / totalArea * 100 : 0;
+        maxLayerFootprintDensity = Math.max(maxLayerFootprintDensity, layerDensity);
+
+        cells.forEach(area => {
+            const density = cellArea > 0 ? area / cellArea * 100 : 0;
+            maxCellDensity = Math.max(maxCellDensity, density);
+            if (density >= 85) highDensityCellCount += 1;
+        });
+    });
+
+    return {
+        maxCellDensity,
+        maxLayerFootprintDensity,
+        highDensityCellCount
+    };
+}
+
+function calculateMovedHeavyItemsV12(beforeRecord, afterRecord) {
+    const before = flattenPlanPlacementStatesV11(beforeRecord);
+    const after = flattenPlanPlacementStatesV11(afterRecord);
+    const weights = [];
+
+    after.furnaces.forEach(f => (f.packedItems || []).forEach(item => weights.push(getPlacementWeightV12(item))));
+    const avgWeight = weights.length ? weights.reduce((a, b) => a + b, 0) / weights.length : 1;
+    const heavyThreshold = Math.max(20, avgWeight * 1.5);
+
+    let heavyMovedCount = 0;
+    let maxHeavyMoveMm = 0;
+
+    after.map.forEach((next, key) => {
+        const prev = before.map.get(key);
+        if (!prev) return;
+
+        const move = Math.sqrt(
+            Math.pow(next.x - prev.x, 2) +
+            Math.pow(next.y - prev.y, 2) +
+            Math.pow(next.z - prev.z, 2)
+        );
+
+        const weight = Number(next.weight || 0);
+        if (weight >= heavyThreshold && move > 2) {
+            heavyMovedCount += 1;
+            maxHeavyMoveMm = Math.max(maxHeavyMoveMm, move);
+        }
+    });
+
+    return {
+        heavyMovedCount,
+        maxHeavyMoveMm,
+        heavyThreshold
+    };
+}
+
+function calculatePlanSpatialMetricsV12(record) {
+    return {
+        center: calculatePlanCenterOffsetV11(record),
+        spacing: calculatePlanSpacingMetricsV12(record),
+        density: calculatePlanLocalDensityMetricsV12(record)
+    };
+}
+
+function formatMmV12(value, digits = 1) {
+    return Number.isFinite(Number(value)) ? `${Number(value).toFixed(digits)}mm` : '-';
+}
+
+function formatPctV12(value, digits = 1) {
+    return Number.isFinite(Number(value)) ? `${Number(value).toFixed(digits)}%` : '-';
+}
+
+function buildSimulationSuggestionV12(summary) {
+    const reasons = [];
+    const modules = new Set();
+
+    if (!summary) {
+        return { yes: false, level: '低', modules: [], reasons: ['未检测到可分析的人工调整。'] };
+    }
+
+    if (summary.movedCount >= 3) {
+        reasons.push(`移动工件数达到 ${summary.movedCount} 个，建议验证局部空间变化。`);
+        modules.add('3D空间复核');
+    }
+
+    if (summary.heavyMovedCount > 0) {
+        reasons.push(`有 ${summary.heavyMovedCount} 个重件被移动，建议验证重心与热场影响。`);
+        modules.add('热场均匀性');
+        modules.add('3D重心复核');
+    }
+
+    if (summary.layerChangedCount > 0) {
+        reasons.push('存在层级变化，建议验证层间遮挡和施工顺序。');
+        modules.add('辐射暴露');
+        modules.add('施工清单复核');
+    }
+
+    if (Number.isFinite(summary.minGapDelta) && summary.minGapDelta < -10) {
+        reasons.push(`最小间距减少 ${Math.abs(summary.minGapDelta).toFixed(1)}mm，建议验证气流与表面暴露风险。`);
+        modules.add('气流通道');
+        modules.add('表面均匀性');
+    }
+
+    if (summary.closePairDelta > 0 || summary.overlapPairDelta > 0) {
+        reasons.push('近距离/重叠风险对增加，建议进行局部干涉和气流复核。');
+        modules.add('气流通道');
+        modules.add('碰撞/间距检查');
+    }
+
+    if (Number.isFinite(summary.maxCellDensityDelta) && summary.maxCellDensityDelta > 8) {
+        reasons.push(`局部密度上升 ${summary.maxCellDensityDelta.toFixed(1)}%，建议验证局部升温和冷却均匀性。`);
+        modules.add('热场均匀性');
+        modules.add('气流通道');
+    }
+
+    if (Number.isFinite(summary.centerDelta) && Math.abs(summary.centerDelta) > 20) {
+        reasons.push(`平均重心偏移变化 ${Math.abs(summary.centerDelta).toFixed(1)}mm，建议确认装炉稳定性。`);
+        modules.add('3D重心复核');
+    }
+
+    if (!reasons.length) {
+        return {
+            yes: false,
+            level: '低',
+            modules: [],
+            reasons: ['人工调整对基础指标影响较小，暂不强制要求仿真对比。']
+        };
+    }
+
+    const level = (
+        summary.overlapPairDelta > 0 ||
+        (Number.isFinite(summary.minGapDelta) && summary.minGapDelta < -20) ||
+        (Number.isFinite(summary.maxCellDensityDelta) && summary.maxCellDensityDelta > 15)
+    ) ? '高' : '中';
+
+    return {
+        yes: true,
+        level,
+        modules: Array.from(modules),
+        reasons
+    };
+}
+
+function buildEnhancedVersionNotesV12(summary) {
+    const notes = [];
+
+    if (Number.isFinite(summary.minGapDelta)) {
+        if (summary.minGapDelta > 5) notes.push(`最小间距增加 ${summary.minGapDelta.toFixed(1)}mm`);
+        else if (summary.minGapDelta < -5) notes.push(`最小间距减少 ${Math.abs(summary.minGapDelta).toFixed(1)}mm`);
+        else notes.push('最小间距基本不变');
+    }
+
+    if (Number.isFinite(summary.maxCellDensityDelta)) {
+        if (summary.maxCellDensityDelta < -5) notes.push(`局部最高密度下降 ${Math.abs(summary.maxCellDensityDelta).toFixed(1)}%`);
+        else if (summary.maxCellDensityDelta > 5) notes.push(`局部最高密度上升 ${summary.maxCellDensityDelta.toFixed(1)}%`);
+        else notes.push('局部密度基本不变');
+    }
+
+    if (summary.closePairDelta > 0) notes.push(`近距离工件对增加 ${summary.closePairDelta} 对`);
+    if (summary.closePairDelta < 0) notes.push(`近距离工件对减少 ${Math.abs(summary.closePairDelta)} 对`);
+    if (summary.overlapPairDelta > 0) notes.push(`重叠/贴合风险增加 ${summary.overlapPairDelta} 对`);
+    if (summary.heavyMovedCount > 0) notes.push(`重件移动 ${summary.heavyMovedCount} 个`);
+
+    return notes;
+}
+
+
+function buildPlanVersionChangeSummaryV11(beforeRecord, afterRecord) {
+    const before = flattenPlanPlacementStatesV11(beforeRecord);
+    const after = flattenPlanPlacementStatesV11(afterRecord);
+
+    let movedCount = 0;
+    let layerChangedCount = 0;
+    let rotationChangedCount = 0;
+    let lockedCount = 0;
+    let newEditedCount = 0;
+    let maxMoveMm = 0;
+
+    after.map.forEach((next, key) => {
+        const prev = before.map.get(key);
+        if (!prev) return;
+
+        const move = Math.sqrt(
+            Math.pow(next.x - prev.x, 2) +
+            Math.pow(next.y - prev.y, 2) +
+            Math.pow(next.z - prev.z, 2)
+        );
+
+        if (move > 2) {
+            movedCount += 1;
+            maxMoveMm = Math.max(maxMoveMm, move);
+        }
+        if (next.layer !== prev.layer) layerChangedCount += 1;
+        if (
+            Math.abs(next.rotation - prev.rotation) > 0.5 ||
+            Math.abs(next.verticalRotation - prev.verticalRotation) > 0.5
+        ) {
+            rotationChangedCount += 1;
+        }
+        if (next.locked) lockedCount += 1;
+        if (next.finalEdited && !prev.finalEdited) newEditedCount += 1;
+    });
+
+    const beforeCenter = calculatePlanCenterOffsetV11(beforeRecord);
+    const afterCenter = calculatePlanCenterOffsetV11(afterRecord);
+    const centerDelta = Number.isFinite(beforeCenter.avgOffset) && Number.isFinite(afterCenter.avgOffset)
+        ? afterCenter.avgOffset - beforeCenter.avgOffset
+        : NaN;
+
+    const beforeSpatial = calculatePlanSpatialMetricsV12(beforeRecord);
+    const afterSpatial = calculatePlanSpatialMetricsV12(afterRecord);
+    const heavyMove = calculateMovedHeavyItemsV12(beforeRecord, afterRecord);
+
+    const minGapDelta = Number.isFinite(beforeSpatial.spacing.minGap) && Number.isFinite(afterSpatial.spacing.minGap)
+        ? afterSpatial.spacing.minGap - beforeSpatial.spacing.minGap
+        : NaN;
+    const avgNearestGapDelta = Number.isFinite(beforeSpatial.spacing.avgNearestGap) && Number.isFinite(afterSpatial.spacing.avgNearestGap)
+        ? afterSpatial.spacing.avgNearestGap - beforeSpatial.spacing.avgNearestGap
+        : NaN;
+    const closePairDelta = (afterSpatial.spacing.closePairCount || 0) - (beforeSpatial.spacing.closePairCount || 0);
+    const overlapPairDelta = (afterSpatial.spacing.overlapPairCount || 0) - (beforeSpatial.spacing.overlapPairCount || 0);
+    const maxCellDensityDelta = (afterSpatial.density.maxCellDensity || 0) - (beforeSpatial.density.maxCellDensity || 0);
+    const maxLayerDensityDelta = (afterSpatial.density.maxLayerFootprintDensity || 0) - (beforeSpatial.density.maxLayerFootprintDensity || 0);
+
+    const notes = [];
+    if (movedCount > 0) notes.push(`移动 ${movedCount} 个工件`);
+    if (layerChangedCount > 0) notes.push(`层级变化 ${layerChangedCount} 个`);
+    if (rotationChangedCount > 0) notes.push(`旋转/立放变化 ${rotationChangedCount} 个`);
+    if (lockedCount > 0) notes.push(`锁定 ${lockedCount} 个工件`);
+    if (Number.isFinite(centerDelta)) {
+        if (centerDelta < -2) notes.push(`平均重心偏移减少 ${Math.abs(centerDelta).toFixed(1)}mm`);
+        else if (centerDelta > 2) notes.push(`平均重心偏移增加 ${centerDelta.toFixed(1)}mm`);
+        else notes.push('平均重心偏移基本不变');
+    }
+
+    notes.push(...buildEnhancedVersionNotesV12({
+        minGapDelta,
+        maxCellDensityDelta,
+        closePairDelta,
+        overlapPairDelta,
+        heavyMovedCount: heavyMove.heavyMovedCount
+    }));
+
+    const summary = {
+        movedCount,
+        layerChangedCount,
+        rotationChangedCount,
+        lockedCount,
+        newEditedCount,
+        maxMoveMm,
+        beforeCenter,
+        afterCenter,
+        centerDelta,
+        beforeSpatial,
+        afterSpatial,
+        heavyMovedCount: heavyMove.heavyMovedCount,
+        maxHeavyMoveMm: heavyMove.maxHeavyMoveMm,
+        heavyThreshold: heavyMove.heavyThreshold,
+        minGapDelta,
+        avgNearestGapDelta,
+        closePairDelta,
+        overlapPairDelta,
+        maxCellDensityDelta,
+        maxLayerDensityDelta,
+        notes
+    };
+
+    summary.simulationSuggestion = buildSimulationSuggestionV12(summary);
+
+    if (!summary.notes.length) summary.notes.push('未检测到明显摆放变化');
+    return summary;
+}
+
+function renderPlanVersionChangeSummaryHtml(summary) {
+    if (!summary) return '';
+    const centerText = Number.isFinite(summary.centerDelta)
+        ? (Math.abs(summary.centerDelta) < 2
+            ? '基本不变'
+            : (summary.centerDelta < 0 ? `改善 ${Math.abs(summary.centerDelta).toFixed(1)}mm` : `增加 ${summary.centerDelta.toFixed(1)}mm`))
+        : '-';
+
+    const minGapText = Number.isFinite(summary.minGapDelta)
+        ? (Math.abs(summary.minGapDelta) < 2
+            ? '基本不变'
+            : (summary.minGapDelta > 0 ? `增加 ${summary.minGapDelta.toFixed(1)}mm` : `减少 ${Math.abs(summary.minGapDelta).toFixed(1)}mm`))
+        : '-';
+
+    const densityText = Number.isFinite(summary.maxCellDensityDelta)
+        ? (Math.abs(summary.maxCellDensityDelta) < 2
+            ? '基本不变'
+            : (summary.maxCellDensityDelta < 0 ? `下降 ${Math.abs(summary.maxCellDensityDelta).toFixed(1)}%` : `上升 ${summary.maxCellDensityDelta.toFixed(1)}%`))
+        : '-';
+
+    const sim = summary.simulationSuggestion || { yes: false, level: '低', modules: [], reasons: [] };
+    const simText = sim.yes ? `建议仿真（${sim.level}）` : '暂不强制';
+    const simClass = sim.yes ? (sim.level === '高' ? 'danger' : 'warning') : 'safe';
+
+    return `
+        <section class="pdc-version-change">
+            <div class="pdc-version-change-head">
+                <div>
+                    <strong>人工微调变化摘要 V1.2</strong>
+                    <span>用于判断“总工调整是否破坏基础可执行性、是否值得进一步做辐射/气流/热场仿真”。</span>
+                </div>
+            </div>
+            <div class="pdc-version-grid">
+                <div><span>移动工件</span><b>${summary.movedCount || 0}</b></div>
+                <div><span>层级变化</span><b>${summary.layerChangedCount || 0}</b></div>
+                <div><span>旋转变化</span><b>${summary.rotationChangedCount || 0}</b></div>
+                <div><span>重心偏移</span><b>${escapeCompareHtml(centerText)}</b></div>
+                <div><span>最小间距</span><b>${escapeCompareHtml(minGapText)}</b></div>
+                <div><span>近距离变化</span><b>${summary.closePairDelta > 0 ? '+' : ''}${summary.closePairDelta || 0} 对</b></div>
+                <div><span>局部密度</span><b>${escapeCompareHtml(densityText)}</b></div>
+                <div><span>重件移动</span><b>${summary.heavyMovedCount || 0}</b></div>
+            </div>
+
+            <div class="pdc-sim-box ${simClass}">
+                <div>
+                    <strong>${escapeCompareHtml(simText)}</strong>
+                    <p>${escapeCompareHtml((sim.reasons || []).join('；'))}</p>
+                </div>
+                ${(sim.modules || []).length ? `<div class="pdc-sim-modules">${sim.modules.map(m => `<span>${escapeCompareHtml(m)}</span>`).join('')}</div>` : ''}
+            </div>
+
+            <div class="pdc-version-notes">
+                ${summary.notes.map(text => `<span>${escapeCompareHtml(text)}</span>`).join('')}
+            </div>
+        </section>
+    `;
+}
+
+function saveCurrentPlanVersionV11({ versionType = 'manual_adjusted', versionName = '', baseVersionId = '', source = '', silent = false } = {}) {
+    if (!globalFurnacesResult || globalFurnacesResult.length === 0) {
+        if (!silent) alert('请先生成装炉方案，再保存版本。');
+        return null;
+    }
+
+    const groupId = getCurrentPlanVersionGroupIdV11();
+    const versions = getPlanVersionsForWorkspaceV11(groupId);
+
+    if (versionType === 'ai_draft') {
+        const existed = versions.find(v => v.versionType === 'ai_draft');
+        if (existed) return existed;
+    }
+
+    const previous = versions[versions.length - 1] || null;
+    const versionNo = getNextPlanVersionNoV11(versions);
+    const normalizedName = versionName || `${getPlanVersionTypeLabelV11(versionType)} V${versionNo}`;
+    const versionId = makePlanVersionIdV11(versionType);
+
+    const record = buildCurrentPlanVersionRecordV11({
+        versionId,
+        versionNo,
+        versionName: normalizedName,
+        versionType,
+        baseVersionId: baseVersionId || previous?.versionId || '',
+        source
+    });
+
+    if (!record) return null;
+
+    const changeSummary = previous?.record
+        ? buildPlanVersionChangeSummaryV11(previous.record, record)
+        : null;
+
+    const version = {
+        versionId,
+        versionNo,
+        versionName: normalizedName,
+        versionType,
+        versionTypeLabel: getPlanVersionTypeLabelV11(versionType),
+        baseVersionId: baseVersionId || previous?.versionId || '',
+        createdAt: new Date().toISOString(),
+        workspaceId: groupId,
+        workspaceTitle: getCurrentWorkspaceTitle(),
+        strategy: currentWorkspaceIdentity?.strategyLabel || STRATEGY_LABELS[placementRules.strategy] || placementRules.strategy || '',
+        record,
+        changeSummary
+    };
+
+    const nextVersions = [...versions, version].slice(-PLAN_VERSION_V11_MAX_PER_WORKSPACE);
+    if (!savePlanVersionsForWorkspaceV11(groupId, nextVersions)) return null;
+
+    planVersionV11State.lastSavedVersionId = versionId;
+    if (!silent) refreshPlanLibraryWorkbench();
+
+    if (!silent && typeof showCapacityFeedback === 'function') {
+        showCapacityFeedback('success', `已保存 ${normalizedName}，可与上一版对比。`);
+    }
+
+    return version;
+}
+
+function ensureAiDraftPlanVersionSaved(source = '') {
+    if (!globalFurnacesResult || globalFurnacesResult.length === 0) return null;
+    return saveCurrentPlanVersionV11({
+        versionType: 'ai_draft',
+        versionName: 'AI初稿 V1',
+        source: source || 'generate-plan',
+        silent: true
+    });
+}
+
+function saveManualAdjustedPlanVersionFromCurrent(options = {}) {
+    ensureAiDraftPlanVersionSaved('before-manual-adjusted');
+    const versions = getCurrentPlanVersionsV11();
+    const manualCount = versions.filter(v => v.versionType === 'manual_adjusted').length + 1;
+    return saveCurrentPlanVersionV11({
+        versionType: 'manual_adjusted',
+        versionName: `总工调整版 V${versions.length + 1}`,
+        source: options.source || 'manual-adjusted',
+        silent: !!options.silent
+    });
+}
+
+function getPreviousComparableVersionV11() {
+    const versions = getCurrentPlanVersionsV11();
+    if (!versions.length) return null;
+
+    // 如果最后一个版本就是刚保存的当前调整版，则“上一版”应取倒数第二个。
+    if (versions.length >= 2 && versions[versions.length - 1]?.versionId === planVersionV11State.lastSavedVersionId) {
+        return versions[versions.length - 2];
+    }
+
+    return versions[versions.length - 1];
+}
+
+function buildPlanVersionCompareRecommendationV11(currentMetrics, targetMetrics, changeSummary) {
+    const reasons = [];
+    let negativeSignal = 0;
+    let positiveSignal = 0;
+
+    if (changeSummary) {
+        if (changeSummary.movedCount > 0) reasons.push(`本次微调移动了 ${changeSummary.movedCount} 个工件。`);
+        if (changeSummary.layerChangedCount > 0) reasons.push(`有 ${changeSummary.layerChangedCount} 个工件发生层级变化，建议现场确认施工顺序。`);
+        if (changeSummary.heavyMovedCount > 0) {
+            reasons.push(`有 ${changeSummary.heavyMovedCount} 个重件被移动，需要确认调整意图。`);
+            negativeSignal += 1;
+        }
+
+        if (Number.isFinite(changeSummary.centerDelta)) {
+            if (changeSummary.centerDelta < -2) {
+                reasons.push('调整后平均重心偏移降低，空间稳定性有改善。');
+                positiveSignal += 1;
+            } else if (changeSummary.centerDelta > 2) {
+                reasons.push('调整后平均重心偏移增加，需要确认是否为了热场/间距做出的权衡。');
+                negativeSignal += 1;
+            }
+        }
+
+        if (Number.isFinite(changeSummary.minGapDelta)) {
+            if (changeSummary.minGapDelta > 5) {
+                reasons.push(`调整后最小间距增加 ${changeSummary.minGapDelta.toFixed(1)}mm，表面/气流风险可能下降。`);
+                positiveSignal += 1;
+            } else if (changeSummary.minGapDelta < -5) {
+                reasons.push(`调整后最小间距减少 ${Math.abs(changeSummary.minGapDelta).toFixed(1)}mm，需要复核气流和表面暴露。`);
+                negativeSignal += 1;
+            }
+        }
+
+        if (Number.isFinite(changeSummary.maxCellDensityDelta)) {
+            if (changeSummary.maxCellDensityDelta < -5) {
+                reasons.push(`局部最高密度下降 ${Math.abs(changeSummary.maxCellDensityDelta).toFixed(1)}%，局部过密风险可能降低。`);
+                positiveSignal += 1;
+            } else if (changeSummary.maxCellDensityDelta > 5) {
+                reasons.push(`局部最高密度上升 ${changeSummary.maxCellDensityDelta.toFixed(1)}%，建议复核局部升温/冷却风险。`);
+                negativeSignal += 1;
+            }
+        }
+
+        if (changeSummary.closePairDelta > 0 || changeSummary.overlapPairDelta > 0) {
+            reasons.push('调整后近距离/重叠风险对增加，建议复核局部间距。');
+            negativeSignal += 1;
+        }
+
+        if (changeSummary.simulationSuggestion?.yes) {
+            reasons.push(`建议运行：${changeSummary.simulationSuggestion.modules.join('、') || '仿真对比'}。`);
+        }
+    }
+
+    const riskNow = riskRank(currentMetrics.riskLevel);
+    const riskBefore = riskRank(targetMetrics.riskLevel);
+
+    if (riskNow < riskBefore) {
+        reasons.push('调整版风险等级低于上一版。');
+        positiveSignal += 1;
+    }
+    if (riskNow > riskBefore) {
+        reasons.push('调整版风险等级高于上一版，建议复核。');
+        negativeSignal += 2;
+    }
+
+    const scoreDelta = currentMetrics.score - targetMetrics.score;
+    if (scoreDelta > 3) {
+        reasons.push(`调整版综合评分提升 ${scoreDelta} 分。`);
+        positiveSignal += 1;
+    }
+    if (scoreDelta < -3) {
+        reasons.push(`调整版综合评分下降 ${Math.abs(scoreDelta)} 分。`);
+        negativeSignal += 1;
+    }
+
+    if (!reasons.length) {
+        reasons.push('调整前后基础指标接近，建议结合局部 3D 位置和仿真结果判断。');
+    }
+
+    let headline = '调整版可作为候选方案';
+    if (riskNow > riskBefore || scoreDelta < -6 || negativeSignal >= positiveSignal + 2) headline = '调整版需要复核';
+    else if (positiveSignal > negativeSignal && riskNow <= riskBefore && scoreDelta >= -3) headline = '调整版更合理';
+    else if (riskNow <= riskBefore && scoreDelta >= -3) headline = '调整版基本合理';
+
+    return { winner: 'current', headline, reasons };
+}
+
+function compareCurrentWithPlanVersionV11(version = null) {
+    const currentRecord = buildCurrentCompareRecord();
+    if (!currentRecord) {
+        alert('请先生成当前工作台方案，再进行版本对比。');
+        return;
+    }
+
+    const targetVersion = version || getPreviousComparableVersionV11();
+    if (!targetVersion?.record) {
+        alert('暂无可对比的上一版本。生成方案后会自动保存 AI 初稿；人工调整后请点击保存。');
+        return;
+    }
+
+    const changeSummary = buildPlanVersionChangeSummaryV11(targetVersion.record, currentRecord);
+    const payload = buildPlanDataComparePayload(currentRecord, targetVersion.record);
+    payload.compareType = '人工调整版本对比';
+    payload.currentLabel = '当前工作台版本';
+    payload.targetLabel = targetVersion.versionName || '上一版';
+    payload.subtitle = '用于验证总工人工微调是否比 AI 初稿/上一版更合理；策略和业务目标不在这里重新切换。';
+    payload.versionChangeSummary = changeSummary;
+    payload.recommendation = buildPlanVersionCompareRecommendationV11(payload.current, payload.target, changeSummary);
+
+    planDataCompareState = {
+        active: true,
+        currentRecord,
+        targetRecord: targetVersion.record,
+        payload
+    };
+
+    renderPlanDataComparePayload(payload);
+}
+
+function ensurePlanVersionV11Styles() {
+    if (document.getElementById('plan-version-v11-style')) return;
+    const style = document.createElement('style');
+    style.id = 'plan-version-v11-style';
+    style.textContent = `
+        .cwc-version-panel {
+            margin-top: 12px;
+            border: 1px solid rgba(37, 99, 235, .16);
+            border-radius: 18px;
+            padding: 12px;
+            background: linear-gradient(135deg, rgba(239, 246, 255, .9), rgba(248, 250, 252, .9));
+        }
+        .cwc-version-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            align-items: flex-start;
+            margin-bottom: 10px;
+        }
+        .cwc-version-title {
+            font-size: 13px;
+            font-weight: 900;
+            color: #0f172a;
+        }
+        .cwc-version-subtitle {
+            margin-top: 3px;
+            color: #64748b;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+        .cwc-version-count {
+            flex: 0 0 auto;
+            border-radius: 999px;
+            padding: 5px 9px;
+            color: #1d4ed8;
+            font-size: 11px;
+            font-weight: 900;
+            background: #dbeafe;
+        }
+        .cwc-version-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .cwc-version-btn {
+            border: 1px solid #c7d2fe;
+            border-radius: 12px;
+            padding: 7px 10px;
+            color: #1e3a8a;
+            font-size: 12px;
+            font-weight: 900;
+            background: #fff;
+            cursor: pointer;
+        }
+        .cwc-version-btn.primary {
+            color: #fff;
+            background: #2563eb;
+            border-color: #2563eb;
+        }
+        .cwc-version-btn:disabled {
+            opacity: .45;
+            cursor: not-allowed;
+        }
+        .pdc-version-change {
+            margin: 14px 0;
+            border-radius: 22px;
+            padding: 16px;
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 12px 28px rgba(15, 23, 42, .08);
+        }
+        .pdc-version-change-head strong {
+            display: block;
+            font-size: 16px;
+            color: #0f172a;
+        }
+        .pdc-version-change-head span {
+            display: block;
+            margin-top: 4px;
+            color: #64748b;
+            font-size: 12px;
+        }
+        .pdc-version-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .pdc-version-grid div {
+            border-radius: 14px;
+            padding: 10px;
+            background: #f8fafc;
+            border: 1px solid #e5edf8;
+        }
+        .pdc-version-grid span {
+            display: block;
+            color: #7b8ba8;
+            font-size: 11px;
+            font-weight: 800;
+        }
+        .pdc-version-grid b {
+            display: block;
+            margin-top: 4px;
+            color: #0f172a;
+            font-size: 16px;
+        }
+        .pdc-version-notes {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .pdc-version-notes span {
+            border-radius: 999px;
+            padding: 6px 9px;
+            background: #eff6ff;
+            color: #1d4ed8;
+            font-size: 12px;
+            font-weight: 800;
+        }
+        .pdc-sim-box {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 12px;
+            align-items: center;
+            margin-top: 12px;
+            border-radius: 16px;
+            padding: 12px;
+            border: 1px solid #dbeafe;
+            background: #eff6ff;
+        }
+        .pdc-sim-box.warning {
+            border-color: #fed7aa;
+            background: #fff7ed;
+        }
+        .pdc-sim-box.danger {
+            border-color: #fecdd3;
+            background: #fff1f2;
+        }
+        .pdc-sim-box.safe {
+            border-color: #bbf7d0;
+            background: #f0fdf4;
+        }
+        .pdc-sim-box strong {
+            display: block;
+            color: #0f172a;
+            font-size: 14px;
+        }
+        .pdc-sim-box p {
+            margin: 4px 0 0;
+            color: #64748b;
+            font-size: 12px;
+            line-height: 1.45;
+        }
+        .pdc-sim-modules {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+        .pdc-sim-modules span {
+            border-radius: 999px;
+            padding: 5px 8px;
+            color: #1e3a8a;
+            font-size: 11px;
+            font-weight: 900;
+            background: rgba(255,255,255,.72);
+            border: 1px solid rgba(37,99,235,.18);
+        }
+        .pvv-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 9988;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 22px;
+            background: rgba(15,23,42,.48);
+            backdrop-filter: blur(8px);
+        }
+        .pvv-modal.active { display: flex; }
+        .pvv-panel {
+            width: min(720px, 94vw);
+            max-height: 86vh;
+            overflow: auto;
+            border-radius: 24px;
+            background: #fff;
+            box-shadow: 0 28px 70px rgba(15,23,42,.28);
+        }
+        .pvv-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: center;
+            padding: 16px 18px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .pvv-head strong { font-size: 18px; }
+        .pvv-subtitle {
+            margin: 4px 0 0;
+            color: #64748b;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+        .pvv-close {
+            border: 0;
+            border-radius: 12px;
+            padding: 8px 11px;
+            font-weight: 900;
+            background: #e2e8f0;
+            cursor: pointer;
+        }
+        .pvv-list { padding: 14px 18px 18px; display: grid; gap: 10px; }
+        .pvv-item {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 12px;
+            align-items: center;
+            border: 1px solid #e2e8f0;
+            border-radius: 16px;
+            padding: 12px;
+            background: #f8fafc;
+        }
+        .pvv-item-title { font-weight: 900; color: #0f172a; }
+        .pvv-item-meta { margin-top: 3px; color: #64748b; font-size: 12px; }
+        .pvv-item.is-current {
+            border-color: #93c5fd;
+            background: linear-gradient(135deg, #eff6ff, #ffffff);
+        }
+        .pvv-item-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .pvv-item-title em {
+            border-radius: 999px;
+            padding: 3px 7px;
+            color: #1d4ed8;
+            font-size: 11px;
+            font-style: normal;
+            font-weight: 900;
+            background: #dbeafe;
+        }
+        .pvv-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+            flex-wrap: wrap;
+        }
+        .pvv-item-notes {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px;
+        }
+        .pvv-item-notes span {
+            border-radius: 999px;
+            padding: 4px 7px;
+            color: #1e40af;
+            font-size: 11px;
+            font-weight: 800;
+            background: #dbeafe;
+        }
+        @media (max-width: 720px) {
+            .pdc-version-grid { grid-template-columns: 1fr 1fr; }
+            .pvv-modal { padding: 0; align-items: stretch; }
+            .pvv-panel { width: 100vw; max-height: 100vh; border-radius: 0; }
+            .pvv-item { grid-template-columns: 1fr; }
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+function renderPlanVersionMiniPanel() {
+    ensurePlanVersionV11Styles();
+    if (!globalFurnacesResult || globalFurnacesResult.length === 0) return '';
+
+    ensureAiDraftPlanVersionSaved('render-mini-panel');
+
+    const versions = getCurrentPlanVersionsV11();
+    const latest = versions[versions.length - 1] || null;
+    const canCompare = versions.length >= 1;
+    const restoredId = getCurrentRestoredVersionIdV13();
+    const restoredVersion = restoredId ? versions.find(v => v.versionId === restoredId) : null;
+    const latestText = restoredVersion
+        ? `当前：${restoredVersion.versionName} · ${formatWorkspaceTime(restoredVersion.createdAt)}`
+        : (latest
+            ? `${latest.versionName} · ${formatWorkspaceTime(latest.createdAt)}`
+            : '生成方案后自动保存 AI 初稿');
+
+    return `
+        <div class="cwc-version-panel">
+            <div class="cwc-version-head">
+                <div>
+                    <div class="cwc-version-title">方案版本链</div>
+                    <div class="cwc-version-subtitle">${escapeCompareHtml(latestText)}</div>
+                </div>
+                <span class="cwc-version-count">${versions.length || 0} 版</span>
+            </div>
+            <div class="cwc-version-actions">
+                <button class="cwc-version-btn primary" id="btn-compare-prev-version" type="button" ${canCompare ? '' : 'disabled'}>与上一版对比</button>
+                <button class="cwc-version-btn" id="btn-save-manual-version" type="button">保存调整版</button>
+                <button class="cwc-version-btn" id="btn-save-final-version" type="button">保存最终版</button>
+                <button class="cwc-version-btn" id="btn-open-version-list" type="button">版本列表</button>
+            </div>
+        </div>
+    `;
+}
+
+function bindPlanVersionMiniPanelEvents(root = document) {
+    root.querySelector('#btn-compare-prev-version')?.addEventListener('click', () => compareCurrentWithPlanVersionV11());
+    root.querySelector('#btn-save-manual-version')?.addEventListener('click', () => {
+        const version = saveManualAdjustedPlanVersionFromCurrent({ silent: false, source: 'manual-button' });
+        if (version) refreshPlanLibraryWorkbench();
+    });
+    root.querySelector('#btn-save-final-version')?.addEventListener('click', () => {
+        saveFinalExecutionPlanVersionFromCurrentV13({ silent: false });
+    });
+    root.querySelector('#btn-open-version-list')?.addEventListener('click', openPlanVersionListModalV11);
+}
+
+
+// ==================== V1.3: 版本恢复 / 设为当前方案 ====================
+// V1.3 目标：允许总工在 AI初稿、总工调整版、仿真优化版、最终执行版之间切换。
+// 该功能只恢复当前工作台状态，不写回飞书，也不自动覆盖历史方案。
+// 使用场景：调整后不满意，恢复 AI 初稿；多个调整版之间切换；将某版设为最终执行版。
+
+function getPlanVersionRecordFurnacesV13(record) {
+    if (!record) return [];
+    const runtime = getCompareRuntimeFurnaces(record);
+    if (Array.isArray(runtime) && runtime.length) return runtime;
+    if (Array.isArray(record?.loadingPlan?.furnaces)) return record.loadingPlan.furnaces;
+    if (Array.isArray(record?.furnaces)) return record.furnaces;
+    return [];
+}
+
+function getPlanVersionRecordUnpackedV13(record) {
+    if (!record) return [];
+    if (Array.isArray(record?.loadingPlan?.unpackedItems)) return record.loadingPlan.unpackedItems;
+    if (Array.isArray(record?.unpackedItems)) return record.unpackedItems;
+    if (Array.isArray(record?.notPackedItems)) return record.notPackedItems;
+    return [];
+}
+
+function getCurrentRestoredVersionIdV13() {
+    return planVersionV11State.currentRestoredVersionId || currentWorkspaceIdentity?.restoredVersionId || '';
+}
+
+function setWorkspaceIdentityFromVersionV13(version) {
+    const existed = ensureCurrentWorkspaceIdentity();
+    const record = version?.record || {};
+    const meta = record.meta || {};
+    const now = new Date().toISOString();
+
+    currentWorkspaceIdentity = {
+        ...existed,
+        id: meta.workspaceId || meta.planGroupId || existed.id || getCurrentPlanVersionGroupIdV11(),
+        title: meta.workspaceTitle || existed.title || getCurrentWorkspaceTitle(),
+        source: 'version_restored',
+        status: 'restored',
+        strategyLabel: meta.strategyLabel || version?.strategy || existed.strategyLabel || STRATEGY_LABELS[placementRules.strategy] || placementRules.strategy || '',
+        strategyKey: meta.strategy || existed.strategyKey || placementRules.strategy || '',
+        restoredVersionId: version?.versionId || '',
+        restoredVersionName: version?.versionName || '',
+        updatedAt: now,
+        createdAt: existed.createdAt || meta.createdAt || now
+    };
+
+    planVersionV11State.currentRestoredVersionId = version?.versionId || '';
+}
+
+function applyPlanVersionToCurrentWorkspaceV13(version, options = {}) {
+    if (!version?.record) {
+        alert('该版本缺少可恢复的方案快照。');
+        return false;
+    }
+
+    const record = version.record;
+    const furnaces = clonePlain(getPlanVersionRecordFurnacesV13(record));
+    const unpackedItems = clonePlain(getPlanVersionRecordUnpackedV13(record));
+    const predictions = clonePlain(record?.loadingPlan?.predictions || record?.predictions || []);
+
+    if (!furnaces.length) {
+        alert('该版本没有可恢复的装炉结果。');
+        return false;
+    }
+
+    if (!options.skipConfirm) {
+        const ok = confirm(`确定将「${version.versionName || '该版本'}」恢复为当前工作台方案吗？\n\n当前未保存的人工调整会被覆盖；如需保留，请先点击“保存调整版”。`);
+        if (!ok) return false;
+    }
+
+    exitCompareMode(false);
+    closePlanDataCompareModal?.();
+
+    setGlobalFurnacesResult(furnaces);
+    setGlobalUnpackedItems(unpackedItems);
+    setGlobalPredictions(predictions || []);
+
+    clearFurnaceGroups();
+    clearThermalSimulationLayer();
+    setCurrentFurnaceIndex(0);
+
+    setWorkspaceIdentityFromVersionV13(version);
+
+    const analysis = analyzeFurnaces(
+        furnaces || [],
+        unpackedItems || [],
+        predictions || []
+    );
+    window._currentPlanAnalysis = analysis;
+
+    renderPlanAnalysisPanel(analysis);
+    renderHeatProcessRiskCard();
+    renderToolingRecommendationBasisCard();
+    renderPlanCompareV05Card();
+    renderLoadingSimulationPanel();
+
+    processSimulationActive = false;
+    processSimulationMode = 'idle';
+    renderThermalSimulationPanel(null, 'idle');
+    syncThermalControlState(null);
+    updateSimulationModeButtons();
+    activateRightPanelTab('analysis');
+
+    const emptyState = document.getElementById("empty-state");
+    const nav = document.getElementById("furnace-nav");
+
+    if (furnaces.length > 0) {
+        if (emptyState) emptyState.style.display = "none";
+        showPlanActionButtons();
+        renderSingleFurnace(0, getSelectedMaterialName());
+        updateFurnaceNav();
+        updateLeftPanelActiveForIndex(0);
+        updateExplodeBOMButtons();
+        renderFurnaceThumbnails(
+            furnaces,
+            0,
+            handleThumbFurnaceClick
+        );
+    } else {
+        if (emptyState) emptyState.style.display = "block";
+        if (nav) nav.style.display = "none";
+        hideExplodeBOMButtons();
+        hidePlanActionButtons();
+    }
+
+    renderAISummaryBar(onCenterFurnaceClick);
+    updateCurrentToolingHud();
+    refreshPlanLibraryWorkbench();
+    updateTopSummary();
+    updateWorkbenchUiMode();
+    if (typeof renderHeatMergeDesignPanel === 'function') renderHeatMergeDesignPanel();
+
+    if (typeof showCapacityFeedback === 'function') {
+        showCapacityFeedback('success', `已恢复版本：${version.versionName || '方案版本'}`);
+    }
+
+    return true;
+}
+
+function saveFinalExecutionPlanVersionFromCurrentV13({ silent = false } = {}) {
+    const version = saveCurrentPlanVersionV11({
+        versionType: 'final_execution',
+        versionName: '',
+        source: 'final-execution-button',
+        silent
+    });
+
+    if (version) {
+        planVersionV11State.currentRestoredVersionId = version.versionId;
+        currentWorkspaceIdentity = {
+            ...ensureCurrentWorkspaceIdentity(),
+            status: 'final',
+            restoredVersionId: version.versionId,
+            restoredVersionName: version.versionName,
+            updatedAt: new Date().toISOString()
+        };
+        refreshPlanLibraryWorkbench();
+
+        if (!silent && typeof showCapacityFeedback === 'function') {
+            showCapacityFeedback('success', `已保存最终执行版：${version.versionName}`);
+        }
+    }
+
+    return version;
+}
+
+
+function openPlanVersionListModalV11() {
+    ensurePlanVersionV11Styles();
+    const versions = getCurrentPlanVersionsV11();
+    const currentVersionId = getCurrentRestoredVersionIdV13();
+
+    let modal = document.getElementById('plan-version-v11-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'plan-version-v11-modal';
+        modal.className = 'pvv-modal';
+        modal.innerHTML = `
+            <div class="pvv-panel">
+                <div class="pvv-head">
+                    <div>
+                        <strong>方案版本列表</strong>
+                        <p class="pvv-subtitle">可将任一版本恢复为当前工作台，也可与当前版本做数据/微调对比。</p>
+                    </div>
+                    <button type="button" class="pvv-close" data-action="version-close">关闭</button>
+                </div>
+                <div class="pvv-list" id="pvv-list"></div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        modal.addEventListener('click', event => {
+            if (event.target === modal || event.target.closest('[data-action="version-close"]')) {
+                modal.classList.remove('active');
+                return;
+            }
+
+            const compareBtn = event.target.closest('[data-action="compare-version-current"]');
+            if (compareBtn) {
+                const version = getCurrentPlanVersionsV11().find(v => v.versionId === compareBtn.getAttribute('data-version-id'));
+                if (version) {
+                    modal.classList.remove('active');
+                    compareCurrentWithPlanVersionV11(version);
+                }
+                return;
+            }
+
+            const restoreBtn = event.target.closest('[data-action="restore-version-current"]');
+            if (restoreBtn) {
+                const version = getCurrentPlanVersionsV11().find(v => v.versionId === restoreBtn.getAttribute('data-version-id'));
+                if (version) {
+                    const restored = applyPlanVersionToCurrentWorkspaceV13(version);
+                    if (restored) modal.classList.remove('active');
+                }
+                return;
+            }
+        });
+    }
+
+    const list = modal.querySelector('#pvv-list');
+    if (list) {
+        list.innerHTML = versions.length
+            ? versions.slice().reverse().map(version => {
+                const isCurrent = currentVersionId && currentVersionId === version.versionId;
+                const changeNotes = version.changeSummary?.notes?.length
+                    ? `<div class="pvv-item-notes">${version.changeSummary.notes.slice(0, 3).map(text => `<span>${escapeCompareHtml(text)}</span>`).join('')}</div>`
+                    : '';
+                return `
+                    <div class="pvv-item ${isCurrent ? 'is-current' : ''}">
+                        <div>
+                            <div class="pvv-item-title">
+                                ${escapeCompareHtml(version.versionName)}
+                                ${isCurrent ? '<em>当前</em>' : ''}
+                            </div>
+                            <div class="pvv-item-meta">${escapeCompareHtml(version.versionTypeLabel || '')} · ${escapeCompareHtml(formatWorkspaceTime(version.createdAt))} · ${escapeCompareHtml(version.strategy || '-')}</div>
+                            ${changeNotes}
+                        </div>
+                        <div class="pvv-actions">
+                            <button class="cwc-version-btn" type="button" data-action="restore-version-current" data-version-id="${escapeCompareHtml(version.versionId)}" ${isCurrent ? 'disabled' : ''}>设为当前</button>
+                            <button class="cwc-version-btn" type="button" data-action="compare-version-current" data-version-id="${escapeCompareHtml(version.versionId)}">与当前对比</button>
+                        </div>
+                    </div>
+                `;
+            }).join('')
+            : '<div class="pvv-item"><div><div class="pvv-item-title">暂无版本</div><div class="pvv-item-meta">生成方案后会自动保存 AI 初稿。</div></div></div>';
+    }
+
+    modal.classList.add('active');
+}
+
+window.PlanVersionV11 = {
+    getCurrentVersions: getCurrentPlanVersionsV11,
+    saveAiDraft: ensureAiDraftPlanVersionSaved,
+    saveManualAdjusted: saveManualAdjustedPlanVersionFromCurrent,
+    compareWithPrevious: compareCurrentWithPlanVersionV11,
+    buildChangeSummary: buildPlanVersionChangeSummaryV11
+};
+
+window.PlanVersionV12 = {
+    buildChangeSummary: buildPlanVersionChangeSummaryV11,
+    calculateSpatialMetrics: calculatePlanSpatialMetricsV12,
+    calculateSpacingMetrics: calculatePlanSpacingMetricsV12,
+    calculateLocalDensityMetrics: calculatePlanLocalDensityMetricsV12,
+    buildSimulationSuggestion: buildSimulationSuggestionV12
+};
+
+window.PlanVersionV13 = {
+    restoreToCurrent: applyPlanVersionToCurrentWorkspaceV13,
+    saveFinalExecution: saveFinalExecutionPlanVersionFromCurrentV13,
+    getCurrentRestoredVersionId: getCurrentRestoredVersionIdV13
+};
+
+window.PlanVersionV14 = {
+    buildMobileVersionSummary: buildMobileVersionSummaryV14,
+    appendMobileSummaryToPlanSummary: appendMobileSummaryToPlanSummaryV14
+};
+
+
 
 function clearCompareDomLabels() {
     document.querySelectorAll('.compare-side-label').forEach(el => el.remove());
@@ -2104,6 +5083,20 @@ function bindCompareModeEvents() {
     const masterList = document.getElementById('master-list');
     if (masterList) {
         masterList.addEventListener('click', (e) => {
+            const dataBtn = e.target.closest('[data-action="compare-data-plan"]');
+            if (dataBtn) {
+                e.preventDefault();
+                e.stopPropagation();
+                const card = dataBtn.closest('.master-plan-card');
+                const record = findRecordForPlanCard(card);
+                if (!record) {
+                    alert('没有找到该历史方案的数字孪生记录，建议重新保存当前方案后再对比');
+                    return;
+                }
+                enterPlanDataCompareMode(record, card?.querySelector('.mpc-title')?.textContent?.trim() || getPlanRecordTitle(record));
+                return;
+            }
+
             const btn = e.target.closest('[data-action="compare-plan"]');
             if (!btn) return;
             e.preventDefault();
@@ -2135,6 +5128,11 @@ function bindCompareModeEvents() {
     if (exit) exit.addEventListener('click', () => exitCompareMode(true));
 
     window.addEventListener('resize', resizeCompareViews);
+    window.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && planDataCompareState.active) {
+            closePlanDataCompareModal();
+        }
+    });
 }
 
 /**
@@ -3827,8 +6825,9 @@ function setupDockViewSettingsMenu() {
             { id: 'dock-toggle-rulers', label: '尺寸标注', active: !!displaySettings.showRulers },
             { id: 'dock-toggle-axes', label: '方向轴', active: !!displaySettings.showAxes }
         ];
-        const colorMode = typeof getItemColorMode === 'function' ? getItemColorMode() : 'materialCustomer';
+        const colorMode = typeof getItemColorMode === 'function' ? getItemColorMode() : 'batch';
         const colorModeOptions = [
+            { value: 'batch', label: '按批次色（与左侧一致）' },
             { value: 'materialCustomer', label: '材质主色 + 客户标识' },
             { value: 'material', label: '按材质着色' },
             { value: 'customer', label: '按客户着色' },
@@ -3874,7 +6873,7 @@ function setupDockViewSettingsMenu() {
         if (colorBtn) {
             event.preventDefault();
             event.stopPropagation();
-            const mode = colorBtn.getAttribute('data-color-mode') || 'materialCustomer';
+            const mode = colorBtn.getAttribute('data-color-mode') || 'batch';
             if (typeof setItemColorMode === 'function') setItemColorMode(mode);
             if (globalFurnacesResult && globalFurnacesResult.length > 0) {
                 renderSingleFurnace(currentFurnaceIndex || 0, getSelectedMaterialName());
@@ -3899,7 +6898,7 @@ function setupDockViewSettingsMenu() {
         if (!select) return;
         event.preventDefault();
         event.stopPropagation();
-        if (typeof setItemColorMode === 'function') setItemColorMode(select.value || 'materialCustomer');
+        if (typeof setItemColorMode === 'function') setItemColorMode(select.value || 'batch');
         if (globalFurnacesResult && globalFurnacesResult.length > 0) {
             renderSingleFurnace(currentFurnaceIndex || 0, getSelectedMaterialName());
             renderFurnaceThumbnails(globalFurnacesResult, currentFurnaceIndex || 0, handleThumbFurnaceClick);
@@ -6625,6 +9624,9 @@ function capturePlanCompareV05Baseline(label = '', strategy = '') {
         heatGroupId: heatMergeState.appliedGroupId || null
     };
     window._planCompareV05Baseline = planCompareV05Baseline;
+
+    // V1.1：生成方案后自动沉淀一版“AI初稿”，作为后续人工微调对比基线。
+    setTimeout(() => ensureAiDraftPlanVersionSaved('auto-baseline'), 0);
 }
 
 function ensurePlanCompareV05Baseline() {
@@ -7040,10 +10042,29 @@ function initHeatMergeDesign() {
 const FEISHU_SYNC_DEFAULT_CLIENT_ID = 'client_suoli';
 
 function getFeishuApiBase() {
-    const override = (window.FEISHU_API_BASE || localStorage.getItem('feishuApiBase') || '').trim();
+    const params = new URLSearchParams(window.location.search);
+
+    const override = (
+        params.get('api') ||
+        window.FEISHU_API_BASE ||
+        localStorage.getItem('feishuApiBase') ||
+        ''
+    ).trim();
+
     if (override) return override.replace(/\/$/, '');
 
-    // 云端部署时统一走同源 /api，由 Nginx 转发到 127.0.0.1:3000
+    const hostname = window.location?.hostname || '';
+    const port = window.location?.port || '';
+
+    // 正式部署或由本地 node server.js 直接提供页面时，走同源 /api。
+    if (port === '3000') return '';
+
+    // 本地 VS Code Live Server / 静态服务开发时，默认请求 Azure 后端，避免 5500 没有后端导致飞书同步失败。
+    if (hostname === '127.0.0.1' || hostname === 'localhost') {
+        return 'http://74.248.33.0';
+    }
+
+    // Azure / 客户服务器正式访问时，走同域名 /api，由 Nginx 转发到 Node。
     return '';
 }
 
@@ -7455,15 +10476,38 @@ function applyFeishuToolingResourcesToCards(resources = [], options = {}) {
 
 async function fetchFeishuJson(endpoint, clientId) {
     const apiBase = getFeishuApiBase();
-    const resp = await fetch(`${apiBase}${endpoint}`, {
+    const url = `${apiBase}${endpoint}`;
+    const resp = await fetch(url, {
         headers: {
             'Accept': 'application/json',
             'x-client-id': clientId || getFeishuClientId()
         }
     });
-    const payload = await resp.json().catch(() => null);
-    if (!resp.ok || !payload || payload.ok === false || payload.error) {
-        throw new Error(payload?.error || payload?.detail?.msg || payload?.detail || `HTTP ${resp.status}`);
+
+    const text = await resp.text().catch(() => '');
+    let payload = null;
+    try {
+        payload = text ? JSON.parse(text) : null;
+    } catch (error) {
+        const preview = String(text || '').slice(0, 120).replace(/\s+/g, ' ');
+        const looksHtml = /^\s*</.test(text || '');
+        const message = looksHtml
+            ? `接口返回了HTML而不是JSON：${url}。通常是后端 server.js 没有部署/重启，或本地页面请求到了静态服务器。`
+            : `接口没有返回有效JSON：${url}；预览：${preview}`;
+        const err = new Error(message);
+        err.status = resp.status;
+        err.url = url;
+        err.responsePreview = preview;
+        throw err;
+    }
+
+    if (!resp.ok || !payload || payload.ok === false || payload.success === false || payload.error) {
+        const message = payload?.error || payload?.message || payload?.detail?.msg || payload?.detail || `HTTP ${resp.status}`;
+        const err = new Error(message);
+        err.status = resp.status;
+        err.url = url;
+        err.payload = payload;
+        throw err;
     }
     return payload;
 }
@@ -7651,16 +10695,36 @@ function collectFeishuSourceInfoFromCurrentPlan() {
 
 
 function getCurrentSystemPlanLink(writebackKey = '') {
+    const clientId = getFeishuClientId();
+    const params = new URLSearchParams();
+    if (writebackKey) params.set('planId', writebackKey);
+    if (clientId) params.set('clientId', clientId);
+
+    const configuredBase = String(
+        window.FEISHU_PUBLIC_APP_URL ||
+        localStorage.getItem('feishuPublicAppUrl') ||
+        ''
+    ).trim().replace(/\/$/, '');
+
+    if (/^https?:\/\//i.test(configuredBase)) {
+        return `${configuredBase}${params.toString() ? '?' + params.toString() : ''}`;
+    }
+
     try {
         const url = new URL(window.location.href);
+        const isLocalDev = ['127.0.0.1', 'localhost'].includes(url.hostname);
+        if (isLocalDev) {
+            const publicBase = String(localStorage.getItem('feishuPublicBaseUrl') || 'http://74.248.33.0/ht/furnace.html').trim();
+            const publicUrl = new URL(publicBase);
+            params.forEach((value, key) => publicUrl.searchParams.set(key, value));
+            return publicUrl.toString();
+        }
         url.hash = '';
-        if (writebackKey) url.searchParams.set('planId', writebackKey);
-        const clientId = getFeishuClientId();
-        if (clientId) url.searchParams.set('clientId', clientId);
+        params.forEach((value, key) => url.searchParams.set(key, value));
         return url.toString();
     } catch (_) {
-        const base = `${window.location.origin || ''}${window.location.pathname || '/furnace.html'}`;
-        return writebackKey ? `${base}?planId=${encodeURIComponent(writebackKey)}` : base;
+        const base = 'http://74.248.33.0/ht/furnace.html';
+        return `${base}${params.toString() ? '?' + params.toString() : ''}`;
     }
 }
 
@@ -7696,23 +10760,351 @@ function buildFeishuPlanSummaryText({ planName, totals, sourceInfo, toolingNames
     ].join('；');
 }
 
+
+// ==================== V1.4: 手机端对比摘要 / 最终执行版写回辅助 ====================
+// V1.4 不把完整版本快照写入飞书，避免方案JSON过大。
+// 只写轻量摘要，供 mobile.html 读取：最终版本、总工调整说明、对比结论、仿真建议。
+
+function sanitizeVersionChangeSummaryForMobileV14(summary = {}) {
+    const sim = summary.simulationSuggestion || {};
+    return {
+        movedCount: Number(summary.movedCount || 0),
+        layerChangedCount: Number(summary.layerChangedCount || 0),
+        rotationChangedCount: Number(summary.rotationChangedCount || 0),
+        heavyMovedCount: Number(summary.heavyMovedCount || 0),
+        centerDelta: Number.isFinite(Number(summary.centerDelta)) ? Number(summary.centerDelta) : null,
+        minGapDelta: Number.isFinite(Number(summary.minGapDelta)) ? Number(summary.minGapDelta) : null,
+        closePairDelta: Number(summary.closePairDelta || 0),
+        maxCellDensityDelta: Number.isFinite(Number(summary.maxCellDensityDelta)) ? Number(summary.maxCellDensityDelta) : null,
+        notes: Array.isArray(summary.notes) ? summary.notes.slice(0, 8).map(String) : [],
+        simulationSuggestion: {
+            yes: !!sim.yes,
+            level: sim.level || '低',
+            modules: Array.isArray(sim.modules) ? sim.modules.slice(0, 6).map(String) : [],
+            reasons: Array.isArray(sim.reasons) ? sim.reasons.slice(0, 6).map(String) : []
+        }
+    };
+}
+
+function buildMobileCompareConclusionV14(version, changeSummary) {
+    if (!version) return '暂无版本对比结论。';
+    if (!changeSummary) return `${version.versionName || '当前版本'} 已保存，暂无明显人工调整摘要。`;
+
+    const sim = changeSummary.simulationSuggestion || {};
+    const notes = Array.isArray(changeSummary.notes) ? changeSummary.notes : [];
+    const positive = [];
+    const warning = [];
+
+    if (Number(changeSummary.movedCount || 0) > 0) positive.push(`总工已调整 ${changeSummary.movedCount} 个工件`);
+    if (Number.isFinite(Number(changeSummary.centerDelta))) {
+        if (Number(changeSummary.centerDelta) < -2) positive.push('重心偏移有所改善');
+        if (Number(changeSummary.centerDelta) > 2) warning.push('重心偏移有所增加');
+    }
+    if (Number.isFinite(Number(changeSummary.minGapDelta))) {
+        if (Number(changeSummary.minGapDelta) > 5) positive.push('最小间距增加');
+        if (Number(changeSummary.minGapDelta) < -5) warning.push('最小间距减少');
+    }
+    if (Number.isFinite(Number(changeSummary.maxCellDensityDelta))) {
+        if (Number(changeSummary.maxCellDensityDelta) < -5) positive.push('局部密度下降');
+        if (Number(changeSummary.maxCellDensityDelta) > 5) warning.push('局部密度上升');
+    }
+    if (Number(changeSummary.heavyMovedCount || 0) > 0) warning.push('存在重件移动');
+
+    if (sim.yes) {
+        return `${version.versionName || '调整版'} 需要进一步复核：${(sim.reasons || []).slice(0, 2).join('；') || '建议运行仿真对比。'}`;
+    }
+    if (warning.length && positive.length) {
+        return `${version.versionName || '调整版'} 有改善也有权衡：${positive.join('、')}；但${warning.join('、')}，建议总工确认。`;
+    }
+    if (warning.length) {
+        return `${version.versionName || '调整版'} 需要复核：${warning.join('、')}。`;
+    }
+    if (positive.length) {
+        return `${version.versionName || '调整版'} 基本合理：${positive.join('、')}。`;
+    }
+    return notes.length ? notes.slice(0, 3).join('；') : `${version.versionName || '当前版本'} 基础指标变化不大，可按现场经验确认。`;
+}
+
+function buildMobileVersionSummaryV14() {
+    if (typeof getCurrentPlanVersionsV11 !== 'function') {
+        return {
+            enabled: false,
+            finalVersionName: '',
+            currentVersionName: '',
+            versionCount: 0,
+            compareConclusion: '当前系统尚未启用方案版本链。',
+            adjustmentSummary: '',
+            simulationConclusion: '',
+            simulationModules: [],
+            versions: []
+        };
+    }
+
+    const versions = getCurrentPlanVersionsV11() || [];
+    const currentId = typeof getCurrentRestoredVersionIdV13 === 'function' ? getCurrentRestoredVersionIdV13() : '';
+    const finalVersion = versions.slice().reverse().find(v => v.versionType === 'final_execution') || null;
+    const currentVersion = (currentId ? versions.find(v => v.versionId === currentId) : null) ||
+        finalVersion ||
+        versions[versions.length - 1] ||
+        null;
+
+    const latestChangedVersion = versions.slice().reverse().find(v => v.changeSummary && Array.isArray(v.changeSummary.notes) && v.changeSummary.notes.length) || currentVersion;
+    const latestChange = latestChangedVersion?.changeSummary || null;
+    const safeChange = latestChange ? sanitizeVersionChangeSummaryForMobileV14(latestChange) : null;
+    const sim = safeChange?.simulationSuggestion || null;
+
+    const versionRows = versions.map(v => ({
+        versionId: v.versionId || '',
+        versionNo: v.versionNo || 0,
+        versionName: v.versionName || '',
+        versionType: v.versionType || '',
+        versionTypeLabel: v.versionTypeLabel || getPlanVersionTypeLabelV11?.(v.versionType) || '方案版本',
+        createdAt: v.createdAt || '',
+        strategy: v.strategy || '',
+        isCurrent: currentVersion && v.versionId === currentVersion.versionId,
+        isFinal: v.versionType === 'final_execution',
+        changeSummary: v.changeSummary ? sanitizeVersionChangeSummaryForMobileV14(v.changeSummary) : null
+    })).slice(-8);
+
+    const adjustmentNotes = safeChange?.notes?.length
+        ? safeChange.notes.join('；')
+        : (versions.length ? '已建立方案版本链，暂无明显人工调整摘要。' : '暂无方案版本链。');
+
+    return {
+        enabled: true,
+        versionCount: versions.length,
+        finalVersionName: finalVersion?.versionName || '',
+        currentVersionName: currentVersion?.versionName || '',
+        currentVersionType: currentVersion?.versionType || '',
+        currentVersionTypeLabel: currentVersion?.versionTypeLabel || '',
+        compareConclusion: buildMobileCompareConclusionV14(latestChangedVersion, safeChange),
+        adjustmentSummary: adjustmentNotes,
+        simulationConclusion: sim
+            ? (sim.yes
+                ? `建议进一步仿真：${sim.reasons.join('；') || '请复核辐射、气流或热场风险。'}`
+                : (sim.reasons.join('；') || '暂不强制要求仿真对比。'))
+            : '暂无仿真建议。',
+        simulationModules: sim?.modules || [],
+        simulationLevel: sim?.level || '低',
+        needSimulation: !!sim?.yes,
+        versions: versionRows
+    };
+}
+
+function appendMobileSummaryToPlanSummaryV14(planSummary, mobileSummary) {
+    if (!mobileSummary || !mobileSummary.enabled || mobileSummary.versionCount === 0) return planSummary;
+    const lines = [
+        '',
+        '【方案版本】',
+        mobileSummary.finalVersionName ? `最终执行版：${mobileSummary.finalVersionName}` : `当前版本：${mobileSummary.currentVersionName || '-'}`,
+        `总工调整：${mobileSummary.adjustmentSummary || '-'}`,
+        `对比结论：${mobileSummary.compareConclusion || '-'}`,
+        `仿真建议：${mobileSummary.simulationConclusion || '-'}`
+    ];
+    return `${planSummary || ''}${lines.join('\n')}`;
+}
+
+
+
+// ==================== V1.5: 完整方案JSON + 现场施工单持久化 ====================
+function buildFullDigitalTwinRecordForFeishuV15(planName, mobileVersionSummary) {
+    let record = null;
+    try {
+        record = buildCurrentDigitalTwinRecord({
+            title: planName || getCurrentWorkspaceTitle(),
+            materials: collectMaterialBatchesForRecord(),
+            tooling: collectToolingForRecord()
+        });
+    } catch (error) {
+        console.warn('[Plan Assets V1.5] buildCurrentDigitalTwinRecord failed, fallback:', error);
+    }
+
+    if (!record) {
+        record = { schemaVersion: 'heat-treatment-digital-twin-v1', meta: {}, loadingPlan: {} };
+    }
+
+    record.meta = {
+        ...(record.meta || {}),
+        title: planName || record.meta?.title || getCurrentWorkspaceTitle(),
+        createdAt: new Date().toISOString(),
+        source: 'feishu-plan-asset-v15',
+        strategy: placementRules?.strategy || '',
+        strategyLabel: STRATEGY_LABELS?.[placementRules?.strategy] || placementRules?.strategy || '',
+        mobileVersionSummary: mobileVersionSummary || null
+    };
+
+    record.placementRules = { ...(record.placementRules || {}), ...(placementRules || {}) };
+    record.loadingPlan = {
+        ...(record.loadingPlan || {}),
+        furnaces: Array.isArray(globalFurnacesResult) ? globalFurnacesResult : [],
+        unpackedItems: Array.isArray(globalUnpackedItems) ? globalUnpackedItems : [],
+        predictions: Array.isArray(globalPredictions) ? globalPredictions : []
+    };
+    record.aggregationStats = aggregationStats || record.aggregationStats || null;
+    record.mobileVersionSummary = mobileVersionSummary || null;
+    return record;
+}
+
+async function persistCurrentPlanAssetsForFeishuV15(payload) {
+    if (!payload || !payload.planJson) return null;
+    const apiBase = getFeishuApiBase();
+    const resp = await fetch(`${apiBase}/api/plan-assets/save`, {
+        method: 'POST',
+        headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json; charset=utf-8',
+            'x-client-id': getFeishuClientId()
+        },
+        body: JSON.stringify({
+            assetKey: payload.writebackKey || '',
+            writebackKey: payload.writebackKey || '',
+            planName: payload.planName || '',
+            customer: payload.customer || '',
+            processGroup: payload.processGroup || '',
+            strategy: payload.strategy || '',
+            generatedAt: payload.generatedAt || new Date().toISOString(),
+            planSummary: payload.planSummary || '',
+            planJson: payload.planJson
+        })
+    });
+
+    const result = await resp.json().catch(() => null);
+    if (!resp.ok || !result || result.ok === false) {
+        throw new Error(result?.error || result?.detail || `方案资产保存失败 HTTP ${resp.status}`);
+    }
+
+    payload.planJsonUrl = result.planJsonUrl || '';
+    payload.constructionSheetUrl = result.constructionSheetUrl || result.pdfLink || '';
+    payload.assetManifestUrl = result.manifestUrl || '';
+    if (payload.constructionSheetUrl) {
+        payload.pdfLink = payload.constructionSheetUrl;
+        payload.pdfStatus = '已生成施工单打印页';
+    }
+    return result;
+}
+
+
+function derivePlanJsonUrlFromPlanAssetLinksV153(plan = {}) {
+    const explicit = String(plan.planJsonUrl || plan.jsonUrl || plan.fullJsonUrl || '').trim();
+    if (/^https?:\/\//i.test(explicit)) return explicit;
+
+    const candidates = [
+        plan.constructionSheetUrl,
+        plan.pdfLink,
+        plan.pdfUrl,
+        plan.assetManifestUrl,
+        plan.manifestUrl
+    ].map(v => String(v || '').trim()).filter(Boolean);
+
+    for (const url of candidates) {
+        if (!/^https?:\/\//i.test(url)) continue;
+        if (/\/construction-sheet\.html(?:[?#].*)?$/i.test(url)) {
+            return url.replace(/\/construction-sheet\.html(?:[?#].*)?$/i, '/plan.json');
+        }
+        if (/\/manifest\.json(?:[?#].*)?$/i.test(url)) {
+            return url.replace(/\/manifest\.json(?:[?#].*)?$/i, '/plan.json');
+        }
+        if (/\/plan-assets\/[^/?#]+(?:[?#].*)?$/i.test(url)) {
+            return url.replace(/(?:[?#].*)?$/i, '/plan.json');
+        }
+    }
+    return '';
+}
+
+function withDerivedPlanAssetLinksV153(plan = {}) {
+    const next = { ...(plan || {}) };
+    const derivedJson = derivePlanJsonUrlFromPlanAssetLinksV153(next);
+    if (derivedJson && !next.planJsonUrl) next.planJsonUrl = derivedJson;
+
+    if (!next.constructionSheetUrl && /^https?:\/\//i.test(String(next.pdfLink || ''))) {
+        next.constructionSheetUrl = next.pdfLink;
+    }
+
+    if (!next.pdfLink && next.constructionSheetUrl) {
+        next.pdfLink = next.constructionSheetUrl;
+    }
+
+    return next;
+}
+
+
+function extractPlanAssetKeyFromUrlV155(rawUrl = '') {
+    const text = String(rawUrl || '').trim();
+    if (!text) return '';
+    try {
+        const pathname = new URL(text, window.location.href).pathname || '';
+        const match = pathname.match(/\/(?:ht\/)?plan-assets\/([^\/?#]+)\/(?:plan\.json|manifest\.json|construction-sheet\.html)?/i);
+        return match ? decodeURIComponent(match[1]) : '';
+    } catch (_) {
+        const match = text.match(/\/(?:ht\/)?plan-assets\/([^\/?#]+)\/(?:plan\.json|manifest\.json|construction-sheet\.html)?/i);
+        return match ? decodeURIComponent(match[1]) : '';
+    }
+}
+
+async function loadPlanJsonAssetV15(planJsonUrl) {
+    const url = String(planJsonUrl || '').trim();
+    if (!url) return null;
+
+    // V1.5.6：本地 127 页面直接 fetch http://74.248.33.0/ht/plan-assets/.../plan.json
+    // 可能被静态资源 CORS 拦截。优先走同一个 API 后端代理读取本地文件。
+    const apiBase = typeof getFeishuApiBase === 'function' ? getFeishuApiBase() : '';
+    const assetKey = extractPlanAssetKeyFromUrlV155(url);
+
+    if (apiBase && assetKey) {
+        try {
+            const proxyUrl = `${apiBase}/api/plan-assets/read?assetKey=${encodeURIComponent(assetKey)}&url=${encodeURIComponent(url)}`;
+            const resp = await fetch(proxyUrl, {
+                headers: {
+                    'Accept': 'application/json',
+                    'x-client-id': typeof getFeishuClientId === 'function' ? getFeishuClientId() : ''
+                }
+            });
+            const payload = await resp.json().catch(() => null);
+            if (resp.ok && payload?.ok && payload.planJson) {
+                return payload.planJson;
+            }
+            console.warn('[Plan Assets V1.5] proxy read returned no planJson:', payload);
+        } catch (error) {
+            console.warn('[Plan Assets V1.5] proxy read failed, fallback to direct fetch:', error);
+        }
+    }
+
+    try {
+        const resp = await fetch(url, { headers: { 'Accept': 'application/json' }, mode: 'cors' });
+        const payload = await resp.json().catch(() => null);
+        if (!resp.ok || !payload) return null;
+        return payload;
+    } catch (error) {
+        console.warn('[Plan Assets V1.5] direct load plan json asset failed:', error);
+        return null;
+    }
+}
+
+
 function buildCurrentPlanFeishuPayload() {
     const furnaces = Array.isArray(globalFurnacesResult) ? globalFurnacesResult : [];
     if (!furnaces.length) return null;
 
     const sourceInfo = collectFeishuSourceInfoFromCurrentPlan();
-    if (!sourceInfo.sourceRecordIds.length) return null;
-
+    // V1.5：允许本地/测试方案也写入飞书方案记录，便于手机端查看施工单、电脑端恢复3D。
     const totals = getPlanCompareTotals(furnaces, globalUnpackedItems || [], 'current');
     const planName = buildAutoWorkspaceTitle(STRATEGY_LABELS[placementRules.strategy] || placementRules.strategy || 'balanced');
     const toolingNames = Array.from(new Set(furnaces.map(f => f?.typeName || f?.name || f?.instanceId || '').filter(Boolean)));
     const customer = sourceInfo.customers.length === 1 ? sourceInfo.customers[0] : sourceInfo.customers.join(', ');
     const processGroup = sourceInfo.processes.length === 1 ? sourceInfo.processes[0] : sourceInfo.processes.join(', ');
+    const mobileVersionSummary = buildMobileVersionSummaryV14();
 
     let planJson = '';
     try {
+        const fullRecord = buildFullDigitalTwinRecordForFeishuV15(planName, mobileVersionSummary);
+        fullRecord.sourceRecordIds = sourceInfo.sourceRecordIds;
+        fullRecord.taskIds = sourceInfo.taskIds;
+        fullRecord.planName = planName;
+        planJson = JSON.stringify(fullRecord);
+    } catch (err) {
+        console.warn('[Feishu Plan Writeback] build full plan JSON failed:', err);
         planJson = JSON.stringify({
-            version: '0.8.4',
+            version: '1.5.0-fallback',
             source: 'ai-furnace-loading-agent',
             createdAt: new Date().toISOString(),
             planName,
@@ -7721,10 +11113,9 @@ function buildCurrentPlanFeishuPayload() {
             placementRules,
             furnaces,
             unpackedItems: globalUnpackedItems || [],
-            aggregationStats: aggregationStats || null
+            aggregationStats: aggregationStats || null,
+            mobileVersionSummary
         });
-    } catch (err) {
-        planJson = '';
     }
 
     const payload = {
@@ -7740,9 +11131,11 @@ function buildCurrentPlanFeishuPayload() {
         sourceRecordIds: sourceInfo.sourceRecordIds,
         taskIds: sourceInfo.taskIds,
         planJson,
-        updateTaskStatus: true,
+        updateTaskStatus: sourceInfo.sourceRecordIds.length > 0,
         taskStatus: '已生成方案',
-        remark: `由 AI热处理装炉智能体写回；工件 ${totals.itemCount} 件，未装 ${totals.unpackedCount} 件。`
+        forceCreate: true,
+        saveMode: 'full_json_and_construction_sheet_v15',
+        remark: `由 AI热处理装炉智能体写回；工件 ${totals.itemCount} 件，未装 ${totals.unpackedCount} 件。${sourceInfo.sourceRecordIds.length ? '' : '（本地/非飞书任务方案）'}`
     };
     payload.writebackKey = buildFeishuWritebackKey(payload);
     payload.generatedAt = new Date().toISOString();
@@ -7751,14 +11144,15 @@ function buildCurrentPlanFeishuPayload() {
     payload.pdfLink = getCurrentPdfLinkForFeishu(payload.writebackKey);
     payload.pdfStatus = /^https?:\/\//i.test(payload.pdfLink) ? '已生成链接' : '本地导出，待上传';
     payload.notifyBot = true;
-    payload.planSummary = buildFeishuPlanSummaryText({
+    payload.mobileVersionSummary = mobileVersionSummary;
+    payload.planSummary = appendMobileSummaryToPlanSummaryV14(buildFeishuPlanSummaryText({
         planName,
         totals,
         sourceInfo,
         toolingNames,
         customer,
         processGroup
-    });
+    }), mobileVersionSummary);
     return payload;
 }
 
@@ -7779,15 +11173,6 @@ async function syncCurrentPlanToFeishuAfterLibrarySave(triggerButton = null) {
 
     const writebackKey = payload.writebackKey || buildFeishuWritebackKey(payload);
     payload.writebackKey = writebackKey;
-    const existed = hasFeishuWritebackRecord(writebackKey);
-    if (existed) {
-        showCapacityFeedback('warning', getFeishuUiText(
-            `本地方案已保存；检测到该飞书方案已写回过，已跳过重复写回${existed.planRecordId ? `（${existed.planRecordId}）` : ''}。`,
-            `Plan saved locally; this Feishu plan was already written back, so duplicate writeback was skipped${existed.planRecordId ? ` (${existed.planRecordId})` : ''}.`
-        ));
-        return { ok: true, localDuplicateSkipped: true, existing: existed };
-    }
-
     const apiBase = getFeishuApiBase();
     const clientId = getFeishuClientId();
     const oldText = triggerButton ? triggerButton.textContent : '';
@@ -7797,7 +11182,13 @@ async function syncCurrentPlanToFeishuAfterLibrarySave(triggerButton = null) {
         if (triggerButton) {
             triggerButton.disabled = true;
             triggerButton.classList.add('is-loading');
-            triggerButton.textContent = getFeishuUiText('保存并写回飞书...', 'Saving & syncing Feishu...');
+            triggerButton.textContent = getFeishuUiText('保存JSON与施工单...', 'Saving JSON & construction sheet...');
+        }
+
+        await persistCurrentPlanAssetsForFeishuV15(payload);
+
+        if (triggerButton) {
+            triggerButton.textContent = getFeishuUiText('写回飞书方案记录...', 'Writing back to Feishu...');
         }
 
         const resp = await fetch(`${apiBase}/api/feishu/plans`, {
@@ -8514,6 +11905,12 @@ function ensurePdfExportDomV08212() {
                     <label style="display:flex;align-items:center;gap:8px;color:#475569;font-size:13px;">
                         <input type="checkbox" id="pdf-opt-json"> 同时导出 JSON
                     </label>
+                    <label style="display:flex;align-items:center;gap:8px;color:#475569;font-size:13px;margin-top:8px;">
+                        <input type="checkbox" id="pdf-opt-coordinates"> PDF 内包含工件坐标清单
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;color:#475569;font-size:13px;margin-top:8px;">
+                        <input type="checkbox" id="pdf-opt-density-zoom"> PDF 内包含高密度区域放大
+                    </label>
                 </div>
                 <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:18px;">
                     <button id="btn-pdf-cancel" type="button" style="padding:10px 20px;border:0;border-radius:12px;background:#e2e8f0;color:#334155;font-weight:800;cursor:pointer;">取消</button>
@@ -8630,6 +12027,18 @@ async function confirmPdfExportSafeV08212(event) {
     const btn = document.getElementById('btn-pdf-confirm');
     const oldText = btn ? btn.textContent : '';
     const shouldExportJson = !!document.getElementById('pdf-opt-json')?.checked;
+    const includeCoordinateList = !!document.getElementById('pdf-opt-coordinates')?.checked;
+    const includeHighDensityZoom = !!document.getElementById('pdf-opt-density-zoom')?.checked;
+    window.__HT_PDF_EXPORT_OPTIONS__ = {
+        ...(window.__HT_PDF_EXPORT_OPTIONS__ || {}),
+        includeCoordinateList,
+        includeCoordinates: includeCoordinateList,
+        coordinateList: includeCoordinateList,
+        includeHighDensityZoom,
+        highDensityZoom: includeHighDensityZoom,
+        densityZoom: includeHighDensityZoom,
+        regionZoom: includeHighDensityZoom
+    };
     const overlay = document.getElementById('pdf-select-overlay');
 
     try {
@@ -8639,7 +12048,7 @@ async function confirmPdfExportSafeV08212(event) {
         }
         if (overlay) overlay.style.display = 'none';
         showPdfProgressV08212(`正在导出 ${selectedIds.length} 个炉次，请不要关闭页面。`);
-        await generateSixPagePDF(selectedIds);
+        await generateSixPagePDF(selectedIds, window.__HT_PDF_EXPORT_OPTIONS__ || {});
         if (shouldExportJson) exportCurrentPlanJson();
     } catch (err) {
         console.error('[PDF] 导出失败:', err);
@@ -9173,6 +12582,7 @@ function initRightPanelTabs() {
                     planLibrary.renderPlanLibraryList();
                 }
                 refreshPlanLibraryWorkbench();
+                initFeishuPlanLibrarySyncV143();
             }
 
             if (tab === 'thermal') {
@@ -10410,10 +13820,14 @@ function savePlacementAdjustedPlan() {
     placementEditSessionSnapshot = capturePlacementEditSessionSnapshot();
     placementEditDirty = false;
     placementEditSavedInSession = true;
+
+    const version = saveManualAdjustedPlanVersionFromCurrent({ silent: true, source: 'placement-edit-save' });
+    const versionText = version ? `，并保存为 ${version.versionName}` : '';
+
     if (typeof showCapacityFeedback === 'function') {
-        showCapacityFeedback('success', '✅ 已保存人工调整位置，后续打印方案将读取当前最终位置。');
+        showCapacityFeedback('success', `✅ 已保存人工调整位置${versionText}，可与 AI 初稿/上一版对比。`);
     } else {
-        alert('已保存人工调整位置');
+        alert(`已保存人工调整位置${versionText}`);
     }
     refreshPlanLibraryWorkbench();
 }
@@ -10986,3 +14400,48 @@ function bindPlacementEditMode() {
 
 })();
 
+
+
+window.FeishuPlanLibraryV143 = {
+    sync: syncFeishuPlanLibraryFromServerV143,
+    render: renderFeishuPlanLibraryCardsV143,
+    getCache: getFeishuPlanLibraryCacheV143,
+    clearCache: () => {
+        localStorage.removeItem(FEISHU_PLAN_LIBRARY_CACHE_KEY_V143);
+        feishuPlanRecordMemoryCacheV145.clear();
+        renderFeishuPlanLibraryCardsV143();
+    },
+    lazyLoad: ensureFeishuPlanRecordLoadedV144
+};
+
+
+window.debugBatchColorsV151 = function debugBatchColorsV151() {
+    const cards = [...document.querySelectorAll('.material-card')].map(card => {
+        const d = getMaterialDataFromCard(card);
+        return { name: d.name, color: normalizeBatchColorV151(d.color), material: d.material, customer: d.customer, process: d.process };
+    });
+    const packed = (globalFurnacesResult || []).flatMap((f, furnaceIndex) =>
+        (f.packedItems || []).slice(0, 80).map(item => ({
+            furnaceIndex, name: item.name, color: item.color, batchColor: item.batchColor,
+            displayColor: item.displayColor, renderColor: item.renderColor,
+            material: item.material, customer: item.customer, process: item.process
+        }))
+    );
+    console.table(cards);
+    console.table(packed);
+    return { cards, packed };
+};
+
+
+window.debugPlanAssetLoadV155 = async function debugPlanAssetLoadV155(url) {
+    const jsonUrl = derivePlanJsonUrlFromPlanAssetLinksV153({ planJsonUrl: url, constructionSheetUrl: url, pdfLink: url });
+    const assetKey = extractPlanAssetKeyFromUrlV155(jsonUrl || url);
+    const apiBase = getFeishuApiBase();
+    const proxyUrl = `${apiBase}/api/plan-assets/read?assetKey=${encodeURIComponent(assetKey)}&url=${encodeURIComponent(jsonUrl || url)}`;
+    console.log('[V1.5.6] jsonUrl:', jsonUrl || url);
+    console.log('[V1.5.6] assetKey:', assetKey);
+    console.log('[V1.5.6] proxyUrl:', proxyUrl);
+    const data = await loadPlanJsonAssetV15(jsonUrl || url);
+    console.log('[V1.5.6] loaded planJson:', data);
+    return data;
+};
