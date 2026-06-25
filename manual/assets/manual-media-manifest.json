@@ -1,0 +1,175 @@
+{
+  "screenshots": [
+    {
+      "id": "s01",
+      "file": "./assets/screens/01-01-feishu-preview-task.webp",
+      "title": "飞书群预览生产任务",
+      "desc": "客服在飞书群里 @ 机器人，让机器人读取可转换的订单草稿。"
+    },
+    {
+      "id": "s02",
+      "file": "./assets/screens/02-02-feishu-draft-input.webp",
+      "title": "飞书群提交订单信息",
+      "desc": "用自然语言提交客户、产品、材质、工艺、数量、重量和交期。"
+    },
+    {
+      "id": "s03",
+      "file": "./assets/screens/03-03-feishu-draft-created.webp",
+      "title": "机器人生成订单草稿",
+      "desc": "机器人将非结构化消息整理成订单草稿，并提示去订单草稿表确认。"
+    },
+    {
+      "id": "s04",
+      "file": "./assets/screens/04-04-feishu-batch-convert.webp",
+      "title": "批量转生产任务",
+      "desc": "客服确认后，可批量把订单草稿转成生产任务。"
+    },
+    {
+      "id": "s05",
+      "file": "./assets/screens/05-05-plan-record-link.webp",
+      "title": "方案记录回写",
+      "desc": "装炉方案生成后，机器人回传方案链接与施工单链接。"
+    },
+    {
+      "id": "s06",
+      "file": "./assets/screens/06-06-feishu-draft-table.webp",
+      "title": "订单草稿表",
+      "desc": "草稿表承接机器人整理结果，人工确认订单状态和是否生成生产任务。"
+    },
+    {
+      "id": "s07",
+      "file": "./assets/screens/07-07-mobile-order-single.webp",
+      "title": "手机端单条确认订单",
+      "desc": "移动端用于客服确认订单草稿，减少在表格里操作的复杂度。"
+    },
+    {
+      "id": "s08",
+      "file": "./assets/screens/08-08-mobile-order-list.webp",
+      "title": "手机端批量确认",
+      "desc": "多条订单可在手机端快速确认，再批量生成已确认订单。"
+    },
+    {
+      "id": "s09",
+      "file": "./assets/screens/09-09-mobile-task-empty.webp",
+      "title": "手机端生产任务空状态",
+      "desc": "生产任务为空时，引导用户回到订单确认或飞书同步。"
+    },
+    {
+      "id": "s10",
+      "file": "./assets/screens/10-10-mobile-task-list.webp",
+      "title": "手机端生产任务列表",
+      "desc": "生产任务生成后，现场或管理者可查看待排产任务。"
+    },
+    {
+      "id": "s11",
+      "file": "./assets/screens/11-11-feishu-production-table.webp",
+      "title": "生产任务表",
+      "desc": "正式生产任务表是装炉计算的数据来源，字段结构化。"
+    },
+    {
+      "id": "s12",
+      "file": "./assets/screens/12-12-desktop-device-sync.webp",
+      "title": "电脑端同步设备资源",
+      "desc": "同步飞书设备/工装资源后，系统知道可用炉膛和工装。"
+    },
+    {
+      "id": "s13",
+      "file": "./assets/screens/13-13-excel-import-preview.webp",
+      "title": "Excel / 飞书任务导入预览",
+      "desc": "导入前先预览字段，确认材质、工艺、尺寸和数量无误。"
+    },
+    {
+      "id": "s14",
+      "file": "./assets/screens/14-14-merge-design.webp",
+      "title": "合炉设计与人工拼炉",
+      "desc": "系统按质量、交付、成本策略推荐合炉组合，也允许人工拼炉。"
+    },
+    {
+      "id": "s15",
+      "file": "./assets/screens/15-15-merge-confirm.webp",
+      "title": "人工拼炉确认",
+      "desc": "总工确认本次合炉组合后，再进入装炉设计。"
+    },
+    {
+      "id": "s16",
+      "file": "./assets/screens/16-16-tooling-selected.webp",
+      "title": "选择工装与推荐装载",
+      "desc": "从可用工装中选择或采纳推荐工装，作为装炉空间边界。"
+    },
+    {
+      "id": "s17",
+      "file": "./assets/screens/17-17-packing-rules.webp",
+      "title": "摆放规则配置",
+      "desc": "设置空间利用、承重安全、分层算法、立放等规则。"
+    },
+    {
+      "id": "s18",
+      "file": "./assets/screens/18-18-progress.webp",
+      "title": "生成方案进度",
+      "desc": "生成过程中展示算法阶段，避免用户重复点击。"
+    },
+    {
+      "id": "s19",
+      "file": "./assets/screens/19-19-pdf-export-options.webp",
+      "title": "PDF 施工单导出配置",
+      "desc": "选择输出模式、坐标清单、高密度放大和 JSON 备份。"
+    }
+  ],
+  "pdfPages": [
+    {
+      "id": "p01",
+      "file": "./assets/pdf-pages/construction-sheet-page-01.webp",
+      "title": "施工单第 1 页",
+      "desc": "封面与任务信息"
+    },
+    {
+      "id": "p02",
+      "file": "./assets/pdf-pages/construction-sheet-page-02.webp",
+      "title": "施工单第 2 页",
+      "desc": "第 1 层俯视摆放图"
+    },
+    {
+      "id": "p03",
+      "file": "./assets/pdf-pages/construction-sheet-page-03.webp",
+      "title": "施工单第 3 页",
+      "desc": "第 1 层高密度区域放大 A 区"
+    },
+    {
+      "id": "p04",
+      "file": "./assets/pdf-pages/construction-sheet-page-04.webp",
+      "title": "施工单第 4 页",
+      "desc": "第 1 层高密度区域放大 B 区"
+    },
+    {
+      "id": "p05",
+      "file": "./assets/pdf-pages/construction-sheet-page-05.webp",
+      "title": "施工单第 5 页",
+      "desc": "第 1 层高密度区域放大 D 区"
+    },
+    {
+      "id": "p06",
+      "file": "./assets/pdf-pages/construction-sheet-page-06.webp",
+      "title": "施工单第 6 页",
+      "desc": "第 1 层高密度区域放大 C 区"
+    },
+    {
+      "id": "p07",
+      "file": "./assets/pdf-pages/construction-sheet-page-07.webp",
+      "title": "施工单第 7 页",
+      "desc": "第 2 层俯视摆放图"
+    },
+    {
+      "id": "p08",
+      "file": "./assets/pdf-pages/construction-sheet-page-08.webp",
+      "title": "施工单第 8 页",
+      "desc": "第 2 层高密度区域放大 B 区"
+    },
+    {
+      "id": "p09",
+      "file": "./assets/pdf-pages/construction-sheet-page-09.webp",
+      "title": "施工单第 9 页",
+      "desc": "第 2 层高密度区域放大 A 区"
+    }
+  ],
+  "version": "1.6.3"
+}
