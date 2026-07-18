@@ -749,23 +749,6 @@ export function exportFurnaceJSON(furnaceIndex) {
 export function showPdfSelectModal() {
     if (!globalFurnacesResult || globalFurnacesResult.length === 0) return;
 
-    // V1.5.4：兼容旧 HTML，没有坐标清单复选框时动态补一个。
-    const modal = document.getElementById('pdf-select-overlay');
-    if (modal && !document.getElementById('pdf-opt-coordinates')) {
-        const jsonOpt = document.getElementById('pdf-opt-json');
-        const holder = jsonOpt?.closest('label')?.parentElement || modal.querySelector('.pdf-options') || modal.querySelector('[class*="option"]');
-        if (holder) {
-            const label = document.createElement('label');
-            label.style.cssText = 'display:flex;align-items:center;gap:8px;color:#475569;font-size:13px;margin-top:8px;';
-            label.innerHTML = '<input type="checkbox" id="pdf-opt-coordinates"> PDF 内包含工件坐标清单';
-            holder.appendChild(label);
-            const zoomLabel = document.createElement('label');
-            zoomLabel.style.cssText = 'display:flex;align-items:center;gap:8px;color:#475569;font-size:13px;margin-top:8px;';
-            zoomLabel.innerHTML = '<input type="checkbox" id="pdf-opt-density-zoom"> PDF 内包含高密度区域放大';
-            holder.appendChild(zoomLabel);
-        }
-    }
-
     const list = document.getElementById('pdf-furnace-list');
     list.innerHTML = '';
 

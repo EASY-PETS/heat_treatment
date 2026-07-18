@@ -11881,7 +11881,7 @@ function ensureLanguageThemeControls() {
 let pdfExportDelegationBoundV08212 = false;
 
 function ensurePdfExportDomV08212() {
-    let overlay = document.getElementById('pdf-select-overlay');
+    const overlay = document.getElementById('pdf-select-overlay');
     let hiddenTemplate = document.getElementById('pdf-hidden-template');
 
     if (!hiddenTemplate) {
@@ -11891,57 +11891,21 @@ function ensurePdfExportDomV08212() {
         document.body.appendChild(hiddenTemplate);
     }
 
-    if (!overlay) {
-        overlay = document.createElement('div');
-        overlay.id = 'pdf-select-overlay';
-        overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,.56);backdrop-filter:blur(8px);';
-        overlay.innerHTML = `
-            <div id="pdf-select-modal" style="width:min(920px,calc(100vw - 36px));max-height:88vh;overflow:auto;background:#fff;border-radius:22px;padding:24px;box-shadow:0 30px 100px rgba(15,23,42,.32);">
-                <h2 style="margin:0 0 8px;font-size:22px;color:#0f172a;">打印现场摆料施工单</h2>
-                <div style="color:#64748b;font-size:13px;line-height:1.7;margin-bottom:14px;">选择需要导出的炉次，然后生成 PDF。</div>
-                <div id="pdf-unpacked-warning" class="pdf-unpacked-badge" style="display:none;"></div>
-                <div id="pdf-furnace-list" style="display:flex;flex-direction:column;gap:10px;margin:14px 0 18px;"></div>
-                <div class="pdf-options-section" style="margin:12px 0;">
-                    <label style="display:flex;align-items:center;gap:8px;color:#475569;font-size:13px;">
-                        <input type="checkbox" id="pdf-opt-json"> 同时导出 JSON
-                    </label>
-                    <label style="display:flex;align-items:center;gap:8px;color:#475569;font-size:13px;margin-top:8px;">
-                        <input type="checkbox" id="pdf-opt-coordinates"> PDF 内包含工件坐标清单
-                    </label>
-                    <label style="display:flex;align-items:center;gap:8px;color:#475569;font-size:13px;margin-top:8px;">
-                        <input type="checkbox" id="pdf-opt-density-zoom"> PDF 内包含高密度区域放大
-                    </label>
-                </div>
-                <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:18px;">
-                    <button id="btn-pdf-cancel" type="button" style="padding:10px 20px;border:0;border-radius:12px;background:#e2e8f0;color:#334155;font-weight:800;cursor:pointer;">取消</button>
-                    <button id="btn-pdf-confirm" type="button" style="padding:10px 24px;border:0;border-radius:12px;background:#2563eb;color:white;font-weight:800;cursor:pointer;">📄 导出 PDF</button>
-                </div>
-            </div>
-        `;
-        document.body.appendChild(overlay);
-    }
+    if (!overlay) throw new Error('缺少静态 PDF 导出弹窗 #pdf-select-overlay');
 
-    if (!document.getElementById('pdf-furnace-list')) {
-        const modal = overlay.querySelector('#pdf-select-modal') || overlay.firstElementChild || overlay;
-        const list = document.createElement('div');
-        list.id = 'pdf-furnace-list';
-        list.style.cssText = 'display:flex;flex-direction:column;gap:10px;margin:14px 0 18px;';
-        modal.appendChild(list);
-    }
-    if (!document.getElementById('pdf-unpacked-warning')) {
-        const warning = document.createElement('div');
-        warning.id = 'pdf-unpacked-warning';
-        warning.className = 'pdf-unpacked-badge';
-        warning.style.display = 'none';
-        const list = document.getElementById('pdf-furnace-list');
-        list.parentNode.insertBefore(warning, list);
-    }
-    if (!document.getElementById('btn-pdf-cancel') || !document.getElementById('btn-pdf-confirm')) {
-        const modal = overlay.querySelector('#pdf-select-modal') || overlay.firstElementChild || overlay;
-        const actions = document.createElement('div');
-        actions.style.cssText = 'display:flex;gap:12px;justify-content:flex-end;margin-top:18px;';
-        actions.innerHTML = '<button id="btn-pdf-cancel" type="button">取消</button><button id="btn-pdf-confirm" type="button">📄 导出 PDF</button>';
-        modal.appendChild(actions);
+    const requiredIds = [
+        'pdf-select-modal',
+        'pdf-furnace-list',
+        'pdf-unpacked-warning',
+        'pdf-opt-coordinates',
+        'pdf-opt-density-zoom',
+        'pdf-opt-json',
+        'btn-pdf-cancel',
+        'btn-pdf-confirm'
+    ];
+    const missingIds = requiredIds.filter(id => !document.getElementById(id));
+    if (missingIds.length) {
+        throw new Error(`PDF 导出弹窗缺少静态控件：${missingIds.join(', ')}`);
     }
 
     return overlay;
