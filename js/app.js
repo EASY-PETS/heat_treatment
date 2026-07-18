@@ -132,8 +132,9 @@ import {
     openJsonImportModal, parseJsonPlan, renderJsonPreview, 
 } from './ui.js';
 import { executePacking } from './furnace-engine.js';
-import { showPdfSelectModal, exportSingleFurnacePDF, getSelectedPdfFurnaceIds } from './pdf-export.js';
+import { showPdfSelectModal, exportSingleFurnacePDF, getSelectedPdfFurnaceIds, estimateSixPagePdfPages } from './pdf-export.js';
 import { generateSixPagePDF } from './pdf-six-page.js';
+import { normalizePdfExportOptions, applyPdfTemplateDefaults } from './pdf-export-options.js';
 import {
     buildCurrentDigitalTwinRecord,
     downloadJsonFile,
@@ -11879,6 +11880,52 @@ function ensureLanguageThemeControls() {
 
 // ==================== V0.8.2.1.2 PDF export bulletproof binding ====================
 let pdfExportDelegationBoundV08212 = false;
+let pdfExportOptionsV08212 = null;
+let pdfExportInFlight = false;
+
+const PDF_TEMPLATE_NAMES_V08212 = {
+    'field-large': '现场大图版',
+    standard: '标准施工版',
+    archive: '完整归档版'
+};
+
+function renderPdfExportSummaryV08212(options) {
+    const summary = document.getElementById('pdf-export-summary');
+    if (!summary) return;
+    const estimatedPages = estimateSixPagePdfPages(options);
+    summary.textContent = `已选炉次：${options.selectedFurnaceIds.length} · 模板：${PDF_TEMPLATE_NAMES_V08212[options.template]} · A4 ${options.orientation} · 预计页数：${estimatedPages} · JSON：${options.exportJson ? '导出' : '不导出'}`;
+}
+
+function syncPdfExportControlsV08212(options) {
+    document.querySelectorAll('input[name="pdf-template"]').forEach(radio => {
+        radio.checked = radio.value === options.template;
+    });
+    document.getElementById('pdf-opt-coordinates').checked = options.includeCoordinateList;
+    document.getElementById('pdf-opt-density-zoom').checked = options.includeHighDensityZoom;
+    document.getElementById('pdf-opt-json').checked = options.exportJson;
+    renderPdfExportSummaryV08212(options);
+}
+
+function updatePdfExportOptionsFromControlV08212(control) {
+    if (!pdfExportOptionsV08212) return;
+
+    if (control.matches('input[name="pdf-template"]')) {
+        pdfExportOptionsV08212 = applyPdfTemplateDefaults(control.value, {
+            selectedFurnaceIds: getSelectedPdfFurnaceIds()
+        });
+        syncPdfExportControlsV08212(pdfExportOptionsV08212);
+        return;
+    }
+
+    pdfExportOptionsV08212 = normalizePdfExportOptions({
+        ...pdfExportOptionsV08212,
+        selectedFurnaceIds: getSelectedPdfFurnaceIds(),
+        includeCoordinateList: !!document.getElementById('pdf-opt-coordinates')?.checked,
+        includeHighDensityZoom: !!document.getElementById('pdf-opt-density-zoom')?.checked,
+        exportJson: !!document.getElementById('pdf-opt-json')?.checked
+    });
+    syncPdfExportControlsV08212(pdfExportOptionsV08212);
+}
 
 function ensurePdfExportDomV08212() {
     const overlay = document.getElementById('pdf-select-overlay');
@@ -11900,6 +11947,7 @@ function ensurePdfExportDomV08212() {
         'pdf-opt-coordinates',
         'pdf-opt-density-zoom',
         'pdf-opt-json',
+        'pdf-export-summary',
         'btn-pdf-cancel',
         'btn-pdf-confirm'
     ];
@@ -11962,13 +12010,11 @@ function openPdfExportModalSafeV08212(event) {
     try {
         ensurePdfExportDomV08212();
         showPdfSelectModal();
-        const confirmBtn = document.getElementById('btn-pdf-confirm');
-        if (confirmBtn) confirmBtn.onclick = confirmPdfExportSafeV08212;
-        const cancelBtn = document.getElementById('btn-pdf-cancel');
-        if (cancelBtn) cancelBtn.onclick = () => {
-            const overlay = document.getElementById('pdf-select-overlay');
-            if (overlay) overlay.style.display = 'none';
-        };
+        pdfExportOptionsV08212 = normalizePdfExportOptions({
+            template: 'standard',
+            selectedFurnaceIds: getSelectedPdfFurnaceIds()
+        });
+        syncPdfExportControlsV08212(pdfExportOptionsV08212);
     } catch (err) {
         console.error('[PDF] 打开导出弹窗失败:', err);
         alert('PDF 导出弹窗打开失败：' + (err?.message || err));
@@ -11982,42 +12028,34 @@ async function confirmPdfExportSafeV08212(event) {
         if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
     }
 
-    const selectedIds = getSelectedPdfFurnaceIds();
-    if (!selectedIds.length) {
+    if (pdfExportInFlight) return;
+
+    const options = normalizePdfExportOptions(pdfExportOptionsV08212 || {});
+    if (!options.selectedFurnaceIds.length) {
         alert('请至少选择一个炉膛方案');
         return;
     }
 
     const btn = document.getElementById('btn-pdf-confirm');
     const oldText = btn ? btn.textContent : '';
-    const shouldExportJson = !!document.getElementById('pdf-opt-json')?.checked;
-    const includeCoordinateList = !!document.getElementById('pdf-opt-coordinates')?.checked;
-    const includeHighDensityZoom = !!document.getElementById('pdf-opt-density-zoom')?.checked;
-    window.__HT_PDF_EXPORT_OPTIONS__ = {
-        ...(window.__HT_PDF_EXPORT_OPTIONS__ || {}),
-        includeCoordinateList,
-        includeCoordinates: includeCoordinateList,
-        coordinateList: includeCoordinateList,
-        includeHighDensityZoom,
-        highDensityZoom: includeHighDensityZoom,
-        densityZoom: includeHighDensityZoom,
-        regionZoom: includeHighDensityZoom
-    };
     const overlay = document.getElementById('pdf-select-overlay');
 
     try {
+        pdfExportInFlight = true;
         if (btn) {
             btn.disabled = true;
             btn.textContent = '正在生成...';
         }
         if (overlay) overlay.style.display = 'none';
-        showPdfProgressV08212(`正在导出 ${selectedIds.length} 个炉次，请不要关闭页面。`);
-        await generateSixPagePDF(selectedIds, window.__HT_PDF_EXPORT_OPTIONS__ || {});
-        if (shouldExportJson) exportCurrentPlanJson();
+        const estimatedPages = estimateSixPagePdfPages(options);
+        showPdfProgressV08212(`正在导出 ${options.selectedFurnaceIds.length} 个炉次，预计 ${estimatedPages} 页，请不要关闭页面。`);
+        await generateSixPagePDF(options.selectedFurnaceIds, options);
+        if (options.exportJson === true) exportCurrentPlanJson();
     } catch (err) {
         console.error('[PDF] 导出失败:', err);
         alert('PDF 导出失败：' + (err?.message || err));
     } finally {
+        pdfExportInFlight = false;
         hidePdfProgressV08212();
         if (btn) {
             btn.disabled = false;
@@ -12052,6 +12090,11 @@ function bindPdfExportDelegationV08212() {
             if (overlay) overlay.style.display = 'none';
         }
     }, true);
+
+    document.addEventListener('change', (event) => {
+        const control = event.target.closest?.('input[name="pdf-template"], input[name="pdf-furnace"], #pdf-opt-coordinates, #pdf-opt-density-zoom, #pdf-opt-json');
+        if (control) updatePdfExportOptionsFromControlV08212(control);
+    });
 }
 
 
