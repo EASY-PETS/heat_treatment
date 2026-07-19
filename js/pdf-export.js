@@ -27,6 +27,7 @@ import {
     getMaterialDataFromCard,
     rgbToHex
 } from './ui.js';
+import { estimatePdfPageCountFromManifest } from './pdf-six-page.js';
 
 
 function normalizeLegacyPdfOptionsV154(options = {}) {
@@ -57,94 +58,11 @@ function normalizeLegacyPdfOptionsV154(options = {}) {
     };
 }
 
-const PDF_PAGE_ROW_LIMIT = 28;
-
-function getPdfItemLayerForEstimate(item, furnace) {
-    if (typeof item?.layer === 'number' && item.layer >= 1) return Math.round(item.layer);
-
-    const y = Number(item?.y) || 0;
-    const shelves = Array.isArray(furnace?.shelvesUsed)
-        ? [...furnace.shelvesUsed].sort((a, b) => (Number(a?.y) || 0) - (Number(b?.y) || 0))
-        : [];
-    let layer = 1;
-    shelves.forEach(shelf => {
-        const shelfY = Number(shelf?.y) || 0;
-        const thickness = Number(shelf?.thickness) || Number(placementRules?.shelfThickness) || 20;
-        if (y >= shelfY + thickness * 0.5) layer += 1;
-    });
-    return Math.max(1, layer);
-}
-
-function estimateDensityZoomPages(furnace, layerItems) {
-    const furnaceArea = Math.max(1, (Number(furnace?.w) || 0) * (Number(furnace?.d) || 0));
-    const usedArea = layerItems.reduce((sum, item) => {
-        const width = Math.max(1, Number(item?.pdfFootprintW ?? item?.w) || 1);
-        const depth = Math.max(1, Number(item?.pdfFootprintD ?? item?.d) || 1);
-        return sum + width * depth;
-    }, 0);
-    if (layerItems.length < 36 && usedArea / furnaceArea * 100 < 18) return 0;
-
-    const regionCounts = [0, 0, 0, 0];
-    const furnaceWidth = Math.max(1, Number(furnace?.w) || 0);
-    const furnaceDepth = Math.max(1, Number(furnace?.d) || 0);
-    layerItems.forEach(item => {
-        const width = Math.max(1, Number(item?.pdfFootprintW ?? item?.w) || 1);
-        const depth = Math.max(1, Number(item?.pdfFootprintD ?? item?.d) || 1);
-        const column = (Number(item?.x) || 0) + width / 2 < furnaceWidth / 2 ? 0 : 1;
-        const row = (Number(item?.z) || 0) + depth / 2 < furnaceDepth / 2 ? 0 : 1;
-        regionCounts[row * 2 + column] += 1;
-    });
-    return regionCounts.filter(count => count >= 8).slice(0, 4).length;
-}
-
 /**
- * Estimate pages using the same cover/layer/zoom/worklist rules as pdf-six-page.js.
- * The supplied options are already canonical and are never read from the DOM.
+ * Estimate pages from the exact manifest consumed by pdf-six-page.js.
  */
 export function estimateSixPagePdfPages(options) {
-    const selectedIds = (options?.selectedFurnaceIds || []).map(id => String(id));
-    const furnaces = (Array.isArray(globalFurnacesResult) ? globalFurnacesResult : [])
-        .map((furnace, index) => ({ furnace, index }))
-        .filter(({ furnace, index }) => {
-            const candidates = [
-                index,
-                index + 1,
-                furnace?.id,
-                furnace?.fid,
-                furnace?.furnaceId,
-                furnace?.instanceId,
-                furnace?.typeName,
-                furnace?.name
-            ].filter(value => value !== undefined && value !== null).map(String);
-            return selectedIds.some(id => candidates.includes(id)) || selectedIds.some(id => {
-                const match = id.match(/-?\d+/);
-                if (!match) return false;
-                const value = Number(match[0]);
-                return value === index || value === index + 1 || value === Number(furnace?.fid);
-            });
-        })
-        .map(({ furnace }) => furnace);
-
-    return furnaces.reduce((total, furnace) => {
-        const items = Array.isArray(furnace?.packedItems) ? furnace.packedItems : [];
-        const layers = new Map();
-        items.forEach(item => {
-            const layer = getPdfItemLayerForEstimate(item, furnace);
-            if (!layers.has(layer)) layers.set(layer, []);
-            layers.get(layer).push(item);
-        });
-
-        let furnacePages = 1 + layers.size;
-        if (options?.includeHighDensityZoom) {
-            layers.forEach(layerItems => {
-                furnacePages += estimateDensityZoomPages(furnace, layerItems);
-            });
-        }
-        if (options?.includeCoordinateList) {
-            furnacePages += Math.ceil(items.length / PDF_PAGE_ROW_LIMIT);
-        }
-        return total + furnacePages;
-    }, 0);
+    return estimatePdfPageCountFromManifest(options?.selectedFurnaceIds || [], options);
 }
 
 
