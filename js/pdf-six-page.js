@@ -27,6 +27,25 @@ const FIELD_SVG_UNITS_PER_MM = 10;
 // side column. Its 140 mm tooling boundary satisfies the 900 x 1200 mm case.
 const STANDARD_DIAGRAM_MM = Object.freeze({ width: 150, height: 150, maxBoundary: 140 });
 const STANDARD_SVG_UNITS_PER_MM = 10;
+const PT_PER_MM = 72 / 25.4;
+const NUMBER_MARKER_SPECS = Object.freeze({
+    standard: Object.freeze({
+        unitsPerMm: STANDARD_SVG_UNITS_PER_MM,
+        minFontPt: 8,
+        minDiameterMm: 4,
+        maxFontUnits: 46,
+        badgeClass: 'pdfv1-standard-number-badge',
+        labelClass: 'pdfv1-standard-item-label'
+    }),
+    field: Object.freeze({
+        unitsPerMm: FIELD_SVG_UNITS_PER_MM,
+        minFontPt: 9,
+        minDiameterMm: 5,
+        maxFontUnits: 52,
+        badgeClass: 'pdfv1-field-number-badge',
+        labelClass: 'pdfv1-field-item-label'
+    })
+});
 
 
 function normalizePdfExportOptionsV154(options = {}) {
@@ -521,6 +540,42 @@ function getStandardLayout(furnace) {
     };
 }
 
+function renderPhysicalNumberMarker(item, layout, box, spec) {
+    const { x, y, w, h } = box;
+    const itemCx = x + w / 2;
+    const itemCy = y + h / 2;
+    const number = escapeHtml(item._pdfNo);
+    const digitCount = String(item._pdfNo ?? '').length;
+    const minFontUnits = spec.minFontPt / PT_PER_MM * spec.unitsPerMm;
+    const labelSize = clamp(Math.min(w, h) * 0.38, minFontUnits, spec.maxFontUnits);
+    const minBadgeRadius = spec.minDiameterMm * spec.unitsPerMm / 2;
+    const textFitRadius = labelSize * Math.max(0.62, digitCount * 0.31 + 0.18);
+    const badgeRadius = Math.max(minBadgeRadius, textFitRadius);
+    const fitPadding = 0.6 * spec.unitsPerMm;
+    const useLeader = w < badgeRadius * 2 + fitPadding || h < badgeRadius * 2 + fitPadding;
+
+    let badgeCx = itemCx;
+    let badgeCy = itemCy;
+    let leader = '';
+    if (useLeader) {
+        const gap = 0.4 * spec.unitsPerMm;
+        const candidates = [
+            { room: x, badgeCx: x - gap - badgeRadius, badgeCy: itemCy, x1: x, y1: itemCy, x2: x - gap, y2: itemCy },
+            { room: layout.svgW - (x + w), badgeCx: x + w + gap + badgeRadius, badgeCy: itemCy, x1: x + w, y1: itemCy, x2: x + w + gap, y2: itemCy },
+            { room: y, badgeCx: itemCx, badgeCy: y - gap - badgeRadius, x1: itemCx, y1: y, x2: itemCx, y2: y - gap },
+            { room: layout.svgH - (y + h), badgeCx: itemCx, badgeCy: y + h + gap + badgeRadius, x1: itemCx, y1: y + h, x2: itemCx, y2: y + h + gap }
+        ];
+        const placement = candidates.reduce((best, candidate) => candidate.room > best.room ? candidate : best);
+        badgeCx = placement.badgeCx;
+        badgeCy = placement.badgeCy;
+        leader = `<line x1="${placement.x1}" y1="${placement.y1}" x2="${placement.x2}" y2="${placement.y2}" class="pdfv1-number-leader" />`;
+    }
+
+    return `${leader}
+        <circle cx="${badgeCx}" cy="${badgeCy}" r="${badgeRadius}" class="${spec.badgeClass}" />
+        <text x="${badgeCx}" y="${badgeCy + labelSize * 0.35}" font-size="${labelSize}" class="pdfv1-item-label ${spec.labelClass}">${number}</text>`;
+}
+
 function renderStandardItemSvg(item, layout) {
     const footprint = getPdfFootprint(item);
     const x = layout.ox + toNumber(item.x) * layout.scale;
@@ -530,16 +585,11 @@ function renderStandardItemSvg(item, layout) {
     const cx = x + w / 2;
     const cy = y + h / 2;
     const fill = escapeHtml(getColor(item.color, '#2563EB'));
-    // 30 SVG units equal 3 mm (8.5 pt); radius 20 equals a 4 mm badge diameter.
-    const labelSize = clamp(Math.min(w, h) * 0.38, 30, 46);
-    const badgeRadius = Math.max(20, labelSize * 0.58);
     const geometry = item.shape === 'cylinder' && !isCylinderSideStanding(item)
         ? `<circle cx="${cx}" cy="${cy}" r="${Math.max(3, Math.min(w, h) / 2)}" fill="${fill}" class="pdfv1-item standard-item" />`
         : `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="${fill}" class="pdfv1-item standard-item" />`;
 
-    return `${geometry}
-        <circle cx="${cx}" cy="${cy}" r="${badgeRadius}" class="pdfv1-standard-number-badge" />
-        <text x="${cx}" y="${cy + labelSize * 0.35}" font-size="${labelSize}" class="pdfv1-item-label pdfv1-standard-item-label">${escapeHtml(item._pdfNo)}</text>`;
+    return `${geometry}${renderPhysicalNumberMarker(item, layout, { x, y, w, h }, NUMBER_MARKER_SPECS.standard)}`;
 }
 
 function renderStandardLayerDiagram(furnace, layerItems, layer, markerId) {
@@ -587,15 +637,11 @@ function renderFieldItemSvg(item, layout) {
     const cx = x + w / 2;
     const cy = y + h / 2;
     const fill = escapeHtml(getColor(item.color, '#2563EB'));
-    const labelSize = clamp(Math.min(w, h) * 0.38, 32, 52);
-    const badgeRadius = Math.max(25, labelSize * 0.58);
     const geometry = item.shape === 'cylinder' && !isCylinderSideStanding(item)
         ? `<circle cx="${cx}" cy="${cy}" r="${Math.max(3, Math.min(w, h) / 2)}" fill="${fill}" class="pdfv1-item field-item" />`
         : `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8" fill="${fill}" class="pdfv1-item field-item" />`;
 
-    return `${geometry}
-        <circle cx="${cx}" cy="${cy}" r="${badgeRadius}" class="pdfv1-field-number-badge" />
-        <text x="${cx}" y="${cy + labelSize * 0.35}" font-size="${labelSize}" class="pdfv1-item-label pdfv1-field-item-label">${escapeHtml(item._pdfNo)}</text>`;
+    return `${geometry}${renderPhysicalNumberMarker(item, layout, { x, y, w, h }, NUMBER_MARKER_SPECS.field)}`;
 }
 
 function renderFieldLayerDiagram(furnace, layerItems, layer, markerId) {
@@ -1017,6 +1063,7 @@ function getPdfV1Css() {
         .pdfv1-standard-axis { stroke: #334155; stroke-width: 4; }
         .pdfv1-standard-axis-label { fill: #334155; font-size: 28px; font-weight: 900; }
         .standard-item { stroke-width: 3; opacity: .96; }
+        .pdfv1-number-leader { fill: none; stroke: #0f172a; stroke-width: 3; stroke-linecap: round; }
         .pdfv1-standard-number-badge { fill: rgba(15,23,42,.82); stroke: #fff; stroke-width: 2.5; }
         .pdfv1-standard-item-label { stroke-width: 1.8; }
         .pdfv1-standard-summary { display: grid; grid-template-columns: minmax(0, 1fr) 50mm; gap: 3mm; align-items: stretch; border-top: 1px solid #cbd5e1; padding-top: 2mm; min-width: 0; }
