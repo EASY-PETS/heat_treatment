@@ -27,11 +27,13 @@ import {
     getMaterialDataFromCard,
     rgbToHex
 } from './ui.js';
+import { estimatePdfPageCountFromManifest } from './pdf-six-page.js';
 
 
-function normalizeLegacyPdfOptionsV154(options = {}) {
-    const globalOptions = (typeof window !== 'undefined' && window.__HT_PDF_EXPORT_OPTIONS__) ? window.__HT_PDF_EXPORT_OPTIONS__ : {};
-    const merged = { ...globalOptions, ...(options || {}) };
+// Deprecated compatibility boundary for exportSingleFurnacePDF only. Legacy
+// aliases are converted once here and never enter the canonical PDF pipeline.
+function normalizeLegacySingleFurnaceOptions(options = {}) {
+    const merged = options || {};
     const includeWorklist = !(
         merged.includeCoordinateList === false ||
         merged.includeCoordinates === false ||
@@ -56,6 +58,14 @@ function normalizeLegacyPdfOptionsV154(options = {}) {
         densityZoom: includeHighDensityZoom,
         regionZoom: includeHighDensityZoom
     };
+}
+
+/**
+ * Estimate pages from the exact manifest consumed by pdf-six-page.js.
+ */
+export function estimateSixPagePdfPages(manifestOrOptions) {
+    if (Array.isArray(manifestOrOptions?.pages)) return manifestOrOptions.pages.length;
+    return estimatePdfPageCountFromManifest(manifestOrOptions?.selectedFurnaceIds || [], manifestOrOptions);
 }
 
 
@@ -749,23 +759,6 @@ export function exportFurnaceJSON(furnaceIndex) {
 export function showPdfSelectModal() {
     if (!globalFurnacesResult || globalFurnacesResult.length === 0) return;
 
-    // V1.5.4：兼容旧 HTML，没有坐标清单复选框时动态补一个。
-    const modal = document.getElementById('pdf-select-overlay');
-    if (modal && !document.getElementById('pdf-opt-coordinates')) {
-        const jsonOpt = document.getElementById('pdf-opt-json');
-        const holder = jsonOpt?.closest('label')?.parentElement || modal.querySelector('.pdf-options') || modal.querySelector('[class*="option"]');
-        if (holder) {
-            const label = document.createElement('label');
-            label.style.cssText = 'display:flex;align-items:center;gap:8px;color:#475569;font-size:13px;margin-top:8px;';
-            label.innerHTML = '<input type="checkbox" id="pdf-opt-coordinates"> PDF 内包含工件坐标清单';
-            holder.appendChild(label);
-            const zoomLabel = document.createElement('label');
-            zoomLabel.style.cssText = 'display:flex;align-items:center;gap:8px;color:#475569;font-size:13px;margin-top:8px;';
-            zoomLabel.innerHTML = '<input type="checkbox" id="pdf-opt-density-zoom"> PDF 内包含高密度区域放大';
-            holder.appendChild(zoomLabel);
-        }
-    }
-
     const list = document.getElementById('pdf-furnace-list');
     list.innerHTML = '';
 
@@ -787,7 +780,7 @@ export function showPdfSelectModal() {
         const div = document.createElement('div');
         div.className = 'pdf-furnace-option' + (idx === currentFurnaceIndex ? ' selected' : '');
         div.innerHTML = `
-            <input type="checkbox" name="pdf-furnace" value="${idx}" ${idx===currentFurnaceIndex?'checked':''}>
+            <input type="checkbox" name="pdf-furnace" value="${f.instanceId}" ${idx===currentFurnaceIndex?'checked':''}>
             <div>
                 <div class="pfo-name">${f.instanceId}</div>
                 <div class="pfo-meta">${f.packedItems.length}${pdfT('件', ' pcs')} · ${f.totalWeight.toFixed(1)}kg · ${pdfT('利用率', 'Utilization ')}${((packedVol/totalVol)*100).toFixed(1)}%</div>
@@ -798,6 +791,7 @@ export function showPdfSelectModal() {
             const cb = div.querySelector('input[type="checkbox"]');
             cb.checked = !cb.checked;
             div.classList.toggle('selected', cb.checked);
+            cb.dispatchEvent(new Event('change', { bubbles: true }));
         });
         list.appendChild(div);
     });
@@ -807,14 +801,14 @@ export function showPdfSelectModal() {
 /**
  * V3.1: 获取用户在 PDF 选择弹窗中选中的所有炉膛索引。
  * 用于支持多炉膛批量导出三页式 PDF。
- * @returns {number[]} 选中的炉膛索引数组
+ * @returns {string[]} 选中的稳定炉次 ID 数组
  */
 export function getSelectedPdfFurnaceIds() {
     const checkboxes = document.querySelectorAll('input[name="pdf-furnace"]:checked');
     const ids = [];
     checkboxes.forEach(cb => {
-        const val = parseInt(cb.value);
-        if (!isNaN(val)) ids.push(val);
+        const id = String(cb.value || '').trim();
+        if (id && !ids.includes(id)) ids.push(id);
     });
     return ids;
 }
@@ -823,7 +817,7 @@ export function getSelectedPdfFurnaceIds() {
  * Export a single furnace's PDF report.
  */
 export function exportSingleFurnacePDF(furnaceIndex, options = {}) {
-    options = normalizeLegacyPdfOptionsV154(options);
+    options = normalizeLegacySingleFurnaceOptions(options);
     const furnace = globalFurnacesResult[furnaceIndex];
     const pdfWrapper = document.getElementById('pdf-hidden-template');
     pdfWrapper.innerHTML = '';

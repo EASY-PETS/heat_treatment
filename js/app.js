@@ -132,8 +132,9 @@ import {
     openJsonImportModal, parseJsonPlan, renderJsonPreview, 
 } from './ui.js';
 import { executePacking } from './furnace-engine.js';
-import { showPdfSelectModal, exportSingleFurnacePDF, getSelectedPdfFurnaceIds } from './pdf-export.js';
-import { generateSixPagePDF } from './pdf-six-page.js';
+import { showPdfSelectModal, getSelectedPdfFurnaceIds, estimateSixPagePdfPages } from './pdf-export.js';
+import { assertPdfJsonManifestConsistency, buildPdfPageManifest, generateSixPagePDF } from './pdf-six-page.js';
+import { normalizePdfExportOptions, applyPdfTemplateDefaults } from './pdf-export-options.js';
 import {
     buildCurrentDigitalTwinRecord,
     downloadJsonFile,
@@ -7470,6 +7471,25 @@ function exportCurrentPlanJson() {
     downloadJsonFile(record, `${title}.json`);
 }
 
+function exportPdfPlanJson(manifest, pdfFilename) {
+    const title = String(pdfFilename || '现场摆料施工单.pdf').replace(/\.pdf$/i, '');
+    const record = buildCurrentDigitalTwinRecord({
+        title,
+        materials: collectMaterialBatchesForRecord(),
+        tooling: collectToolingForRecord()
+    });
+    const selectedIds = new Set(manifest.summary.furnaceIds);
+    record.loadingPlan.furnaces = record.loadingPlan.furnaces.filter(furnace => selectedIds.has(String(furnace.furnaceInstanceId)));
+    record.pdfExport = {
+        options: { ...manifest.options, selectedFurnaceIds: [...manifest.summary.furnaceIds] },
+        summary: { ...manifest.summary, furnaceIds: [...manifest.summary.furnaceIds] },
+        pageCount: manifest.pages.length,
+        pdfFilename
+    };
+    assertPdfJsonManifestConsistency(manifest, record);
+    downloadJsonFile(record, `${title}.json`);
+}
+
 /**
  * 隐藏总览视图 (Master View)，并恢复主场景的可见性。
  * @returns {void}
@@ -11879,9 +11899,59 @@ function ensureLanguageThemeControls() {
 
 // ==================== V0.8.2.1.2 PDF export bulletproof binding ====================
 let pdfExportDelegationBoundV08212 = false;
+let pdfExportOptionsV08212 = null;
+let pdfExportInFlight = false;
+
+const PDF_TEMPLATE_NAMES_V08212 = {
+    'field-large': '现场大图版',
+    standard: '标准施工版',
+    archive: '完整归档版'
+};
+
+function renderPdfExportSummaryV08212(options) {
+    const summary = document.getElementById('pdf-export-summary');
+    if (!summary) return;
+    const estimatedPages = estimateSixPagePdfPages(options);
+    summary.textContent = `已选炉次：${options.selectedFurnaceIds.length} · 模板：${PDF_TEMPLATE_NAMES_V08212[options.template]} · A4 ${options.orientation} · 预计页数：${estimatedPages} · JSON：${options.exportJson ? '导出' : '不导出'}`;
+}
+
+function syncPdfExportControlsV08212(options) {
+    document.querySelectorAll('input[name="pdf-template"]').forEach(radio => {
+        radio.checked = radio.value === options.template;
+    });
+    document.getElementById('pdf-opt-coordinates').checked = options.includeCoordinateList;
+    document.getElementById('pdf-opt-density-zoom').checked = options.includeHighDensityZoom;
+    document.getElementById('pdf-opt-json').checked = options.exportJson;
+    renderPdfExportSummaryV08212(options);
+}
+
+function updatePdfExportOptionsFromControlV08212(control) {
+    if (!pdfExportOptionsV08212) return;
+    const selectedFurnaceIds = getSelectedPdfFurnaceIds();
+
+    if (control.matches('input[name="pdf-template"]')) {
+        pdfExportOptionsV08212 = {
+            ...applyPdfTemplateDefaults(control.value),
+            selectedFurnaceIds
+        };
+        syncPdfExportControlsV08212(pdfExportOptionsV08212);
+        return;
+    }
+
+    pdfExportOptionsV08212 = {
+        ...normalizePdfExportOptions({
+            ...pdfExportOptionsV08212,
+            includeCoordinateList: !!document.getElementById('pdf-opt-coordinates')?.checked,
+            includeHighDensityZoom: !!document.getElementById('pdf-opt-density-zoom')?.checked,
+            exportJson: !!document.getElementById('pdf-opt-json')?.checked
+        }),
+        selectedFurnaceIds
+    };
+    syncPdfExportControlsV08212(pdfExportOptionsV08212);
+}
 
 function ensurePdfExportDomV08212() {
-    let overlay = document.getElementById('pdf-select-overlay');
+    const overlay = document.getElementById('pdf-select-overlay');
     let hiddenTemplate = document.getElementById('pdf-hidden-template');
 
     if (!hiddenTemplate) {
@@ -11891,57 +11961,22 @@ function ensurePdfExportDomV08212() {
         document.body.appendChild(hiddenTemplate);
     }
 
-    if (!overlay) {
-        overlay = document.createElement('div');
-        overlay.id = 'pdf-select-overlay';
-        overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;background:rgba(15,23,42,.56);backdrop-filter:blur(8px);';
-        overlay.innerHTML = `
-            <div id="pdf-select-modal" style="width:min(920px,calc(100vw - 36px));max-height:88vh;overflow:auto;background:#fff;border-radius:22px;padding:24px;box-shadow:0 30px 100px rgba(15,23,42,.32);">
-                <h2 style="margin:0 0 8px;font-size:22px;color:#0f172a;">打印现场摆料施工单</h2>
-                <div style="color:#64748b;font-size:13px;line-height:1.7;margin-bottom:14px;">选择需要导出的炉次，然后生成 PDF。</div>
-                <div id="pdf-unpacked-warning" class="pdf-unpacked-badge" style="display:none;"></div>
-                <div id="pdf-furnace-list" style="display:flex;flex-direction:column;gap:10px;margin:14px 0 18px;"></div>
-                <div class="pdf-options-section" style="margin:12px 0;">
-                    <label style="display:flex;align-items:center;gap:8px;color:#475569;font-size:13px;">
-                        <input type="checkbox" id="pdf-opt-json"> 同时导出 JSON
-                    </label>
-                    <label style="display:flex;align-items:center;gap:8px;color:#475569;font-size:13px;margin-top:8px;">
-                        <input type="checkbox" id="pdf-opt-coordinates"> PDF 内包含工件坐标清单
-                    </label>
-                    <label style="display:flex;align-items:center;gap:8px;color:#475569;font-size:13px;margin-top:8px;">
-                        <input type="checkbox" id="pdf-opt-density-zoom"> PDF 内包含高密度区域放大
-                    </label>
-                </div>
-                <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:18px;">
-                    <button id="btn-pdf-cancel" type="button" style="padding:10px 20px;border:0;border-radius:12px;background:#e2e8f0;color:#334155;font-weight:800;cursor:pointer;">取消</button>
-                    <button id="btn-pdf-confirm" type="button" style="padding:10px 24px;border:0;border-radius:12px;background:#2563eb;color:white;font-weight:800;cursor:pointer;">📄 导出 PDF</button>
-                </div>
-            </div>
-        `;
-        document.body.appendChild(overlay);
-    }
+    if (!overlay) throw new Error('缺少静态 PDF 导出弹窗 #pdf-select-overlay');
 
-    if (!document.getElementById('pdf-furnace-list')) {
-        const modal = overlay.querySelector('#pdf-select-modal') || overlay.firstElementChild || overlay;
-        const list = document.createElement('div');
-        list.id = 'pdf-furnace-list';
-        list.style.cssText = 'display:flex;flex-direction:column;gap:10px;margin:14px 0 18px;';
-        modal.appendChild(list);
-    }
-    if (!document.getElementById('pdf-unpacked-warning')) {
-        const warning = document.createElement('div');
-        warning.id = 'pdf-unpacked-warning';
-        warning.className = 'pdf-unpacked-badge';
-        warning.style.display = 'none';
-        const list = document.getElementById('pdf-furnace-list');
-        list.parentNode.insertBefore(warning, list);
-    }
-    if (!document.getElementById('btn-pdf-cancel') || !document.getElementById('btn-pdf-confirm')) {
-        const modal = overlay.querySelector('#pdf-select-modal') || overlay.firstElementChild || overlay;
-        const actions = document.createElement('div');
-        actions.style.cssText = 'display:flex;gap:12px;justify-content:flex-end;margin-top:18px;';
-        actions.innerHTML = '<button id="btn-pdf-cancel" type="button">取消</button><button id="btn-pdf-confirm" type="button">📄 导出 PDF</button>';
-        modal.appendChild(actions);
+    const requiredIds = [
+        'pdf-select-modal',
+        'pdf-furnace-list',
+        'pdf-unpacked-warning',
+        'pdf-opt-coordinates',
+        'pdf-opt-density-zoom',
+        'pdf-opt-json',
+        'pdf-export-summary',
+        'btn-pdf-cancel',
+        'btn-pdf-confirm'
+    ];
+    const missingIds = requiredIds.filter(id => !document.getElementById(id));
+    if (missingIds.length) {
+        throw new Error(`PDF 导出弹窗缺少静态控件：${missingIds.join(', ')}`);
     }
 
     return overlay;
@@ -11998,13 +12033,11 @@ function openPdfExportModalSafeV08212(event) {
     try {
         ensurePdfExportDomV08212();
         showPdfSelectModal();
-        const confirmBtn = document.getElementById('btn-pdf-confirm');
-        if (confirmBtn) confirmBtn.onclick = confirmPdfExportSafeV08212;
-        const cancelBtn = document.getElementById('btn-pdf-cancel');
-        if (cancelBtn) cancelBtn.onclick = () => {
-            const overlay = document.getElementById('pdf-select-overlay');
-            if (overlay) overlay.style.display = 'none';
+        pdfExportOptionsV08212 = {
+            ...normalizePdfExportOptions({ template: 'standard' }),
+            selectedFurnaceIds: getSelectedPdfFurnaceIds()
         };
+        syncPdfExportControlsV08212(pdfExportOptionsV08212);
     } catch (err) {
         console.error('[PDF] 打开导出弹窗失败:', err);
         alert('PDF 导出弹窗打开失败：' + (err?.message || err));
@@ -12018,43 +12051,50 @@ async function confirmPdfExportSafeV08212(event) {
         if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
     }
 
-    const selectedIds = getSelectedPdfFurnaceIds();
-    if (!selectedIds.length) {
+    if (pdfExportInFlight) return;
+
+    const selectedTemplate = document.querySelector('input[name="pdf-template"]:checked')?.value;
+    const normalizedOptions = normalizePdfExportOptions({
+        template: selectedTemplate,
+        includeCoordinateList: !!document.getElementById('pdf-opt-coordinates')?.checked,
+        includeHighDensityZoom: !!document.getElementById('pdf-opt-density-zoom')?.checked,
+        exportJson: !!document.getElementById('pdf-opt-json')?.checked
+    });
+    const options = { ...normalizedOptions, selectedFurnaceIds: getSelectedPdfFurnaceIds() };
+    if (!options.selectedFurnaceIds.length) {
         alert('请至少选择一个炉膛方案');
         return;
     }
 
     const btn = document.getElementById('btn-pdf-confirm');
     const oldText = btn ? btn.textContent : '';
-    const shouldExportJson = !!document.getElementById('pdf-opt-json')?.checked;
-    const includeCoordinateList = !!document.getElementById('pdf-opt-coordinates')?.checked;
-    const includeHighDensityZoom = !!document.getElementById('pdf-opt-density-zoom')?.checked;
-    window.__HT_PDF_EXPORT_OPTIONS__ = {
-        ...(window.__HT_PDF_EXPORT_OPTIONS__ || {}),
-        includeCoordinateList,
-        includeCoordinates: includeCoordinateList,
-        coordinateList: includeCoordinateList,
-        includeHighDensityZoom,
-        highDensityZoom: includeHighDensityZoom,
-        densityZoom: includeHighDensityZoom,
-        regionZoom: includeHighDensityZoom
-    };
     const overlay = document.getElementById('pdf-select-overlay');
 
     try {
+        pdfExportInFlight = true;
         if (btn) {
             btn.disabled = true;
             btn.textContent = '正在生成...';
         }
         if (overlay) overlay.style.display = 'none';
-        showPdfProgressV08212(`正在导出 ${selectedIds.length} 个炉次，请不要关闭页面。`);
-        await generateSixPagePDF(selectedIds, window.__HT_PDF_EXPORT_OPTIONS__ || {});
-        if (shouldExportJson) exportCurrentPlanJson();
+        const manifest = buildPdfPageManifest(options.selectedFurnaceIds, options);
+        const estimatedPages = estimateSixPagePdfPages(manifest);
+        showPdfProgressV08212(`正在导出 ${options.selectedFurnaceIds.length} 个炉次，预计 ${estimatedPages} 页，请不要关闭页面。`);
+        const pdfResult = await generateSixPagePDF(manifest);
+        if (options.exportJson === true) {
+            try {
+                exportPdfPlanJson(manifest, pdfResult.filename);
+            } catch (jsonError) {
+                throw new Error(`PDF 已导出，但 JSON 导出失败：${jsonError?.message || jsonError}`);
+            }
+        }
     } catch (err) {
         console.error('[PDF] 导出失败:', err);
-        alert('PDF 导出失败：' + (err?.message || err));
+        alert(err?.message || String(err));
     } finally {
+        pdfExportInFlight = false;
         hidePdfProgressV08212();
+        document.getElementById('pdf-v1-render-host')?.remove();
         if (btn) {
             btn.disabled = false;
             btn.textContent = oldText || '📄 导出 PDF';
@@ -12088,6 +12128,11 @@ function bindPdfExportDelegationV08212() {
             if (overlay) overlay.style.display = 'none';
         }
     }, true);
+
+    document.addEventListener('change', (event) => {
+        const control = event.target.closest?.('input[name="pdf-template"], input[name="pdf-furnace"], #pdf-opt-coordinates, #pdf-opt-density-zoom, #pdf-opt-json');
+        if (control) updatePdfExportOptionsFromControlV08212(control);
+    });
 }
 
 
@@ -12176,8 +12221,6 @@ function init() {
     if (processSceneThemeSelect) processSceneThemeSelect.addEventListener('change', applyProcessSceneThemeChange);
     const thermalProgressRange = document.getElementById('thermal-progress-range');
     if (thermalProgressRange) thermalProgressRange.addEventListener('input', (event) => scrubCurrentProcessAnimation(parseInt(event.target.value, 10) || 0));
-    const btnExportPdf = document.getElementById("btn-export-pdf");
-    if (btnExportPdf) btnExportPdf.onclick = openPdfExportModalSafeV08212;
     // JSON 导出并入 PDF 导出弹窗，顶部不再单独提供入口
     // const btnExportJson = document.getElementById('btn-export-json');
     // if (btnExportJson) {
@@ -12399,8 +12442,6 @@ function init() {
         if (e.target === document.getElementById("pdf-select-overlay"))
             document.getElementById("pdf-select-overlay")?.style && (document.getElementById("pdf-select-overlay").style.display = "none");
     });
-    const btnPdfConfirm = document.getElementById("btn-pdf-confirm");
-    if (btnPdfConfirm) btnPdfConfirm.onclick = confirmPdfExportSafeV08212;
     const btnJiParse = document.getElementById("btn-ji-parse");
     if (btnJiParse) btnJiParse.addEventListener("click", () => {
         const jsonStr = document.getElementById("ji-json-textarea").value.trim();
