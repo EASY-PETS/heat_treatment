@@ -19,7 +19,9 @@ const SVG_W = 1000;
 const SVG_H = 650;
 const DRAW_PAD = 58;
 const A4_LANDSCAPE_MM = Object.freeze({ width: 297, height: 210 });
-const FIELD_DIAGRAM_MM = Object.freeze({ width: 170, height: 160, maxBoundary: 150 });
+// field-large uses a square 160 mm stage. The tooling boundary's longer side is
+// fixed at 150 mm, leaving 5 mm on each side for dimensions and direction marks.
+const FIELD_DIAGRAM_MM = Object.freeze({ width: 160, height: 160, maxBoundary: 150 });
 const FIELD_SVG_UNITS_PER_MM = 10;
 
 
@@ -659,6 +661,9 @@ function buildFieldLayerPage(page) {
     const groups = groupItems(layerItems);
     const layerWeight = layerItems.reduce((sum, item) => sum + toNumber(item.weight), 0);
     const density = getLayerDensityForZoomV156(furnace, layerItems);
+    const groupSummary = groups.slice(0, 4).map(group => `${group.name} × ${group.count}`).join('；');
+    const remainingGroupCount = Math.max(0, groups.length - 4);
+    const groupSummaryText = `${groupSummary || '-'}${remainingGroupCount ? `；另 ${remainingGroupCount} 类` : ''}`;
     const warnings = [];
     if (density >= 18 || layerItems.length >= 36) warnings.push('高密度：按编号与间距逐件复核');
     if (Array.isArray(globalUnpackedItems) && globalUnpackedItems.length) warnings.push(`方案有 ${globalUnpackedItems.length} 件未装入`);
@@ -668,7 +673,7 @@ function buildFieldLayerPage(page) {
             <div class="pdfv1-field-header"><div><strong>${escapeHtml(getFurnaceName(furnace, index))}</strong><span>${escapeHtml(getLayerLabel(layer))} · ${escapeHtml(getFurnaceTypeLabel(furnace))}</span></div><div>炉次 ${furnaceOrder + 1} / 层 ${layer}</div></div>
             <div class="pdfv1-field-diagram-stage">${renderFieldLayerDiagram(furnace, layerItems, layer, `${furnaceOrder}-${layer}`)}</div>
             <div class="pdfv1-field-summary">
-                <div class="pdfv1-field-facts"><span><b>炉次/层号</b>${furnaceOrder + 1} / ${layer}</span><span><b>件数</b>${layerItems.length} 件</span><span><b>重量</b>${formatWeight(layerWeight)}</span><span><b>工件类别</b>${groups.length} 类</span><span class="warning"><b>关键警告</b>${escapeHtml(warnings.join('；'))}</span></div>
+                <div class="pdfv1-field-facts"><span><b>炉次/层号</b>${furnaceOrder + 1} / ${layer}</span><span><b>件数</b>${layerItems.length} 件</span><span><b>重量</b>${formatWeight(layerWeight)}</span><span class="categories"><b>类别/数量（共 ${groups.length} 类）</b>${escapeHtml(groupSummaryText)}</span><span class="warning"><b>关键警告</b>${escapeHtml(warnings.join('；'))}</span></div>
                 <div class="pdfv1-field-signatures"><span>操作员：____________</span><span>复核：____________</span></div>
             </div>
         </section>`;
@@ -906,25 +911,26 @@ function getPdfV1Css() {
         .pdfv1-cover-furnace-list strong, .pdfv1-cover-furnace-list span { display: block; }
         .pdfv1-cover-furnace-list span { margin-top: 1mm; color: #64748b; font-size: 8.5pt; }
         .pdfv1-cover-tooling { margin-top: 4mm; color: #334155; font-size: 9pt; font-weight: 700; }
-        .field-large-page { width: 297mm; min-height: 210mm; height: 210mm; padding: 5mm 8mm; display: grid; grid-template-rows: 15mm 160mm 25mm; }
+        .field-large-page { width: 297mm; min-height: 210mm; height: 210mm; padding: 5mm 8mm; display: grid; grid-template-rows: 12mm 160mm 28mm; }
         .pdfv1-field-header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #93c5fd; font-size: 11pt; }
         .pdfv1-field-header strong, .pdfv1-field-header span { display: block; }
-        .pdfv1-field-header strong { font-size: 15pt; }
-        .pdfv1-field-header span { margin-top: 1mm; color: #475569; font-size: 8.5pt; }
+        .pdfv1-field-header strong { font-size: 14pt; line-height: 1; }
+        .pdfv1-field-header span { margin-top: .6mm; color: #475569; font-size: 8pt; }
         .pdfv1-field-diagram-stage { display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; }
-        .pdfv1-field-layout-svg { width: 170mm; height: 160mm; max-width: 170mm; max-height: 160mm; display: block; overflow: visible; }
+        .pdfv1-field-layout-svg { width: 160mm; height: 160mm; max-width: 160mm; max-height: 160mm; display: block; overflow: visible; }
         .pdfv1-field-svg-note { font-size: 28px; font-weight: 800; fill: #475569; }
         .pdfv1-field-axis { stroke: #334155; stroke-width: 5; }
         .pdfv1-field-axis-label { fill: #334155; font-size: 30px; font-weight: 900; }
         .field-item { stroke-width: 4; opacity: .96; }
         .pdfv1-field-number-badge { fill: rgba(15,23,42,.78); stroke: #fff; stroke-width: 3; }
         .pdfv1-field-item-label { stroke-width: 2; }
-        .pdfv1-field-summary { display: grid; grid-template-columns: 1fr 62mm; gap: 4mm; align-items: stretch; border-top: 1px solid #cbd5e1; padding-top: 2mm; }
-        .pdfv1-field-facts { display: grid; grid-template-columns: 25mm 20mm 30mm 25mm 1fr; gap: 2mm; }
-        .pdfv1-field-facts span { padding: 1.5mm 2mm; border-radius: 2mm; background: #f8fafc; font-size: 8.5pt; font-weight: 800; }
+        .pdfv1-field-summary { display: grid; grid-template-columns: minmax(0, 1fr) 55mm; gap: 3mm; align-items: stretch; border-top: 1px solid #cbd5e1; padding-top: 2mm; }
+        .pdfv1-field-facts { display: grid; grid-template-columns: 22mm 18mm 27mm 55mm minmax(0, 1fr); gap: 2mm; min-width: 0; }
+        .pdfv1-field-facts span { min-width: 0; padding: 1.5mm 2mm; border-radius: 2mm; background: #f8fafc; font-size: 8pt; font-weight: 800; line-height: 1.25; }
         .pdfv1-field-facts b { display: block; margin-bottom: .7mm; color: #64748b; font-size: 7pt; }
+        .pdfv1-field-facts .categories { overflow: hidden; }
         .pdfv1-field-facts .warning { background: #fff7ed; color: #9a3412; }
-        .pdfv1-field-signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 2mm; align-items: center; font-size: 9pt; }
+        .pdfv1-field-signatures { display: grid; grid-template-rows: 1fr 1fr; align-items: center; padding-left: 2mm; border-left: 1px dashed #94a3b8; font-size: 9pt; }
     `;
 }
 
