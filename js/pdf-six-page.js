@@ -985,8 +985,8 @@ function buildPdfDocument(manifest) {
 
 function getPdfV1Css() {
     return `
-        .pdfv1-root { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", Arial, sans-serif; color: #0f172a; background: #fff; }
-        .pdfv1-page { width: 297mm; min-height: 210mm; box-sizing: border-box; padding: 10mm; background: #fff; page-break-after: always; position: relative; overflow: hidden; }
+        .pdfv1-root { width: 297mm; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", Arial, sans-serif; color: #0f172a; background: #fff; }
+        .pdfv1-page { width: 297mm; min-width: 297mm; max-width: 297mm; height: 210mm; min-height: 210mm; max-height: 210mm; margin: 0; box-sizing: border-box; padding: 10mm; background: #fff; page-break-after: always; break-after: page; position: relative; overflow: hidden; }
         .pdfv1-page:last-child { page-break-after: auto; }
         .pdfv1-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1d4ed8; padding-bottom: 5mm; margin-bottom: 5mm; }
         .pdfv1-doc-kicker { font-size: 8.5pt; color: #64748b; font-weight: 700; letter-spacing: .4px; }
@@ -1051,7 +1051,7 @@ function getPdfV1Css() {
         .pdfv1-cover-furnace-list strong, .pdfv1-cover-furnace-list span { display: block; }
         .pdfv1-cover-furnace-list span { margin-top: 1mm; color: #64748b; font-size: 8.5pt; }
         .pdfv1-cover-tooling { margin-top: 4mm; color: #334155; font-size: 9pt; font-weight: 700; }
-        .standard-layer-page { width: 297mm; min-height: 210mm; height: 210mm; padding: 6mm 8mm; display: grid; grid-template-rows: 13mm 150mm 35mm; overflow: visible; }
+        .standard-layer-page { padding: 6mm 8mm; display: grid; grid-template-rows: 13mm 150mm 35mm; }
         .pdfv1-standard-header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #93c5fd; min-width: 0; }
         .pdfv1-standard-header strong, .pdfv1-standard-header span { display: block; }
         .pdfv1-standard-header strong { font-size: 14pt; line-height: 1; }
@@ -1072,7 +1072,7 @@ function getPdfV1Css() {
         .pdfv1-standard-facts b { display: block; margin-bottom: .8mm; color: #64748b; font-size: 7.5pt; }
         .pdfv1-standard-facts .warning { background: #fff7ed; color: #9a3412; }
         .pdfv1-standard-signatures { display: grid; grid-template-rows: 1fr 1fr; align-items: center; padding-left: 3mm; border-left: 1px dashed #94a3b8; font-size: 9pt; }
-        .field-large-page { width: 297mm; min-height: 210mm; height: 210mm; padding: 5mm 8mm; display: grid; grid-template-rows: 12mm 160mm 28mm; }
+        .field-large-page { padding: 5mm 8mm; display: grid; grid-template-rows: 12mm 160mm 28mm; }
         .pdfv1-field-header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #93c5fd; font-size: 11pt; }
         .pdfv1-field-header strong, .pdfv1-field-header span { display: block; }
         .pdfv1-field-header strong { font-size: 14pt; line-height: 1; }
@@ -1110,7 +1110,7 @@ function mountPdfHtml(html) {
     host.style.left = '0';
     host.style.top = '0';
     host.style.width = '297mm';
-    host.style.minHeight = '210mm';
+    host.style.height = 'auto';
     host.style.background = '#ffffff';
     host.style.zIndex = '1';
     host.style.pointerEvents = 'none';
@@ -1148,11 +1148,17 @@ async function waitForPdfRenderHostReady(host) {
         throw new Error(`PDF 页面尺寸异常：${Math.round(width)}×${Math.round(height)}`);
     }
 
+    const expectedAspect = A4_LANDSCAPE_MM.width / A4_LANDSCAPE_MM.height;
     pages.forEach((page, idx) => {
         const rect = page.getBoundingClientRect();
         if (!rect.width || !rect.height) {
             throw new Error(`PDF 第 ${idx + 1} 页尺寸异常：${Math.round(rect.width)}×${Math.round(rect.height)}`);
         }
+        const actualAspect = rect.width / rect.height;
+        if (Math.abs(actualAspect - expectedAspect) > 0.002) {
+            throw new Error(`PDF 第 ${idx + 1} 页不是 A4 横版比例：${Math.round(rect.width)}×${Math.round(rect.height)}`);
+        }
+        page.dataset.pdfCaptureIndex = String(idx);
     });
 
     return { pageCount: pages.length, width, height };
@@ -1224,21 +1230,45 @@ async function renderPagesToPdf(host, filename) {
 
     for (let i = 0; i < pages.length; i++) {
         const page = pages[i];
-        page.scrollIntoView({ block: 'start', inline: 'nearest' });
-        await new Promise(resolve => requestAnimationFrame(() => resolve()));
         await new Promise(resolve => requestAnimationFrame(() => resolve()));
 
         const rect = page.getBoundingClientRect();
+        const captureWidth = Math.round(rect.width);
+        const captureHeight = Math.round(rect.height);
         const canvas = await html2canvas(page, {
             scale: 2,
             useCORS: true,
             allowTaint: true,
             backgroundColor: '#ffffff',
             logging: false,
-            windowWidth: Math.max(1400, Math.ceil(rect.width || host.getBoundingClientRect().width || 1400)),
-            windowHeight: Math.max(900, Math.ceil(rect.height || 900)),
+            width: captureWidth,
+            height: captureHeight,
+            windowWidth: captureWidth,
+            windowHeight: captureHeight,
             scrollX: 0,
-            scrollY: -window.scrollY
+            scrollY: 0,
+            onclone: clonedDocument => {
+                const clonedHost = clonedDocument.getElementById('pdf-v1-render-host');
+                if (!clonedHost) return;
+                clonedHost.style.position = 'absolute';
+                clonedHost.style.left = '0';
+                clonedHost.style.top = '0';
+                clonedHost.style.width = `${captureWidth}px`;
+                clonedHost.style.height = `${captureHeight}px`;
+                clonedHost.style.overflow = 'hidden';
+
+                clonedHost.querySelectorAll('.pdfv1-page').forEach(clonedPage => {
+                    if (clonedPage.dataset.pdfCaptureIndex !== String(i)) {
+                        clonedPage.style.display = 'none';
+                        return;
+                    }
+                    clonedPage.style.position = 'absolute';
+                    clonedPage.style.left = '0';
+                    clonedPage.style.top = '0';
+                    clonedPage.style.margin = '0';
+                    clonedPage.style.transform = 'none';
+                });
+            }
         });
 
         console.info('[PDF V1] page canvas:', i + 1, canvas.width, canvas.height);
