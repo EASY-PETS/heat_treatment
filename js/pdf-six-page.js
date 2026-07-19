@@ -23,6 +23,10 @@ const A4_LANDSCAPE_MM = Object.freeze({ width: 297, height: 210 });
 // fixed at 150 mm, leaving 5 mm on each side for dimensions and direction marks.
 const FIELD_DIAGRAM_MM = Object.freeze({ width: 160, height: 160, maxBoundary: 150 });
 const FIELD_SVG_UNITS_PER_MM = 10;
+// standard keeps the construction diagram large without competing with a fixed
+// side column. Its 140 mm tooling boundary satisfies the 900 x 1200 mm case.
+const STANDARD_DIAGRAM_MM = Object.freeze({ width: 150, height: 150, maxBoundary: 140 });
+const STANDARD_SVG_UNITS_PER_MM = 10;
 
 
 function normalizePdfExportOptionsV154(options = {}) {
@@ -502,6 +506,62 @@ function renderLayerDiagram(furnace, layerItems, layer) {
     `;
 }
 
+function getStandardLayout(furnace) {
+    const fw = Math.max(1, toNumber(furnace?.w, 600));
+    const fd = Math.max(1, toNumber(furnace?.d, 600));
+    const svgW = STANDARD_DIAGRAM_MM.width * STANDARD_SVG_UNITS_PER_MM;
+    const svgH = STANDARD_DIAGRAM_MM.height * STANDARD_SVG_UNITS_PER_MM;
+    const scale = STANDARD_DIAGRAM_MM.maxBoundary * STANDARD_SVG_UNITS_PER_MM / Math.max(fw, fd);
+    const drawW = fw * scale;
+    const drawH = fd * scale;
+    return {
+        fw, fd, scale, drawW, drawH, svgW, svgH,
+        ox: (svgW - drawW) / 2,
+        oy: (svgH - drawH) / 2
+    };
+}
+
+function renderStandardItemSvg(item, layout) {
+    const footprint = getPdfFootprint(item);
+    const x = layout.ox + toNumber(item.x) * layout.scale;
+    const y = layout.oy + toNumber(item.z) * layout.scale;
+    const w = Math.max(2, footprint.w * layout.scale);
+    const h = Math.max(2, footprint.d * layout.scale);
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    const fill = escapeHtml(getColor(item.color, '#2563EB'));
+    // 30 SVG units equal 3 mm (8.5 pt); radius 20 equals a 4 mm badge diameter.
+    const labelSize = clamp(Math.min(w, h) * 0.38, 30, 46);
+    const badgeRadius = Math.max(20, labelSize * 0.58);
+    const geometry = item.shape === 'cylinder' && !isCylinderSideStanding(item)
+        ? `<circle cx="${cx}" cy="${cy}" r="${Math.max(3, Math.min(w, h) / 2)}" fill="${fill}" class="pdfv1-item standard-item" />`
+        : `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="${fill}" class="pdfv1-item standard-item" />`;
+
+    return `${geometry}
+        <circle cx="${cx}" cy="${cy}" r="${badgeRadius}" class="pdfv1-standard-number-badge" />
+        <text x="${cx}" y="${cy + labelSize * 0.35}" font-size="${labelSize}" class="pdfv1-item-label pdfv1-standard-item-label">${escapeHtml(item._pdfNo)}</text>`;
+}
+
+function renderStandardLayerDiagram(furnace, layerItems, layer, markerId) {
+    const layout = getStandardLayout(furnace);
+    const boundary = renderBoundarySvg(furnace, layout);
+    const itemsSvg = layerItems.map(item => renderStandardItemSvg(item, layout)).join('');
+    const axisLength = Math.min(layout.drawW, layout.drawH, 150);
+    return `
+        <svg class="pdfv1-standard-layout-svg" width="${STANDARD_DIAGRAM_MM.width}mm" height="${STANDARD_DIAGRAM_MM.height}mm"
+             viewBox="0 0 ${layout.svgW} ${layout.svgH}" preserveAspectRatio="xMidYMid meet"
+             role="img" aria-label="${escapeHtml(getLayerLabel(layer))}标准施工俯视摆放图">
+            <defs><marker id="standard-arrow-${markerId}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#334155" /></marker></defs>
+            <rect x="0" y="0" width="${layout.svgW}" height="${layout.svgH}" fill="#ffffff" />
+            ${boundary}${itemsSvg}
+            <text x="${layout.ox}" y="${Math.max(28, layout.oy - 18)}" class="pdfv1-standard-svg-note">X ${formatNumber(layout.fw)} mm × Z ${formatNumber(layout.fd)} mm · 安全间距 ${escapeHtml(placementRules?.minSpacing ?? 5)} mm</text>
+            <line x1="${layout.ox}" y1="${layout.oy + layout.drawH + 26}" x2="${layout.ox + axisLength}" y2="${layout.oy + layout.drawH + 26}" class="pdfv1-standard-axis" marker-end="url(#standard-arrow-${markerId})" />
+            <text x="${layout.ox + axisLength + 18}" y="${layout.oy + layout.drawH + 34}" class="pdfv1-standard-axis-label">X+</text>
+            <line x1="${layout.ox - 26}" y1="${layout.oy}" x2="${layout.ox - 26}" y2="${layout.oy + axisLength}" class="pdfv1-standard-axis" marker-end="url(#standard-arrow-${markerId})" />
+            <text x="${layout.ox - 42}" y="${layout.oy + axisLength + 26}" class="pdfv1-standard-axis-label">Z+</text>
+        </svg>`;
+}
+
 function getFieldLayout(furnace) {
     const fw = Math.max(1, toNumber(furnace?.w, 600));
     const fd = Math.max(1, toNumber(furnace?.d, 600));
@@ -653,6 +713,36 @@ function buildLayerPage(furnace, index, numberedItems, layer) {
             </div>
         </section>
     `;
+}
+
+function buildStandardLayerPage(page) {
+    const { furnace, index, layerItems, layer, furnaceOrder } = page;
+    const groups = groupItems(layerItems);
+    const layerWeight = layerItems.reduce((sum, item) => sum + toNumber(item.weight), 0);
+    const groupSummary = groups.slice(0, 3).map(group => `${String(group.name).slice(0, 16)} × ${group.count}`).join('；');
+    const remainingGroupCount = Math.max(0, groups.length - 3);
+    const summaryText = `${groupSummary || '-'}${remainingGroupCount ? `；另 ${remainingGroupCount} 类` : ''}`;
+    const unpackedWarning = Array.isArray(globalUnpackedItems) && globalUnpackedItems.length
+        ? `注意：方案另有 ${globalUnpackedItems.length} 件未装入`
+        : '摆放后复核边界、间距与编号';
+
+    return `
+        <section class="pdfv1-page standard-layer-page">
+            <div class="pdfv1-standard-header">
+                <div><strong>${escapeHtml(getFurnaceName(furnace, index))}</strong><span>${escapeHtml(getLayerLabel(layer))} · ${escapeHtml(getFurnaceTypeLabel(furnace))}</span></div>
+                <div class="pdfv1-standard-header-meta">炉次 ${furnaceOrder + 1} / 层 ${layer}</div>
+            </div>
+            <div class="pdfv1-standard-diagram-stage">${renderStandardLayerDiagram(furnace, layerItems, layer, `${furnaceOrder}-${layer}`)}</div>
+            <div class="pdfv1-standard-summary">
+                <div class="pdfv1-standard-facts">
+                    <span><b>本层摘要</b>${layerItems.length} 件 · ${formatWeight(layerWeight)} · ${groups.length} 类</span>
+                    <span class="categories"><b>工件类别 / 数量</b>${escapeHtml(summaryText)}</span>
+                    <span><b>工作坐标基准</b>图示 X+ / Z+；工装左前（现场约定基准角）为 X0 / Z0</span>
+                    <span class="warning"><b>施工复核</b>${escapeHtml(unpackedWarning)}</span>
+                </div>
+                <div class="pdfv1-standard-signatures"><span>操作员：____________</span><span>复核：____________</span></div>
+            </div>
+        </section>`;
 }
 
 function buildFieldLayerPage(page) {
@@ -821,7 +911,11 @@ export function estimatePdfPageCountFromManifest(selectedIds = [], options = {})
 
 function renderManifestPage(manifest, page) {
     if (page.type === 'plan-cover') return buildPlanCoverPage(manifest);
-    if (page.type === 'layer') return manifest.options.template === 'field-large' ? buildFieldLayerPage(page) : buildLayerPage(page.furnace, page.index, page.numberedItems, page.layer);
+    if (page.type === 'layer') {
+        if (manifest.options.template === 'field-large') return buildFieldLayerPage(page);
+        if (manifest.options.template === 'standard') return buildStandardLayerPage(page);
+        return buildLayerPage(page.furnace, page.index, page.numberedItems, page.layer);
+    }
     if (page.type === 'density-zoom') {
         const density = getLayerDensityForZoomV156(page.furnace, page.layerItems);
         return `<section class="pdfv1-page layer-page zoom-page">${buildHeader('高密度区域放大', `${getFurnaceName(page.furnace, page.index)} · ${getLayerLabel(page.layer)} · ${page.regionName} · ${page.regionItems.length} 件`, `放大 ${page.regionIndex + 1}/${page.regionCount}`)}<div class="pdfv1-layer-layout"><div class="pdfv1-diagram-panel zoom-panel">${renderZoomRegionDiagramV156(page.furnace, page.regionItems, page.regionName, page.layer)}</div><div class="pdfv1-layer-side"><div class="pdfv1-panel warning-panel"><div class="pdfv1-panel-title">局部放大说明</div><ul class="pdfv1-bullets"><li>本页仅放大高密度区域，完整位置以本层俯视图为准。</li><li>本层 ${page.layerItems.length} 件，估算平面密度 ${formatPercent(density)}。</li></ul></div><div class="pdfv1-panel grow-panel"><div class="pdfv1-panel-title">本区工件</div><table class="pdfv1-table layer-table"><thead><tr><th>编号</th><th>工件</th><th>尺寸</th><th>坐标</th></tr></thead><tbody>${page.regionItems.slice(0, 32).map(item => `<tr><td class="center">${item._pdfNo}</td><td>${escapeHtml(item.name || '-')}</td><td>${escapeHtml(getItemSizeLabel(item))}</td><td>X ${formatNumber(item.x)} / Z ${formatNumber(item.z)}</td></tr>`).join('')}</tbody></table></div></div></div></section>`;
@@ -911,6 +1005,26 @@ function getPdfV1Css() {
         .pdfv1-cover-furnace-list strong, .pdfv1-cover-furnace-list span { display: block; }
         .pdfv1-cover-furnace-list span { margin-top: 1mm; color: #64748b; font-size: 8.5pt; }
         .pdfv1-cover-tooling { margin-top: 4mm; color: #334155; font-size: 9pt; font-weight: 700; }
+        .standard-layer-page { width: 297mm; min-height: 210mm; height: 210mm; padding: 6mm 8mm; display: grid; grid-template-rows: 13mm 150mm 35mm; overflow: visible; }
+        .pdfv1-standard-header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #93c5fd; min-width: 0; }
+        .pdfv1-standard-header strong, .pdfv1-standard-header span { display: block; }
+        .pdfv1-standard-header strong { font-size: 14pt; line-height: 1; }
+        .pdfv1-standard-header span { margin-top: .8mm; color: #475569; font-size: 8.5pt; }
+        .pdfv1-standard-header-meta { padding: 1.5mm 3mm; border: 1px solid #bfdbfe; border-radius: 999px; color: #1d4ed8; font-size: 9pt; font-weight: 900; white-space: nowrap; }
+        .pdfv1-standard-diagram-stage { display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; }
+        .pdfv1-standard-layout-svg { width: 150mm; height: 150mm; max-width: 150mm; max-height: 150mm; display: block; overflow: visible; }
+        .pdfv1-standard-svg-note { font-size: 26px; font-weight: 800; fill: #475569; }
+        .pdfv1-standard-axis { stroke: #334155; stroke-width: 4; }
+        .pdfv1-standard-axis-label { fill: #334155; font-size: 28px; font-weight: 900; }
+        .standard-item { stroke-width: 3; opacity: .96; }
+        .pdfv1-standard-number-badge { fill: rgba(15,23,42,.82); stroke: #fff; stroke-width: 2.5; }
+        .pdfv1-standard-item-label { stroke-width: 1.8; }
+        .pdfv1-standard-summary { display: grid; grid-template-columns: minmax(0, 1fr) 50mm; gap: 3mm; align-items: stretch; border-top: 1px solid #cbd5e1; padding-top: 2mm; min-width: 0; }
+        .pdfv1-standard-facts { display: grid; grid-template-columns: 48mm minmax(0, .8fr) minmax(0, 1.25fr) minmax(0, .75fr); gap: 2mm; min-width: 0; }
+        .pdfv1-standard-facts span { min-width: 0; padding: 2mm; border-radius: 2mm; background: #f8fafc; font-size: 8pt; font-weight: 800; line-height: 1.35; overflow-wrap: anywhere; }
+        .pdfv1-standard-facts b { display: block; margin-bottom: .8mm; color: #64748b; font-size: 7.5pt; }
+        .pdfv1-standard-facts .warning { background: #fff7ed; color: #9a3412; }
+        .pdfv1-standard-signatures { display: grid; grid-template-rows: 1fr 1fr; align-items: center; padding-left: 3mm; border-left: 1px dashed #94a3b8; font-size: 9pt; }
         .field-large-page { width: 297mm; min-height: 210mm; height: 210mm; padding: 5mm 8mm; display: grid; grid-template-rows: 12mm 160mm 28mm; }
         .pdfv1-field-header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #93c5fd; font-size: 11pt; }
         .pdfv1-field-header strong, .pdfv1-field-header span { display: block; }
