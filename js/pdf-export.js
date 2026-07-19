@@ -30,7 +30,9 @@ import {
 import { estimatePdfPageCountFromManifest } from './pdf-six-page.js';
 
 
-function normalizeLegacyPdfOptionsV154(options = {}) {
+// Deprecated compatibility boundary for exportSingleFurnacePDF only. Legacy
+// aliases are converted once here and never enter the canonical PDF pipeline.
+function normalizeLegacySingleFurnaceOptions(options = {}) {
     const merged = options || {};
     const includeWorklist = !(
         merged.includeCoordinateList === false ||
@@ -61,8 +63,9 @@ function normalizeLegacyPdfOptionsV154(options = {}) {
 /**
  * Estimate pages from the exact manifest consumed by pdf-six-page.js.
  */
-export function estimateSixPagePdfPages(options) {
-    return estimatePdfPageCountFromManifest(options?.selectedFurnaceIds || [], options);
+export function estimateSixPagePdfPages(manifestOrOptions) {
+    if (Array.isArray(manifestOrOptions?.pages)) return manifestOrOptions.pages.length;
+    return estimatePdfPageCountFromManifest(manifestOrOptions?.selectedFurnaceIds || [], manifestOrOptions);
 }
 
 
@@ -777,7 +780,7 @@ export function showPdfSelectModal() {
         const div = document.createElement('div');
         div.className = 'pdf-furnace-option' + (idx === currentFurnaceIndex ? ' selected' : '');
         div.innerHTML = `
-            <input type="checkbox" name="pdf-furnace" value="${idx}" ${idx===currentFurnaceIndex?'checked':''}>
+            <input type="checkbox" name="pdf-furnace" value="${f.instanceId}" ${idx===currentFurnaceIndex?'checked':''}>
             <div>
                 <div class="pfo-name">${f.instanceId}</div>
                 <div class="pfo-meta">${f.packedItems.length}${pdfT('件', ' pcs')} · ${f.totalWeight.toFixed(1)}kg · ${pdfT('利用率', 'Utilization ')}${((packedVol/totalVol)*100).toFixed(1)}%</div>
@@ -798,14 +801,14 @@ export function showPdfSelectModal() {
 /**
  * V3.1: 获取用户在 PDF 选择弹窗中选中的所有炉膛索引。
  * 用于支持多炉膛批量导出三页式 PDF。
- * @returns {number[]} 选中的炉膛索引数组
+ * @returns {string[]} 选中的稳定炉次 ID 数组
  */
 export function getSelectedPdfFurnaceIds() {
     const checkboxes = document.querySelectorAll('input[name="pdf-furnace"]:checked');
     const ids = [];
     checkboxes.forEach(cb => {
-        const val = parseInt(cb.value);
-        if (!isNaN(val)) ids.push(val);
+        const id = String(cb.value || '').trim();
+        if (id && !ids.includes(id)) ids.push(id);
     });
     return ids;
 }
@@ -814,7 +817,7 @@ export function getSelectedPdfFurnaceIds() {
  * Export a single furnace's PDF report.
  */
 export function exportSingleFurnacePDF(furnaceIndex, options = {}) {
-    options = normalizeLegacyPdfOptionsV154(options);
+    options = normalizeLegacySingleFurnaceOptions(options);
     const furnace = globalFurnacesResult[furnaceIndex];
     const pdfWrapper = document.getElementById('pdf-hidden-template');
     pdfWrapper.innerHTML = '';

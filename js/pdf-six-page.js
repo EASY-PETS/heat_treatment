@@ -13,8 +13,48 @@ import {
     globalUnpackedItems,
     placementRules
 } from './state.js';
+import { normalizePdfExportOptions } from './pdf-export-options.js';
 
-const PAGE_ROW_LIMIT = 28;
+const TABLE_PAGINATION_LAYOUTS = Object.freeze({
+    coordinateList: Object.freeze({
+        pageHeightMm: 210,
+        pagePaddingMm: 20,
+        headerBlockMm: 34,
+        footerSafetyMm: 14,
+        panelPaddingMm: 8,
+        tableHeaderMm: 7.5,
+        rowHeightMm: 5.6
+    }),
+    densityZoom: Object.freeze({
+        pageHeightMm: 210,
+        pagePaddingMm: 16,
+        headerBlockMm: 31,
+        zoomNoteAndGapMm: 22,
+        panelPaddingMm: 4,
+        panelTitleMm: 7,
+        tableHeaderMm: 5.5,
+        footerSafetyMm: 5,
+        rowHeightMm: 5.3
+    })
+});
+
+export function getSafeTableRowCount(layout) {
+    const reservedHeightMm = Object.entries(layout)
+        .filter(([key]) => key !== 'pageHeightMm' && key !== 'rowHeightMm')
+        .reduce((sum, [, value]) => sum + Number(value || 0), 0);
+    const availableHeightMm = Number(layout.pageHeightMm || 0) - reservedHeightMm;
+    return Math.max(1, Math.floor(availableHeightMm / Number(layout.rowHeightMm || 1)));
+}
+
+export function paginatePdfTableRows(items, layout) {
+    const source = Array.isArray(items) ? items : [];
+    const rowCount = getSafeTableRowCount(layout);
+    const chunks = [];
+    for (let start = 0; start < source.length; start += rowCount) {
+        chunks.push({ start, items: source.slice(start, start + rowCount) });
+    }
+    return chunks;
+}
 const SVG_W = 1000;
 const SVG_H = 650;
 const DRAW_PAD = 58;
@@ -46,41 +86,6 @@ const NUMBER_MARKER_SPECS = Object.freeze({
         labelClass: 'pdfv1-field-item-label'
     })
 });
-
-
-function normalizePdfExportOptionsV154(options = {}) {
-    const globalOptions = (typeof window !== 'undefined' && window.__HT_PDF_EXPORT_OPTIONS__) ? window.__HT_PDF_EXPORT_OPTIONS__ : {};
-    const merged = { ...globalOptions, ...(options || {}) };
-
-    // 默认保持旧行为：包含坐标清单。只有显式 false 才关闭。
-    const includeCoordinateList = !(
-        merged.includeCoordinateList === false ||
-        merged.includeCoordinates === false ||
-        merged.coordinateList === false ||
-        merged.worklist === false ||
-        merged.includeWorklist === false
-    );
-
-    const includeHighDensityZoom = !!(
-        merged.includeHighDensityZoom ||
-        merged.highDensityZoom ||
-        merged.densityZoom ||
-        merged.regionZoom ||
-        merged.zoomDenseArea
-    );
-
-    return {
-        ...merged,
-        includeCoordinateList,
-        includeWorklist: includeCoordinateList,
-        worklist: includeCoordinateList,
-        includeHighDensityZoom,
-        highDensityZoom: includeHighDensityZoom,
-        densityZoom: includeHighDensityZoom,
-        regionZoom: includeHighDensityZoom
-    };
-}
-
 
 
 function escapeHtml(value) {
@@ -353,39 +358,12 @@ function getSelectedFurnaceEntries(selectedIds) {
     }
 
     const rawIds = selectedIds.map(id => String(id));
-    const entries = [];
-    const seen = new Set();
+    const byId = new Map(furnaces.map((furnace, index) => [getStableFurnaceId(furnace, index), { furnace, index }]));
+    return rawIds.map(id => byId.get(id)).filter(Boolean);
+}
 
-    furnaces.forEach((furnace, index) => {
-        const candidates = [
-            index,
-            index + 1,
-            furnace?.id,
-            furnace?.fid,
-            furnace?.furnaceId,
-            furnace?.instanceId,
-            furnace?.typeName,
-            furnace?.name
-        ].filter(v => v !== undefined && v !== null).map(v => String(v));
-
-        let matched = rawIds.some(id => candidates.includes(id));
-
-        if (!matched) {
-            matched = rawIds.some(id => {
-                const m = id.match(/-?\d+/);
-                if (!m) return false;
-                const n = Number(m[0]);
-                return n === index || n === index + 1 || n === Number(furnace?.fid);
-            });
-        }
-
-        if (matched && !seen.has(index)) {
-            entries.push({ furnace, index });
-            seen.add(index);
-        }
-    });
-
-    return entries.length ? entries : furnaces.map((furnace, index) => ({ furnace, index }));
+export function getStableFurnaceId(furnace, index = 0) {
+    return String(furnace?.instanceId || furnace?.furnaceInstanceId || `FURNACE-HEAT-${index + 1}`);
 }
 
 function getColor(value, fallback = '#2563EB') {
@@ -685,10 +663,8 @@ function buildHeader(title, subtitle, tag = '') {
 }
 
 function buildPlanCoverPage(manifest) {
-    const allItems = manifest.entries.flatMap(entry => entry.numberedItems);
-    const totalWeight = allItems.reduce((sum, item) => sum + toNumber(item.weight), 0);
     const toolingTypes = [...new Set(manifest.entries.map(entry => getFurnaceTypeLabel(entry.furnace)))];
-    const planName = manifest.options.planName || `现场装炉方案（${manifest.entries.length} 炉）`;
+    const planName = manifest.options.planName || `现场装炉方案（${manifest.summary.furnaceCount} 炉）`;
     const hasUnpacked = Array.isArray(globalUnpackedItems) && globalUnpackedItems.length > 0;
     return `
         <section class="pdfv1-page cover plan-cover">
@@ -699,9 +675,9 @@ function buildPlanCoverPage(manifest) {
                 <div class="pdfv1-plan-cover-meta">本页为本次导出的唯一总封面；炉次明细请见对应装炉图页面。</div>
             </div>
             <div class="pdfv1-kpi-grid plan-kpi-grid">
-                ${buildKpi('炉次数量', `${manifest.entries.length} 炉`)}
-                ${buildKpi('工件总数', `${allItems.length} 件`)}
-                ${buildKpi('总重量', formatWeight(totalWeight))}
+                ${buildKpi('炉次数量', `${manifest.summary.furnaceCount} 炉`)}
+                ${buildKpi('工件总数', `${manifest.summary.itemCount} 件`)}
+                ${buildKpi('总重量', formatWeight(manifest.summary.totalWeight))}
                 ${buildKpi('模板类型', getTemplateLabel(manifest.options.template))}
                 ${buildKpi('PDF 页数', `${manifest.pages.length} 页`)}
                 ${buildKpi('导出时间', manifest.generatedAt)}
@@ -851,26 +827,38 @@ function getZoomRegionBoxV156(furnace, regionName) {
     const isRight = /^B|^D/.test(regionName);
     const isBack = /^C|^D/.test(regionName);
     return {
-        x0: isRight ? fw / 2 : 0,
-        z0: isBack ? fd / 2 : 0,
+        xMin: isRight ? fw / 2 : 0,
+        zMin: isBack ? fd / 2 : 0,
         w: fw / 2,
         d: fd / 2
     };
 }
 
-function getZoomLayoutV156(furnace, regionBox) {
-    const scale = Math.min((SVG_W - DRAW_PAD * 2) / regionBox.w, (SVG_H - DRAW_PAD * 2 - 30) / regionBox.d);
+function getZoomLayoutV156(regionBox) {
+    const scale = 1;
     const drawW = regionBox.w * scale;
     const drawH = regionBox.d * scale;
-    const ox = (SVG_W - drawW) / 2;
-    const oy = DRAW_PAD + 20;
-    return { ...regionBox, scale, drawW, drawH, ox, oy };
+    const margin = Math.max(regionBox.w, regionBox.d) * 0.04;
+    return {
+        ...regionBox,
+        scale,
+        drawW,
+        drawH,
+        ox: 0,
+        oy: 0,
+        viewX: -margin,
+        viewY: -margin,
+        viewW: drawW + margin * 2,
+        viewH: drawH + margin * 2
+    };
 }
 
 function renderZoomItemSvgV156(item, layout) {
     const fp = getPdfFootprint(item);
-    const x = layout.ox + (toNumber(item.x, 0) - layout.x0) * layout.scale;
-    const y = layout.oy + (toNumber(item.z, 0) - layout.z0) * layout.scale;
+    const localX = toNumber(item.x, 0) - layout.xMin;
+    const localZ = toNumber(item.z, 0) - layout.zMin;
+    const x = layout.ox + localX * layout.scale;
+    const y = layout.oy + localZ * layout.scale;
     const w = Math.max(3, fp.w * layout.scale);
     const h = Math.max(3, fp.d * layout.scale);
     const cx = x + w / 2;
@@ -890,13 +878,27 @@ function renderZoomItemSvgV156(item, layout) {
 
 function renderZoomRegionDiagramV156(furnace, regionItems, regionName, layer) {
     const box = getZoomRegionBoxV156(furnace, regionName);
-    const layout = getZoomLayoutV156(furnace, box);
+    const layout = getZoomLayoutV156(box);
+    const itemBounds = regionItems.reduce((bounds, item) => {
+        const fp = getPdfFootprint(item);
+        const x = toNumber(item.x, 0) - layout.xMin;
+        const y = toNumber(item.z, 0) - layout.zMin;
+        return {
+            xMin: Math.min(bounds.xMin, x),
+            yMin: Math.min(bounds.yMin, y),
+            xMax: Math.max(bounds.xMax, x + fp.w),
+            yMax: Math.max(bounds.yMax, y + fp.d)
+        };
+    }, { xMin: 0, yMin: 0, xMax: layout.drawW, yMax: layout.drawH });
+    const margin = Math.max(box.w, box.d) * 0.04;
+    const viewX = itemBounds.xMin - margin;
+    const viewY = itemBounds.yMin - margin;
+    const viewW = itemBounds.xMax - itemBounds.xMin + margin * 2;
+    const viewH = itemBounds.yMax - itemBounds.yMin + margin * 2;
     const itemsSvg = regionItems.map(item => renderZoomItemSvgV156(item, layout)).join('');
     return `
-        <svg class="pdfv1-layout-svg" viewBox="0 0 ${SVG_W} ${SVG_H}" role="img" aria-label="${escapeHtml(regionName)}局部放大图">
-            <rect x="0" y="0" width="${SVG_W}" height="${SVG_H}" fill="#ffffff" />
-            <text x="${DRAW_PAD}" y="32" class="pdfv1-svg-title">${escapeHtml(getLayerLabel(layer))} · ${escapeHtml(regionName)}局部放大</text>
-            <text x="${SVG_W - DRAW_PAD}" y="32" class="pdfv1-svg-note" text-anchor="end">局部范围 X=${formatNumber(box.x0)}-${formatNumber(box.x0 + box.w)} / Z=${formatNumber(box.z0)}-${formatNumber(box.z0 + box.d)} mm</text>
+        <svg class="pdfv1-layout-svg" viewBox="${viewX} ${viewY} ${viewW} ${viewH}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${escapeHtml(getLayerLabel(layer))} ${escapeHtml(regionName)}局部放大图">
+            <rect x="${viewX}" y="${viewY}" width="${viewW}" height="${viewH}" fill="#ffffff" />
             <rect x="${layout.ox}" y="${layout.oy}" width="${layout.drawW}" height="${layout.drawH}" fill="#f8fafc" stroke="#0f172a" stroke-width="4" />
             ${itemsSvg}
         </svg>
@@ -920,9 +922,26 @@ function buildWorklistRows(items) {
 }
 
 export function buildPdfPageManifest(selectedIds = [], options = {}) {
-    const pdfOptions = normalizePdfExportOptionsV154(options);
+    const normalizedOptions = normalizePdfExportOptions({
+        ...options,
+        selectedFurnaceIds: []
+    });
+    const pdfOptions = { ...normalizedOptions, selectedFurnaceIds: selectedIds.map(String) };
     const entries = getSelectedFurnaceEntries(selectedIds).map(({ furnace, index }) => ({ furnace, index, numberedItems: buildNumberedItems(furnace), stats: getFurnaceStats(furnace) }));
-    const manifest = { pageSizeMm: A4_LANDSCAPE_MM, orientation: 'landscape', generatedAt: getDateStamp(), options: pdfOptions, entries, pages: [] };
+    const manifest = {
+        pageSizeMm: A4_LANDSCAPE_MM,
+        orientation: 'landscape',
+        generatedAt: getDateStamp(),
+        options: pdfOptions,
+        entries,
+        summary: {
+            furnaceCount: entries.length,
+            itemCount: entries.reduce((sum, entry) => sum + entry.numberedItems.length, 0),
+            totalWeight: entries.reduce((sum, entry) => sum + entry.stats.totalWeight, 0),
+            furnaceIds: entries.map(entry => getStableFurnaceId(entry.furnace, entry.index))
+        },
+        pages: []
+    };
     if (!entries.length) return manifest;
     manifest.pages.push({ type: 'plan-cover' });
     entries.forEach((entry, furnaceOrder) => {
@@ -938,14 +957,31 @@ export function buildPdfPageManifest(selectedIds = [], options = {}) {
                     regionMap.get(region).push(item);
                 });
                 const regions = [...regionMap.entries()].filter(([, items]) => items.length >= 8).sort((a, b) => b[1].length - a[1].length).slice(0, 4);
-                regions.forEach(([regionName, regionItems], regionIndex) => manifest.pages.push({ type: 'density-zoom', furnace, index, layer, layerItems, regionName, regionItems, regionIndex, regionCount: regions.length }));
+                const regionChunks = regions.map(([regionName, regionItems]) => ({
+                    regionName,
+                    regionItems,
+                    chunks: paginatePdfTableRows(regionItems, TABLE_PAGINATION_LAYOUTS.densityZoom)
+                }));
+                const regionPageCount = regionChunks.reduce((sum, region) => sum + region.chunks.length, 0);
+                let regionPageIndex = 0;
+                regionChunks.forEach(({ regionName, regionItems, chunks }) => {
+                    const tablePageCount = chunks.length;
+                    chunks.forEach(({ start: tableStart, items: tableItems }, tablePageIndex) => {
+                        manifest.pages.push({
+                            type: 'density-zoom', furnace, index, layer, layerItems, regionName, regionItems,
+                            tableItems,
+                            tableStart, tablePageIndex, tablePageCount,
+                            regionIndex: regionPageIndex++, regionCount: regionPageCount
+                        });
+                    });
+                });
             }
         });
         if (pdfOptions.includeCoordinateList) {
-            const chunkCount = Math.ceil(numberedItems.length / PAGE_ROW_LIMIT);
-            for (let start = 0; start < numberedItems.length; start += PAGE_ROW_LIMIT) {
-                manifest.pages.push({ type: 'coordinate-list', furnace, index, start, chunk: numberedItems.slice(start, start + PAGE_ROW_LIMIT), totalItems: numberedItems.length, chunkIndex: Math.floor(start / PAGE_ROW_LIMIT), chunkCount });
-            }
+            const chunks = paginatePdfTableRows(numberedItems, TABLE_PAGINATION_LAYOUTS.coordinateList);
+            chunks.forEach(({ start, items: chunk }, chunkIndex) => {
+                manifest.pages.push({ type: 'coordinate-list', furnace, index, start, chunk, totalItems: numberedItems.length, chunkIndex, chunkCount: chunks.length });
+            });
         }
     });
     return manifest;
@@ -964,10 +1000,11 @@ function renderManifestPage(manifest, page) {
     }
     if (page.type === 'density-zoom') {
         const density = getLayerDensityForZoomV156(page.furnace, page.layerItems);
-        return `<section class="pdfv1-page layer-page zoom-page">${buildHeader('高密度区域放大', `${getFurnaceName(page.furnace, page.index)} · ${getLayerLabel(page.layer)} · ${page.regionName} · ${page.regionItems.length} 件`, `放大 ${page.regionIndex + 1}/${page.regionCount}`)}<div class="pdfv1-layer-layout"><div class="pdfv1-diagram-panel zoom-panel">${renderZoomRegionDiagramV156(page.furnace, page.regionItems, page.regionName, page.layer)}</div><div class="pdfv1-layer-side"><div class="pdfv1-panel warning-panel"><div class="pdfv1-panel-title">局部放大说明</div><ul class="pdfv1-bullets"><li>本页仅放大高密度区域，完整位置以本层俯视图为准。</li><li>本层 ${page.layerItems.length} 件，估算平面密度 ${formatPercent(density)}。</li></ul></div><div class="pdfv1-panel grow-panel"><div class="pdfv1-panel-title">本区工件</div><table class="pdfv1-table layer-table"><thead><tr><th>编号</th><th>工件</th><th>尺寸</th><th>坐标</th></tr></thead><tbody>${page.regionItems.slice(0, 32).map(item => `<tr><td class="center">${item._pdfNo}</td><td>${escapeHtml(item.name || '-')}</td><td>${escapeHtml(getItemSizeLabel(item))}</td><td>X ${formatNumber(item.x)} / Z ${formatNumber(item.z)}</td></tr>`).join('')}</tbody></table></div></div></div></section>`;
+        const tableRange = page.tablePageCount > 1 ? ` · 清单 ${page.tablePageIndex + 1}/${page.tablePageCount}` : '';
+        return `<section class="pdfv1-page layer-page zoom-page">${buildHeader('高密度区域放大', `${getFurnaceName(page.furnace, page.index)} · ${getLayerLabel(page.layer)} · ${page.regionName} · ${page.regionItems.length} 件${tableRange}`, `放大 ${page.regionIndex + 1}/${page.regionCount}`)}<div class="pdfv1-layer-layout"><div class="pdfv1-diagram-panel zoom-panel">${renderZoomRegionDiagramV156(page.furnace, page.regionItems, page.regionName, page.layer)}</div><div class="pdfv1-layer-side"><div class="pdfv1-panel warning-panel zoom-note"><div class="pdfv1-panel-title">局部范围</div><div>X ${formatNumber(getZoomRegionBoxV156(page.furnace, page.regionName).xMin)}-${formatNumber(getZoomRegionBoxV156(page.furnace, page.regionName).xMin + getZoomRegionBoxV156(page.furnace, page.regionName).w)} / Z ${formatNumber(getZoomRegionBoxV156(page.furnace, page.regionName).zMin)}-${formatNumber(getZoomRegionBoxV156(page.furnace, page.regionName).zMin + getZoomRegionBoxV156(page.furnace, page.regionName).d)} mm · 本层密度 ${formatPercent(density)}</div></div><div class="pdfv1-panel grow-panel zoom-table-panel"><div class="pdfv1-panel-title">本区工件 ${page.tableStart + 1}-${page.tableStart + page.tableItems.length} / ${page.regionItems.length}</div><table class="pdfv1-table zoom-table"><thead><tr><th>编号</th><th>工件</th><th>尺寸</th><th>坐标</th></tr></thead><tbody>${page.tableItems.map(item => `<tr><td class="center">${item._pdfNo}</td><td>${escapeHtml(item.showName || item.name || '-')}</td><td class="nowrap">${escapeHtml(getItemSizeLabel(item))}</td><td class="nowrap">X ${formatNumber(item.x)} / Z ${formatNumber(item.z)}</td></tr>`).join('')}</tbody></table></div></div></div></section>`;
     }
     if (page.type === 'coordinate-list') {
-        return `<section class="pdfv1-page worklist-page">${buildHeader('工件坐标清单', `${getFurnaceName(page.furnace, page.index)} · ${page.start + 1}-${Math.min(page.start + PAGE_ROW_LIMIT, page.totalItems)} / ${page.totalItems}`, `清单 ${page.chunkIndex + 1}/${page.chunkCount}`)}<div class="pdfv1-panel full-height"><table class="pdfv1-table worklist-table"><thead><tr><th>编号</th><th>层</th><th>工件</th><th>客户/图号</th><th>材质</th><th>工艺</th><th>尺寸 mm</th><th>坐标 mm</th><th>单重</th></tr></thead><tbody>${buildWorklistRows(page.chunk)}</tbody></table></div><div class="pdfv1-footnote">坐标为系统计算值，现场以工装实际定位基准、搁板厚度和工件实物外形复核。</div></section>`;
+        return `<section class="pdfv1-page worklist-page">${buildHeader('工件坐标清单', `${getFurnaceName(page.furnace, page.index)} · ${page.start + 1}-${page.start + page.chunk.length} / ${page.totalItems}`, `清单 ${page.chunkIndex + 1}/${page.chunkCount}`)}<div class="pdfv1-panel full-height"><table class="pdfv1-table worklist-table"><thead><tr><th>编号</th><th>层</th><th>工件</th><th>客户/图号</th><th>材质</th><th>工艺</th><th>尺寸 mm</th><th>坐标 mm</th><th>单重</th></tr></thead><tbody>${buildWorklistRows(page.chunk)}</tbody></table></div><div class="pdfv1-footnote">坐标为系统计算值，现场以工装实际定位基准、搁板厚度和工件实物外形复核。</div></section>`;
     }
     throw new Error(`未知 PDF 页面类型：${page.type}`);
 }
@@ -986,7 +1023,7 @@ function buildPdfDocument(manifest) {
 function getPdfV1Css() {
     return `
         .pdfv1-root { width: 297mm; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", Arial, sans-serif; color: #0f172a; background: #fff; }
-        .pdfv1-page { width: 297mm; min-width: 297mm; max-width: 297mm; height: 210mm; min-height: 210mm; max-height: 210mm; margin: 0; box-sizing: border-box; padding: 10mm; background: #fff; page-break-after: always; break-after: page; position: relative; overflow: hidden; }
+.pdfv1-page { width: 297mm; min-width: 297mm; max-width: 297mm; height: 210mm; min-height: 210mm; max-height: 210mm; margin: 0; box-sizing: border-box; padding: 10mm; background: #fff; page-break-after: always; break-after: page; position: relative; overflow: visible; }
         .pdfv1-page:last-child { page-break-after: auto; }
         .pdfv1-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1d4ed8; padding-bottom: 5mm; margin-bottom: 5mm; }
         .pdfv1-doc-kicker { font-size: 8.5pt; color: #64748b; font-weight: 700; letter-spacing: .4px; }
@@ -1013,7 +1050,7 @@ function getPdfV1Css() {
         .pdfv1-layer-layout { display: grid; grid-template-columns: 1.6fr .9fr; gap: 4mm; height: 172mm; }
         .pdfv1-diagram-panel { border: 1px solid #dbeafe; border-radius: 4mm; background: #fff; padding: 2mm; min-width: 0; }
         .pdfv1-layer-side { display: flex; flex-direction: column; gap: 3mm; min-width: 0; }
-        .grow-panel { flex: 1; overflow: hidden; }
+        .grow-panel { flex: 1; }
         .pdfv1-layout-svg { width: 100%; height: 100%; display: block; }
         .pdfv1-svg-title { font-size: 26px; font-weight: 900; fill: #0f172a; }
         .pdfv1-svg-note { font-size: 18px; font-weight: 700; fill: #64748b; }
@@ -1025,7 +1062,20 @@ function getPdfV1Css() {
         .pdfv1-item { stroke: #0f172a; stroke-width: 1.4; opacity: .94; }
         .zoom-item { stroke-width: 2.2; opacity: .96; }
         .zoom-page .pdfv1-diagram-panel { background: #ffffff; }
-        .zoom-panel { border-color: #fed7aa; }
+        .zoom-page { padding: 8mm 10mm; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+        .zoom-page .pdfv1-header { margin-bottom: 3mm; padding-bottom: 3mm; }
+        .zoom-page .pdfv1-layer-layout { height: auto; min-height: 0; }
+        .zoom-page .pdfv1-layer-side { min-height: 0; }
+        .zoom-panel { border-color: #fed7aa; min-height: 0; display: flex; align-items: center; justify-content: center; }
+        .zoom-panel .pdfv1-layout-svg { max-width: 100%; max-height: 100%; overflow: hidden; }
+        .zoom-note { flex: 0 0 auto; padding: 2mm 3mm; font-size: 7.5pt; line-height: 1.25; }
+        .zoom-note .pdfv1-panel-title { margin-bottom: 1mm; font-size: 8.5pt; }
+        .zoom-table-panel { min-height: 0; padding: 2mm; }
+        .zoom-table-panel .pdfv1-panel-title { margin-bottom: 1.5mm; font-size: 9pt; }
+        .zoom-table { table-layout: fixed; font-size: 6.5pt; line-height: 1.05; }
+        .zoom-table th, .zoom-table td { padding: .85mm .7mm; white-space: nowrap; }
+        .zoom-table th:nth-child(1) { width: 9%; } .zoom-table th:nth-child(2) { width: 31%; } .zoom-table th:nth-child(3) { width: 29%; } .zoom-table th:nth-child(4) { width: 31%; }
+        .nowrap { white-space: nowrap; }
         .pdfv1-item-standing { stroke-width: 1.8; }
         .pdfv1-standing-axis { stroke: rgba(15,23,42,.42); stroke-width: 1.2; stroke-dasharray: 5 4; }
         .pdfv1-item-label { fill: #fff; stroke: rgba(15,23,42,.34); stroke-width: 1; paint-order: stroke; font-weight: 900; text-anchor: middle; font-family: Arial, sans-serif; }
@@ -1058,7 +1108,7 @@ function getPdfV1Css() {
         .pdfv1-standard-header span { margin-top: .8mm; color: #475569; font-size: 8.5pt; }
         .pdfv1-standard-header-meta { padding: 1.5mm 3mm; border: 1px solid #bfdbfe; border-radius: 999px; color: #1d4ed8; font-size: 9pt; font-weight: 900; white-space: nowrap; }
         .pdfv1-standard-diagram-stage { display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; }
-        .pdfv1-standard-layout-svg { width: 150mm; height: 150mm; max-width: 150mm; max-height: 150mm; display: block; overflow: visible; }
+        .pdfv1-standard-layout-svg { width: 150mm; height: 150mm; max-width: 150mm; max-height: 150mm; display: block; overflow: hidden; }
         .pdfv1-standard-svg-note { font-size: 26px; font-weight: 800; fill: #475569; }
         .pdfv1-standard-axis { stroke: #334155; stroke-width: 4; }
         .pdfv1-standard-axis-label { fill: #334155; font-size: 28px; font-weight: 900; }
@@ -1078,7 +1128,7 @@ function getPdfV1Css() {
         .pdfv1-field-header strong { font-size: 14pt; line-height: 1; }
         .pdfv1-field-header span { margin-top: .6mm; color: #475569; font-size: 8pt; }
         .pdfv1-field-diagram-stage { display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; }
-        .pdfv1-field-layout-svg { width: 160mm; height: 160mm; max-width: 160mm; max-height: 160mm; display: block; overflow: visible; }
+        .pdfv1-field-layout-svg { width: 160mm; height: 160mm; max-width: 160mm; max-height: 160mm; display: block; overflow: hidden; }
         .pdfv1-field-svg-note { font-size: 28px; font-weight: 800; fill: #475569; }
         .pdfv1-field-axis { stroke: #334155; stroke-width: 5; }
         .pdfv1-field-axis-label { fill: #334155; font-size: 30px; font-weight: 900; }
@@ -1285,19 +1335,33 @@ async function renderPagesToPdf(host, filename) {
     pdf.save(filename);
 }
 
-export async function generateSixPagePDF(selectedIds = [], options = {}) {
+export function assertPdfJsonManifestConsistency(manifest, record) {
+    const jsonFurnaces = record?.loadingPlan?.furnaces || [];
+    const jsonIds = jsonFurnaces.map((furnace, index) => getStableFurnaceId(furnace, index));
+    const jsonItemCount = jsonFurnaces.reduce((sum, furnace) => sum + (furnace.packedItems || []).length, 0);
+    const jsonWeight = jsonFurnaces.reduce((sum, furnace) => sum + toNumber(furnace.totalWeightKg ?? furnace.totalWeight, 0), 0);
+    const expectedIds = manifest.summary.furnaceIds;
+    if (manifest.summary.furnaceCount !== jsonFurnaces.length) throw new Error('PDF/JSON 炉次数量不一致');
+    if (manifest.summary.itemCount !== jsonItemCount) throw new Error('PDF/JSON 工件数量不一致');
+    if (Math.abs(manifest.summary.totalWeight - jsonWeight) > 0.001) throw new Error('PDF/JSON 总重量不一致');
+    if (expectedIds.length !== jsonIds.length || expectedIds.some((id, index) => id !== jsonIds[index])) throw new Error('PDF/JSON 炉次 ID 不一致');
+    if (manifest.options.selectedFurnaceIds.some((id, index) => id !== expectedIds[index])) throw new Error('selectedFurnaceIds 与 manifest 炉次不一致');
+    return true;
+}
+
+export async function generateSixPagePDF(manifestOrSelectedIds = [], options = {}) {
     let host = null;
     const previousScrollX = window.scrollX || 0;
     const previousScrollY = window.scrollY || 0;
     try {
-        const entries = getSelectedFurnaceEntries(selectedIds);
-        if (!entries.length) {
-            alert('当前没有可导出的装炉方案，请先生成方案。');
-            return;
+        const manifest = Array.isArray(manifestOrSelectedIds)
+            ? buildPdfPageManifest(manifestOrSelectedIds, options)
+            : manifestOrSelectedIds;
+        if (!manifest?.entries?.length) {
+            throw new Error('当前没有可导出的有效炉数据，请重新选择炉次。');
         }
-
-        const pdfOptions = normalizePdfExportOptionsV154(options);
-        const manifest = buildPdfPageManifest(selectedIds, pdfOptions);
+        const entries = manifest.entries;
+        const pdfOptions = manifest.options;
         const html = buildPdfDocument(manifest);
         host = mountPdfHtml(html);
         const filename = makeFileName(entries);
@@ -1309,13 +1373,12 @@ export async function generateSixPagePDF(selectedIds = [], options = {}) {
         }
 
         await renderPagesToPdf(host, filename);
-
-        host.remove();
-        window.scrollTo(previousScrollX, previousScrollY);
+        return { filename, manifest, options: pdfOptions };
     } catch (err) {
         console.error('[PDF V1] 导出失败:', err);
-        alert('PDF 导出失败：' + (err?.message || err));
-        if (host) host.remove();
+        throw err;
+    } finally {
+        if (host?.isConnected) host.remove();
         window.scrollTo(previousScrollX, previousScrollY);
     }
 }
